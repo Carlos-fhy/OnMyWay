@@ -26,7 +26,8 @@ import androidx.compose.ui.unit.dp
 @Composable
 internal fun TaskScreen(tasks: List<Errand>, add: () -> Unit, edit: (Errand) -> Unit, delete: (Errand) -> Unit, save: (Errand) -> Unit, acknowledge: () -> Unit) {
     var filter by rememberSaveable { mutableStateOf("pending") }
-    val visible = tasks.filter { it.status == filter }
+    val sections = taskDateSections(tasks, filter)
+    val visible = sections.flatMap { it.tasks }
     val reminders = tasks.count { it.status == "pending" && it.reminderPending }
     val listState = rememberLazyListState()
     val expandAdd by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset < 40 } }
@@ -35,7 +36,10 @@ internal fun TaskScreen(tasks: List<Errand>, add: () -> Unit, edit: (Errand) -> 
         Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 24.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text("待办", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
             Text("${tasks.count { it.status == "pending" }} 件事，留给下一次顺路", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            ChoiceRow(listOf("pending" to "待办", "deferred" to "暂缓", "done" to "已完成"), filter) { filter = it }
+            val pendingCount = tasks.count { it.status == "pending" }
+            val deferredCount = tasks.count { it.status == "deferred" }
+            val doneCount = tasks.count { it.status == "done" }
+            ChoiceRow(listOf("pending" to "待办 ($pendingCount)", "deferred" to "暂缓 ($deferredCount)", "done" to "已完成 ($doneCount)"), filter) { filter = it }
             ReminderPermission()
             if (reminders > 0) Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("$reminders 件事满三天未完成，已提醒并更新优先级", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
@@ -50,7 +54,12 @@ internal fun TaskScreen(tasks: List<Errand>, add: () -> Unit, edit: (Errand) -> 
                     if (filter == "pending") Text("买东西、取快递，出门时一起安排。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            items(visible, key = { it.id }) { task ->
+            sections.forEach { section ->
+                item(key = "section:${section.key}") {
+                    Text(section.title, Modifier.padding(top = 10.dp, bottom = 2.dp),
+                        style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            items(section.tasks, key = { it.id }) { task ->
                 var menu by remember { mutableStateOf(false) }
                 val completed = task.status == "done"
                 Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainerLowest) {
@@ -60,11 +69,15 @@ internal fun TaskScreen(tasks: List<Errand>, add: () -> Unit, edit: (Errand) -> 
                             Text(task.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
                                 textDecoration = if (completed) TextDecoration.LineThrough else TextDecoration.None,
                                 color = if (completed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
-                            Text("${task.place()?.name ?: if (requiresFixedPlace(task.placeType)) "请补全领取地点" else "${placeTypes[task.placeType]} · 系统选店"} · ${task.serviceMinutes} 分钟",
-                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Icon(painterResource(placeTypeIcon(task.placeType)), null, Modifier.size(14.dp),
+                                    tint = if (completed) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.primary)
+                                Text("${task.place()?.name ?: if (requiresFixedPlace(task.placeType)) "请补全领取地点" else "${placeTypes[task.placeType]} · 系统选店"} · ${task.serviceMinutes} 分钟",
+                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                             if (!completed && (task.priority > 1 || task.deadline.isNotBlank() || task.reminderPending)) Text(
                                 listOfNotNull(if (task.priority > 1) priorities[task.priority] else null, if (task.reminderPending) "三天提醒" else null, if (task.deadline.isNotBlank()) "${displayTime(task.deadline)} 前" else null).joinToString(" · "),
-                                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                                style = MaterialTheme.typography.labelMedium, color = if (task.priority > 2) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary)
                         }
                         Box {
                             IconButton({ menu = true }) { Icon(painterResource(R.drawable.ic_more), "${task.title}的更多操作") }
@@ -78,6 +91,7 @@ internal fun TaskScreen(tasks: List<Errand>, add: () -> Unit, edit: (Errand) -> 
                         }
                     }
                 }
+            }
             }
         }
     }

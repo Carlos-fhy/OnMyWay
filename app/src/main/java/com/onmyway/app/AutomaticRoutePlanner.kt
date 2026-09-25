@@ -22,9 +22,29 @@ internal class AutomaticRoutePlanner(private val scope: CoroutineScope) {
         private set
     var budget by mutableStateOf("10")
         private set
+    var plannedBudget by mutableIntStateOf(10)
+        private set
+    val budgetChanged: Boolean get() = budget.toInt() != plannedBudget
+
+    fun updateBudget(minutes: Int) {
+        val clamped = minutes.coerceIn(0, 240)
+        budget = clamped.toString()
+    }
+    fun replanForBudget(vm: AppViewModel) {
+        if (busy || selectionBusy || vm.busy || start == null || end == null) return
+        val request = generation
+        job = scope.launch {
+            busy = true; error = ""
+            try { calculate(vm) }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { if (generation == request) error = networkMessage(e) }
+            finally { if (generation == request) busy = false }
+        }
+    }
     private var job: Job? = null
     private var generation = 0
     private var calculatedAt = 0L
+    private var feedbackId: String? = null
     private var ownsEdit = false
     private var start: Place? = null
     private var end: Place? = null
@@ -85,9 +105,10 @@ internal class AutomaticRoutePlanner(private val scope: CoroutineScope) {
     fun toggle(vm: AppViewModel, id: String) = select(vm, if (id in selectedIds) selectedIds - id else selectedIds + id)
 
     fun cancel() { generation++; job?.cancel(); selectionJob?.cancel(); selectionJob = null; selectionBusy = false; selectedRoute = null; selectionError = ""; busy = false; stage = "" }
-    fun clear() { cancel(); preview = null; choices = emptyList(); error = ""; start = null; end = null; selectedIds = emptySet() }
+    fun clear() { cancel(); feedbackId = null; preview = null; choices = emptyList(); error = ""; start = null; end = null; selectedIds = emptySet() }
     fun dismiss(vm: AppViewModel) {
         if (vm.busy) return
+        feedbackId?.let { vm.recordSuggestionDecision(it, "REJECTED", 0, 0) }
         if (ownsEdit) vm.cancelPlanEdit()
         ownsEdit = false; clear()
     }
@@ -98,11 +119,13 @@ internal class AutomaticRoutePlanner(private val scope: CoroutineScope) {
         vm.beginPlanEdit(); ownsEdit = false
         vm.origin = start; vm.destination = end; vm.mode = mode
         vm.selected = selectedIds; vm.extra = budget; vm.arriveBy = latest; vm.partial = false
-        vm.inputsChanged(); clear()
+        vm.inputsChanged()
+        feedbackId?.let { vm.recordSuggestionDecision(it, "MANUAL", selectedIds.size, selectedRoute?.optInt("extra_seconds") ?: 0) }
+        clear()
         return true
     }
 
-    fun start(vm: AppViewModel, keyword: String, travelMode: String) {
+    fun start(vm: AppViewModel, keyword: String, travelMode: String, knownDestination: Place? = null) {
         if (ownsEdit && !vm.busy) { vm.cancelPlanEdit(); ownsEdit = false }
         clear()
         val request = generation
@@ -114,8 +137,9 @@ internal class AutomaticRoutePlanner(private val scope: CoroutineScope) {
                 stage = "正在获取当前位置…"
                 start = vm.assistantOrigin()
                 mode = travelMode
-                budget = vm.extra.ifBlank { "10" }
+                budget = vm.preferredDetourMinutes.toString()
                 latest = vm.arriveBy
+                if (knownDestination != null) { end = knownDestination; calculate(vm); return@launch }
                 stage = "正在查找目的地…"
                 val familiar = vm.familiarPlace(keyword)
                 val city = vm.city.ifBlank { Regex("(?:省)?([^省]+?市)").find(start!!.address)?.groupValues?.get(1).orEmpty() }
@@ -165,10 +189,18 @@ internal class AutomaticRoutePlanner(private val scope: CoroutineScope) {
             .put("preference", vm.preference).put("departure", OffsetDateTime.now().toString())
             .put("allow_partial", true).put("max_extra_minutes", budget.toInt())
             .put("arrive_by", parseTime(latest) ?: JSONObject.NULL)
-        preview = Api(vm.server).recommend(body)
+        val result = Api(vm.server).recommend(body)
+        feedbackId?.let { vm.recordSuggestionDecision(it, "SUPERSEDED", 0, 0) }
+        feedbackId = null
+        preview = result
+        plannedBudget = budget.toInt()
         calculatedAt = System.currentTimeMillis()
-        selectedIds = emptySet()
-        selectedRoute = preview!!.getJSONObject("direct")
+        selectedIds = suggestedIds()
+        val suggestion = result.optJSONObject("suggestion")
+        selectedRoute = suggestion ?: result.getJSONObject("direct")
+        if (suggestion != null) {
+            feedbackId = vm.recordSuggestionShown(mode, selectedIds.size, suggestion.optInt("extra_seconds"))
+        }
         stage = ""
     }
 
@@ -196,7 +228,14 @@ internal class AutomaticRoutePlanner(private val scope: CoroutineScope) {
         vm.selected = ids; vm.extra = budget; vm.arriveBy = latest; vm.partial = false
         vm.tripPlaces.keys.toList().forEach(vm::resetTripPlace)
         vm.inputsChanged()
-        vm.planForAssistant { result -> ownsEdit = false; clear(); done(result) }
+        val traceId = feedbackId
+        vm.planForAssistant { result ->
+            traceId?.let {
+                vm.recordSuggestionDecision(it, if (ids.isEmpty()) "DIRECT" else "ACCEPTED",
+                    ids.size, result.optInt("extra_seconds"))
+            }
+            ownsEdit = false; clear(); done(result)
+        }
     }
 
     fun command(text: String): Set<String>? {

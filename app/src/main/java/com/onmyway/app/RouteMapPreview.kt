@@ -117,7 +117,7 @@ private fun MapSurface(result: JSONObject, modifier: Modifier) {
             val point = LatLng(place.latitude, place.longitude)
             bounds.include(point)
             val label = when (index) { 0 -> "起"; locations.lastIndex -> "终"; else -> "$index" }
-            val color = if (index == locations.lastIndex) Color.rgb(212, 82, 64) else Color.rgb(36, 107, 80)
+            val color = if (index == locations.lastIndex) Color.rgb(200, 108, 29) else Color.rgb(30, 90, 68)
             map.addMarker(MarkerOptions().position(point).anchor(.5f, .5f)
                 .icon(BitmapDescriptorFactory.fromBitmap(routeMarker(label, color, density))).title(when(index) {
                 0 -> "起点 · ${place.name}"
@@ -131,10 +131,20 @@ private fun MapSurface(result: JSONObject, modifier: Modifier) {
             points.forEach(bounds::include)
             if (points.size >= 2) {
                 map.addPolyline(PolylineOptions().addAll(points).width(8f * density).color(Color.WHITE).zIndex(1f))?.let(lines::add)
-                map.addPolyline(PolylineOptions().addAll(points).width(5f * density).color(Color.rgb(36, 107, 80)).zIndex(2f))?.let(lines::add)
+                map.addPolyline(PolylineOptions().addAll(points).width(5f * density).color(Color.rgb(30, 90, 68)).zIndex(2f))?.let(lines::add)
             }
         }
-        map.moveCamera(CameraUpdateFactory.newLatLngBounds(bounds.build(), size.width, size.height, (40 * density).toInt()))
+        val built = bounds.build()
+        val paddingPx = (40 * density).toInt().coerceAtMost(minOf(size.width, size.height) / 4).coerceAtLeast(10)
+        if (built.southwest.latitude == built.northeast.latitude && built.southwest.longitude == built.northeast.longitude) {
+            map.moveCamera(CameraUpdateFactory.newLatLngZoom(built.southwest, 15f))
+        } else {
+            runCatching {
+                map.moveCamera(CameraUpdateFactory.newLatLngBounds(built, size.width, size.height, paddingPx))
+            }.onFailure {
+                map.moveCamera(CameraUpdateFactory.newLatLngZoom(built.southwest, 14f))
+            }
+        }
     }
 }
 

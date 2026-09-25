@@ -13,6 +13,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -157,8 +159,8 @@ internal fun DestinationInput(vm: AppViewModel, enabled: Boolean, choose: (Place
         aliasToSave = null; keyword = null; setDestination(place)
     } }
     if (aliases) AlertDialog(onDismissRequest = { aliases = false }, title = { Text("常用地点") }, text = {
-        Column {
-            listOf("家", "宿舍", "学校", "公司").forEach { alias ->
+        Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+            (vm.familiarPlaces.keys + familiarPlaceSuggestions).distinct().forEach { alias ->
                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                     TextButton({
                         aliases = false

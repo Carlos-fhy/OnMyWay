@@ -37,7 +37,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 
 @Composable
-internal fun EmbeddedNavigationScreen(mode: String, destination: Place, via: List<Place>, onExit: () -> Unit) {
+internal fun EmbeddedNavigationScreen(mode: String, destination: Place, via: List<Place>, onExit: (Boolean) -> Unit) {
     val context = LocalContext.current
     val owner = LocalLifecycleOwner.current
     val hostView = LocalView.current
@@ -71,9 +71,9 @@ internal fun EmbeddedNavigationScreen(mode: String, destination: Place, via: Lis
     controller.Content { permission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)) }
     if (confirmExit) AlertDialog(
         onDismissRequest = { confirmExit = false },
-        title = { Text("退出导航？") },
-        text = { Text("停止导航引导，行程和待办会保留。") },
-        confirmButton = { TextButton({ confirmExit = false; exit() }) { Text("退出导航") } },
+        title = { Text(if (controller.arrived) "确认到达终点？" else "结束本次导航？") },
+        text = { Text("导航结束后方案会保存在行程记录；下次出发重新定位并规划，未办事项保留。") },
+        confirmButton = { TextButton({ confirmExit = false; exit(controller.arrived) }) { Text(if (controller.arrived) "确认到达" else "结束导航") } },
         dismissButton = { TextButton({ confirmExit = false }) { Text("继续导航") } },
     )
 }
@@ -91,6 +91,8 @@ private class NavigationController(
     private var status by mutableStateOf("准备导航")
     private var ready by mutableStateOf(false)
     private var running by mutableStateOf(false)
+    var arrived by mutableStateOf(false)
+        private set
     private var calculating by mutableStateOf(false)
     private var consent by mutableStateOf(false)
     private var hasPermission by mutableStateOf(false)
@@ -116,9 +118,9 @@ private class NavigationController(
         override fun onCalculateRouteFailure(result: AMapCalcRouteResult?) { routeFailed(result?.errorCode ?: -1) }
         override fun onNaviInfoUpdate(info: NaviInfo?) {
             if (running && info != null) {
-                status = "剩余 ${(info.pathRetainTime + 59) / 60} 分钟 · ${info.pathRetainDistance} 米"
+                status = "剩余 ${formatDuration(info.pathRetainTime)} · ${formatDistance(info.pathRetainDistance)}"
                 turnIcon = info.iconBitmap
-                if (!spokenInstruction) instruction = "前方 ${info.curStepRetainDistance} 米 · ${info.nextRoadName.orEmpty()}"
+                if (!spokenInstruction) instruction = "前方 ${formatDistance(info.curStepRetainDistance)} · ${info.nextRoadName.orEmpty()}"
             }
         }
         override fun onGetNavigationText(text: String?) { if (!text.isNullOrBlank()) { instruction = text; spokenInstruction = true } }
@@ -126,8 +128,8 @@ private class NavigationController(
         override fun onGetNavigationText(type: Int, text: String?) { if (!text.isNullOrBlank()) { instruction = text; spokenInstruction = true } }
         override fun onManeuverInfoUpdate(type: Int, bitmap: android.graphics.Bitmap?) { turnIcon = bitmap }
         override fun onArriveDestination() {
-            engine?.stopNavi(); running = false; ready = false
-            status = "已到达终点，请返回行程确认完成"
+            engine?.stopNavi(); running = false; ready = false; arrived = true
+            status = "已到达终点，请确认到达"
         }
         override fun onGpsSignalWeak(weak: Boolean) { if (weak && running) status = "定位信号较弱，请留意实际道路" }
         override fun onReCalculateRouteForYaw() { status = "正在重新计算路线" }
@@ -168,7 +170,7 @@ private class NavigationController(
                 Surface(Modifier.fillMaxSize()) {
                     Column(Modifier.fillMaxSize()) {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                            TextButton({ onExit() }) { Text("返回行程") }
+                            TextButton({ onExit() }) { Text("结束导航") }
                             Text(if (mode == "walking") "步行导航" else "自行车导航", Modifier.padding(16.dp))
                         }
                         Text(status, Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
@@ -183,7 +185,7 @@ private class NavigationController(
                             Text("请配置 local.properties 中的 amap.android.key 后重新安装。", Modifier.padding(20.dp))
                         } else if (!consent) {
                             Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                Text("导航期间，高德 SDK 会使用位置、设备及网络信息，提供实时引导。离开此页面会停止导航，行程继续保留。")
+                                Text("导航期间，高德 SDK 会使用位置、设备及网络信息，提供实时引导。结束导航后方案会保存在行程记录。")
                                 TextButton({ context.startActivity(Intent(Intent.ACTION_VIEW, "https://lbs.amap.com/pages/privacy/".toUri())) }) { Text("高德隐私政策") }
                                 Button({
                                     context.getSharedPreferences("embedded_navigation", Context.MODE_PRIVATE).edit().putBoolean("consent", true).apply()
@@ -248,7 +250,7 @@ private class NavigationController(
     private fun calculate() {
         val navi = engine ?: return
         if (calculating) return
-        navi.stopNavi(); running = false; ready = false; calculating = true
+        navi.stopNavi(); running = false; ready = false; arrived = false; calculating = true
         status = "正在从当前位置计算路线"
         handler.removeCallbacks(timeout); handler.postDelayed(timeout, 30_000)
         fun Place.poi() = NaviPoi(name, LatLng(latitude, longitude), id.takeIf { it.startsWith("B") })

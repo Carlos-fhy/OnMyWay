@@ -147,7 +147,7 @@ class Amap:
     def nearby(self, keyword: str, center: Place) -> list[Place]:
         return self._places(self._get("/v3/place/around", {
             "keywords": keyword, "location": center.location, "radius": 3000,
-            "sortrule": "distance", "offset": 5, "page": 1,
+            "sortrule": "distance", "offset": 25, "page": 1,
         }))
 
     def route(self, origin: Place, destination: Place, mode: str) -> Leg | None:

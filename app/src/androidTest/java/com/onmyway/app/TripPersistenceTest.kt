@@ -25,7 +25,7 @@ class TripPersistenceTest {
                 old.execSQL("INSERT INTO tasks VALUES ('test-task','保留的任务',2,5,'','','PHARMACY','pending',1)")
                 old.version = 1
             }
-            fun open() = Room.databaseBuilder(context, TaskDatabase::class.java, name).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
+            fun open() = Room.databaseBuilder(context, TaskDatabase::class.java, name).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build()
             val first = open().also { database = it }
             val task = first.tasks().observe().first().single()
             assertEquals("保留的任务", task.title)
@@ -33,11 +33,20 @@ class TripPersistenceTest {
             assertEquals(0L, task.lastRemindedAt)
             val trip = SavedTrip(requestJson = "{\"mode\":\"walking\"}", resultJson = "{\"stops\":[1,2]}", started = true)
             first.trips().save(trip)
+            val planEvent = RouteHistory(sessionId = trip.sessionId, state = "READY", timestamp = 1000,
+                requestJson = trip.requestJson, resultJson = trip.resultJson)
+            first.trips().record(planEvent)
             first.tasks().save(task.copy(status = "done"))
+            val feedback = SuggestionFeedback(mode = "walking", offeredTaskCount = 1, offeredExtraSeconds = 240)
+            first.suggestionFeedback().show(feedback)
+            assertEquals(1, first.suggestionFeedback().decide(feedback.id, "ACCEPTED", 1, 240, 1000))
+            assertEquals(0, first.suggestionFeedback().decide(feedback.id, "REJECTED", 0, 0, 1001))
             first.close()
             val reopened = open().also { database = it }
             assertEquals(trip, reopened.trips().load())
+            assertEquals(planEvent, reopened.trips().historyById(planEvent.id))
             assertEquals("done", reopened.tasks().observe().first().single().status)
+            assertEquals("ACCEPTED", reopened.suggestionFeedback().recentDecisions().single().decision)
             reopened.trips().clear()
             assertNull(reopened.trips().load())
             assertEquals(1, reopened.tasks().observe().first().size)

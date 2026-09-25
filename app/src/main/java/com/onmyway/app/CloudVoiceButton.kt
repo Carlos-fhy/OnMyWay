@@ -14,6 +14,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
@@ -78,6 +80,7 @@ private class ShortRecording(private val context: Context) {
 @Composable
 internal fun CloudVoiceButton(server: String, enabled: Boolean, result: (String) -> Unit, failure: (String) -> Unit) {
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
     val owner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
     val recordingDevice = remember(context) { ShortRecording(context) }
@@ -99,12 +102,16 @@ internal fun CloudVoiceButton(server: String, enabled: Boolean, result: (String)
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             permissions.launch(Manifest.permission.RECORD_AUDIO); return
         }
-        try { recordingDevice.start(); recording = true }
-        catch (_: Exception) { onFailure("录音启动失败，请检查麦克风。") }
+        try {
+            recordingDevice.start()
+            recording = true
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        } catch (_: Exception) { onFailure("录音启动失败，请检查麦克风。") }
     }
     fun finish() {
         if (!recording) return
         recording = false
+        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
         val bytes = try { recordingDevice.finish() } catch (_: Exception) { onFailure("录音太短，请重新说一次。"); return }
         processing = true
         job = scope.launch {

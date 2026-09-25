@@ -37,7 +37,7 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import kotlin.math.ceil
 
-private fun minutes(seconds: Int) = "${ceil(seconds / 60.0).toInt()} 分钟"
+private fun minutes(seconds: Int) = formatDuration(seconds)
 
 @Composable
 internal fun PlanScreen(vm: AppViewModel, tasks: List<Errand>, navigatingHere: Boolean, onNavigationChanged: (Boolean) -> Unit) {
@@ -259,7 +259,7 @@ private fun TripOverview(result: JSONObject, tasks: List<Errand>, vm: AppViewMod
         EmbeddedNavigationScreen(result.getString("mode"), destination,
             remaining.map { Place.from(it.getJSONObject("place")) }.distinctBy { it.id }
                 .filterNot { it.latitude == destination.latitude && it.longitude == destination.longitude }) {
-            onNavigationChanged(false)
+            if (vm.finishTrip(it)) onNavigationChanged(false)
         }
         }
         TextButton({ conversation = true }, modifier = Modifier.fillMaxWidth()) { Text("和助手调整路线") }
@@ -383,7 +383,7 @@ private fun TripOverview(result: JSONObject, tasks: List<Errand>, vm: AppViewMod
 
 @Composable
 private fun RouteTimelineItem(title: String, number: Int? = null, first: Boolean = false, last: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
-    val primary = MaterialTheme.colorScheme.primary
+    val pinColor = if (last) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary
     val line = MaterialTheme.colorScheme.outlineVariant
     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Box(Modifier.width(28.dp).fillMaxHeight().drawBehind {
@@ -391,10 +391,10 @@ private fun RouteTimelineItem(title: String, number: Int? = null, first: Boolean
             val y = 14.dp.toPx()
             if (!first) drawLine(line, Offset(x, 0f), Offset(x, y), 2.dp.toPx())
             if (!last) drawLine(line, Offset(x, y), Offset(x, size.height), 2.dp.toPx())
-            drawCircle(primary, 11.dp.toPx(), Offset(x, y))
+            drawCircle(pinColor, 11.dp.toPx(), Offset(x, y))
             if (number == null) drawCircle(androidx.compose.ui.graphics.Color.White, 4.dp.toPx(), Offset(x, y), style = Stroke(2.dp.toPx()))
         }, contentAlignment = Alignment.TopCenter) {
-            if (number != null) Text("$number", Modifier.padding(top = 4.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimary)
+            if (number != null) Text("$number", Modifier.padding(top = 4.dp), style = MaterialTheme.typography.labelSmall, color = if (last) MaterialTheme.colorScheme.onTertiary else MaterialTheme.colorScheme.onPrimary)
         }
         Column(Modifier.weight(1f).padding(bottom = if (last) 0.dp else 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -411,8 +411,15 @@ private fun StopTasks(stop: JSONObject, tasks: List<Errand>, vm: AppViewModel, a
         val task = tasks.find { it.id == ids.getString(i) }
         val done = task?.status == "done"
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text((if (done) "✓ " else "") + titles.getString(i), Modifier.weight(1f))
+            if (task != null) {
+                Icon(painterResource(placeTypeIcon(task.placeType)), null, Modifier.size(16.dp),
+                    tint = if (done) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(8.dp))
+            }
+            Text((if (done) "✓ " else "") + titles.getString(i), Modifier.weight(1f),
+                color = if (done) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
             if (actionable && !done) TextButton({ task?.let(vm::completeFromPlan) }, enabled = task != null && !vm.updatingTrip) { Text("办完了") }
+            if (actionable && done) TextButton({ vm.save(task!!.copy(status = "pending")) }, enabled = !vm.updatingTrip) { Text("撤销", color = MaterialTheme.colorScheme.outline) }
             if (!actionable && !done && task != null && changePlace != null) TextButton({ changePlace(task) }, enabled = !vm.updatingTrip) { Text(if (requiresFixedPlace(task.placeType)) "更正地点" else "换一家") }
         }
     }

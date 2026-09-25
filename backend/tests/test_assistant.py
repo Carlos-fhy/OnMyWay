@@ -60,3 +60,12 @@ def test_asr_uses_native_endpoint_and_accepts_documented_responses(monkeypatch, 
         audio.setnchannels(1); audio.setsampwidth(2); audio.setframerate(16000)
         audio.writeframes(b'\0' * 6400)
     assert assistant.transcribe(assistant.AudioRequest(audio=base64.b64encode(buffer.getvalue()).decode()))['text'] == '打印论文'
+
+
+def test_chat_receives_current_navigation_status(monkeypatch):
+    def complete(messages, *args):
+        assert '当前正在导航=False' in messages[0]['content']
+        assert '不能沿用旧路线' in messages[0]['content']
+        return json.dumps({'action': 'reply', 'reply': '请告诉我本次目的地。'})
+    monkeypatch.setattr(assistant, 'completion', complete)
+    assert assistant.chat(request()).action == 'reply'

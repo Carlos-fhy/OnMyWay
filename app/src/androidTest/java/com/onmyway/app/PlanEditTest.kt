@@ -14,6 +14,33 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class PlanEditTest {
+    @Test fun interruptedNavigationIsArchivedInsteadOfRestored() = runBlocking {
+        val app = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as Application
+        val db = Room.inMemoryDatabaseBuilder(app, TaskDatabase::class.java).build()
+        var model: AppViewModel? = null
+        try {
+            val place = Place("end", "宿舍", 121.0, 31.0)
+            val request = JSONObject().put("origin", place.json()).put("destination", place.json())
+                .put("mode", "cycling").put("preference", "fastest").put("allow_partial", false)
+                .put("max_extra_minutes", 10).put("arrive_by", JSONObject.NULL).put("tasks", JSONArray())
+            db.trips().save(SavedTrip(requestJson = request.toString(), resultJson = "{\"stops\":[]}", started = true))
+            val vm = withContext(Dispatchers.Main) { AppViewModel(app, db) }.also { model = it }
+            withTimeout(5000) { while (withContext(Dispatchers.Main) { vm.restoringTrip }) delay(20) }
+            assertNull(db.trips().load())
+            val archived = db.trips().history().single()
+            assertEquals("CANCELLED", archived.state)
+            assertEquals("宿舍", Place.from(JSONObject(archived.requestJson).getJSONObject("destination")).name)
+            withContext(Dispatchers.Main) {
+                assertNull(vm.result)
+                assertFalse(vm.tripStarted)
+                assertEquals(NavigationState.CANCELLED, vm.navigationState)
+            }
+        } finally {
+            withContext(Dispatchers.Main) { model?.viewModelScope?.cancel() }
+            db.close()
+        }
+    }
+
     @Test fun cancelAndInvalidReplanKeepPersistedTrip() = runBlocking {
         val app = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as Application
         val db = Room.inMemoryDatabaseBuilder(app, TaskDatabase::class.java).build()
@@ -24,7 +51,7 @@ class PlanEditTest {
                 .put("mode", "walking").put("preference", "fastest").put("allow_partial", false)
                 .put("max_extra_minutes", 20).put("arrive_by", JSONObject.NULL)
                 .put("tasks", JSONArray().put(JSONObject().put("id", "a")))
-            val stored = SavedTrip(requestJson = request.toString(), resultJson = "{\"stops\":[]}", started = true)
+            val stored = SavedTrip(requestJson = request.toString(), resultJson = "{\"stops\":[]}", started = false)
             db.trips().save(stored)
             val vm = withContext(Dispatchers.Main) { AppViewModel(app, db) }.also { model = it }
             withTimeout(5000) { while (withContext(Dispatchers.Main) { vm.restoringTrip }) delay(20) }
@@ -50,7 +77,7 @@ class PlanEditTest {
                 vm.planForAssistant { assistantReceivedResult = true }
                 assertFalse(assistantReceivedResult) // A rejected plan cannot produce a success card.
                 assertNotNull(vm.result)
-                assertTrue(vm.tripStarted)
+                assertFalse(vm.tripStarted)
                 assertTrue(vm.editingPlan)
                 vm.cancelPlanEdit()
                 assertEquals(place, vm.destination)
@@ -61,14 +88,21 @@ class PlanEditTest {
                 assertFalse(vm.editingPlan)
             }
             assertEquals(stored, db.trips().load())
+            withContext(Dispatchers.Main) { vm.launchTrip { true } }
+            withTimeout(5000) { while (withContext(Dispatchers.Main) { vm.updatingTrip }) delay(20) }
             withContext(Dispatchers.Main) {
                 assertEquals(NavigationState.NAVIGATION_OPENED, vm.navigationState)
-                vm.finishTrip(false)
+                assertTrue(vm.finishTrip(false))
             }
             withTimeout(5000) { while (withContext(Dispatchers.Main) { vm.updatingTrip }) delay(20) }
             assertNull(db.trips().load())
-            assertEquals("CANCELLED", db.trips().history().single().state)
-            withContext(Dispatchers.Main) { assertEquals(NavigationState.CANCELLED, vm.navigationState) }
+            assertEquals("CANCELLED", db.trips().history().first().state)
+            withContext(Dispatchers.Main) {
+                assertEquals(NavigationState.CANCELLED, vm.navigationState)
+                assertNull(vm.result)
+                assertNull(vm.destination)
+                assertTrue(vm.selected.isEmpty())
+            }
         } finally {
             withContext(Dispatchers.Main) { model?.viewModelScope?.cancel() }
             db.close()

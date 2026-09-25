@@ -6,6 +6,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import org.json.JSONObject
 import kotlin.math.ceil
 
@@ -13,6 +15,8 @@ import kotlin.math.ceil
 internal fun AutomaticRouteCard(auto: AutomaticRoutePlanner, vm: AppViewModel, retry: () -> Unit,
     manual: () -> Unit, cancel: () -> Unit, accepted: (JSONObject) -> Unit) {
     var details by remember { mutableStateOf(false) }
+    var editingBudget by remember { mutableStateOf(false) }
+    var customBudget by remember { mutableStateOf("") }
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest)) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (auto.busy || vm.busy) {
@@ -28,13 +32,44 @@ internal fun AutomaticRouteCard(auto: AutomaticRoutePlanner, vm: AppViewModel, r
                 val direct = preview.getJSONObject("direct")
                 val suggested = preview.optJSONObject("suggestion")
                 Text(Place.from(direct.getJSONObject("destination")).name, style = MaterialTheme.typography.titleLarge)
-                Text("直达约 ${ceil(direct.getInt("total_seconds") / 60.0).toInt()} 分钟")
-                Text("${if (direct.getString("mode") == "cycling") "骑行" else "步行"} · ${direct.optInt("total_meters")} 米 · 返回候选中距离最短", style = MaterialTheme.typography.bodySmall)
-                Text("顺路预算：最多多花 ${auto.budget} 分钟（含办事，可调整）", style = MaterialTheme.typography.bodySmall)
+                Text("直达约 ${formatDuration(direct.getInt("total_seconds"))}", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+                Text("${if (direct.getString("mode") == "cycling") "骑行" else "步行"} · ${formatDistance(direct.optInt("total_meters"))} · 返回候选中距离最短", style = MaterialTheme.typography.bodySmall)
+                Text("本次顺路预算 · 最多多花 ${auto.budget} 分钟", style = MaterialTheme.typography.titleSmall)
+                Text("我的常用预算 ${vm.preferredDetourMinutes} 分钟；按实际时间和出行方式调整。", style = MaterialTheme.typography.bodySmall)
+                listOf(listOf(5, 10, 15), listOf(20, 30)).forEach { row ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        row.forEach { mins ->
+                            FilterChip(selected = auto.budget == mins.toString(),
+                                onClick = { auto.updateBudget(mins); editingBudget = false },
+                                label = { Text("${mins}分钟") })
+                        }
+                        if (row.size == 2) FilterChip(
+                            selected = auto.budget.toIntOrNull() !in listOf(5, 10, 15, 20, 30),
+                            onClick = { customBudget = auto.budget; editingBudget = !editingBudget },
+                            label = { Text("自定义") })
+                    }
+                }
+                if (editingBudget) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(customBudget, { customBudget = it.filter(Char::isDigit).take(3) },
+                            label = { Text("0–240 分钟") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true, modifier = Modifier.weight(1f))
+                        Button(onClick = { customBudget.toIntOrNull()?.takeIf { it in 0..240 }?.let {
+                            auto.updateBudget(it); editingBudget = false
+                        } }, enabled = customBudget.toIntOrNull()?.let { it in 0..240 } == true) { Text("应用") }
+                    }
+                }
+                if (auto.budget.toInt() != vm.preferredDetourMinutes) {
+                    TextButton({ vm.savePreferredDetourMinutes(auto.budget.toInt()) }) { Text("设为我的常用预算") }
+                }
+                if (auto.budgetChanged) {
+                    Text("预算已变，助手建议需按新预算重新计算。", style = MaterialTheme.typography.bodySmall)
+                    OutlinedButton({ auto.replanForBudget(vm) }, enabled = !auto.busy && !auto.selectionBusy && !vm.busy) { Text("按新预算重新规划建议") }
+                }
                 val assessments = preview.optJSONArray("assessments")
                 if (assessments != null && assessments.length() > 0) {
-                    Text("选择这次要办的事", style = MaterialTheme.typography.labelLarge)
-                    Text("默认不选，确认后才会加入路线。", style = MaterialTheme.typography.bodySmall)
+                    Text("助手建议的顺路事项", style = MaterialTheme.typography.labelLarge)
+                    Text("助手已试算并勾选建议；你可增减事项，确认后才会加入路线。", style = MaterialTheme.typography.bodySmall)
                     for (i in 0 until assessments.length()) {
                         val entry = assessments.getJSONObject(i)
                         val id = entry.getString("task_id")
@@ -44,9 +79,9 @@ internal fun AutomaticRouteCard(auto: AutomaticRoutePlanner, vm: AppViewModel, r
                             enabled = !auto.busy && !vm.busy && !entry.isNull("extra_seconds"))
                         Column(Modifier.weight(1f)) {
                         Text(if (entry.isNull("extra_seconds")) "${entry.getString("title")}：${entry.getString("reason")}"
-                            else "${entry.getString("title")} · 多 ${entry.optInt("extra_meters")} 米 / 约 ${ceil(entry.getInt("extra_seconds") / 60.0).toInt()} 分钟 · ${if (entry.getBoolean("within_budget")) "预算内" else "超出预算"}",
+                            else "${entry.getString("title")} · 多 ${formatDistance(entry.optInt("extra_meters"))} / 约 ${formatDuration(entry.getInt("extra_seconds"))} · ${if (entry.getInt("extra_seconds") <= auto.budget.toInt() * 60) "预算内" else "超出预算"}",
                             style = MaterialTheme.typography.bodyMedium)
-                        if (id in auto.suggestedIds()) Text("推荐", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                        if (!auto.budgetChanged && id in auto.suggestedIds()) Text("助手建议", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                         }
                         }
                     }
@@ -62,9 +97,15 @@ internal fun AutomaticRouteCard(auto: AutomaticRoutePlanner, vm: AppViewModel, r
                 }
                 auto.selectedRoute?.let { route ->
                     Text(if (auto.selectedIds.isEmpty()) "当前选择：直达" else "当前选择：${auto.selectedIds.size} 件事", style = MaterialTheme.typography.titleMedium)
-                    Text("全程 ${route.optInt("total_meters")} 米 · 约 ${ceil(route.getInt("total_seconds") / 60.0).toInt()} 分钟")
-                    Text("比直达多 ${route.optInt("extra_meters")} 米 / 约 ${ceil(route.getInt("extra_seconds") / 60.0).toInt()} 分钟（含办事）", style = MaterialTheme.typography.bodySmall)
-                    if (route.getInt("extra_seconds") > auto.budget.toInt() * 60) Text("所选组合超出预算，请减少事项或手动调整预算。", color = MaterialTheme.colorScheme.error)
+                    Text("全程 ${formatDistance(route.optInt("total_meters"))} · 约 ${formatDuration(route.getInt("total_seconds"))}")
+                    Text("比直达多 ${formatDistance(route.optInt("extra_meters"))} / 约 ${formatDuration(route.getInt("extra_seconds"))}（含办事）", style = MaterialTheme.typography.bodySmall)
+                    if (route.getInt("extra_seconds") > auto.budget.toInt() * 60) {
+                        val neededMins = kotlin.math.ceil(route.getInt("extra_seconds") / 60.0).toInt()
+                        Column {
+                            Text("所选组合超出预算（需 ${neededMins} 分钟）", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                            TextButton(onClick = { auto.updateBudget(neededMins) }) { Text("本次预算调至 ${neededMins} 分钟") }
+                        }
+                    }
                     RouteMapPreview(route)
                     val stops = route.getJSONArray("stops")
                     for (i in 0 until stops.length()) {

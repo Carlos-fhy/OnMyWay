@@ -49,8 +49,9 @@ class Api(private val base: String) {
             .put("proposed_task_ids", proposed?.getJSONArray("tasks")?.let { tasks ->
                 JSONArray((0 until tasks.length()).map { tasks.getJSONObject(it).getString("id") })
             } ?: JSONObject.NULL)))
-    suspend fun assistant(messages: JSONArray) = JSONObject(request("/assistant/chat",
-        JSONObject().put("messages", messages).put("now", java.time.OffsetDateTime.now().toString())))
+    suspend fun assistant(messages: JSONArray, routeActive: Boolean = false) = JSONObject(request("/assistant/chat",
+        JSONObject().put("messages", messages).put("route_active", routeActive)
+            .put("now", java.time.OffsetDateTime.now().toString())))
     suspend fun transcribe(audio: ByteArray) = JSONObject(request("/assistant/transcribe",
         JSONObject().put("audio", android.util.Base64.encodeToString(audio, android.util.Base64.NO_WRAP)))).getString("text")
     suspend fun currentPlace(longitude: Double, latitude: Double): Place = Place.from(JSONObject(request(

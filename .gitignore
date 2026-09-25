@@ -48,3 +48,7 @@ Thumbs.db
 !/docs/PUBLIC_SETUP.md
 /tools/probe_amap_waypoints.py
 /tools/audit-public-source.py
+
+# Local screen captures from device debugging
+/current-screen*.png
+/current-screen*.jpg

@@ -1,11 +1,12 @@
 from datetime import datetime, timedelta, timezone
 from itertools import combinations, permutations
+from math import hypot
 
 import pytest
 from pydantic import ValidationError
 
 from backend.models import Leg, Place, PlanRequest, Task
-from backend.planner import PlanningError, discover, solve
+from backend.planner import PlanningError, _distance_to_route, discover, solve
 
 
 NOW = datetime(2026, 9, 21, 8, tzinfo=timezone.utc)
@@ -140,7 +141,93 @@ def test_input_rejects_duplicate_ids_naive_times_and_ambiguous_place():
 
 def test_discover_preserves_fixed_place_and_limits_type_candidates():
     tasks = [task(), Task(id="buy", title="buy", place_type="SUPERMARKET")]
-    assert discover(request(tasks), Maps()) == [[A], [A, B]]
+    result = discover(request(tasks), Maps())
+    assert result[0] == [A]
+    assert {place.id for place in result[1]} == {A.id, B.id}
+
+
+def test_discover_searches_along_bent_route_and_broadens_water_stops():
+    origin = Place(id="origin", name="origin", longitude=120.55, latitude=31.25)
+    destination = Place(id="destination", name="destination", longitude=120.65, latitude=31.25)
+    campus_store = Place(id="campus", name="campus store", longitude=120.60, latitude=31.30)
+    query = PlanRequest(origin=origin, destination=destination, departure=NOW,
+                        tasks=[Task(id="water", title="buy water", place_type="SUPERMARKET")])
+
+    class CampusMaps(Maps):
+        def __init__(self):
+            super().__init__()
+            self.queries = []
+
+        def route(self, a, b, mode):
+            if (a.id, b.id) == ("origin", "destination"):
+                return Leg(seconds=600, meters=1000,
+                           polyline="120.550000,31.250000;120.600000,31.300000;120.650000,31.250000")
+            return Leg(seconds=360, meters=600)
+
+        def nearby(self, keyword, center):
+            self.queries.append((keyword, center))
+            return [campus_store] if abs(center.latitude - 31.30) < 0.001 else []
+
+    provider = CampusMaps()
+    assert discover(query, provider) == [[campus_store]]
+    assert all("便利店" in keyword and "小卖部" in keyword for keyword, _ in provider.queries)
+    assert any(abs(center.latitude - 31.30) < 0.001 for _, center in provider.queries)
+
+
+def test_discover_ranks_candidates_by_route_distance_for_selected_mode():
+    query = request([Task(id="water", title="buy water", place_type="SUPERMARKET")], mode="cycling")
+
+    class RoadMaps(Maps):
+        def route(self, a, b, mode):
+            self.modes.append(mode)
+            if (a.id, b.id) == ("start", "end"):
+                return Leg(seconds=500, meters=1000)
+            if "a" in (a.id, b.id):
+                return Leg(seconds=600, meters=2000)
+            return Leg(seconds=200, meters=600)
+
+    provider = RoadMaps()
+    assert [place.id for place in discover(query, provider)[0]] == ["b", "a"]
+    assert set(provider.modes) == {"cycling"}
+
+
+def test_corridor_distance_uses_full_segment_not_only_route_vertices():
+    on_route = Place(id="on", name="on", longitude=120.01, latitude=30.0)
+    near_vertex = Place(id="off", name="off", longitude=120.0001, latitude=30.001)
+    line = [(120.0, 30.0), (120.02, 30.0)]
+    assert _distance_to_route(on_route, line) < 1
+    assert _distance_to_route(near_vertex, line) > 100
+
+
+def test_discover_uses_confirmed_waypoint_and_destination_as_search_centers():
+    origin = Place(id="start", name="start", longitude=120.0, latitude=30.0)
+    waypoint = Place(id="parcel", name="parcel", longitude=120.01, latitude=30.02)
+    destination = Place(id="end", name="end", longitude=120.02, latitude=30.0)
+    near_waypoint = Place(id="near", name="near", longitude=120.0101, latitude=30.0201)
+    near_direct_line = Place(id="direct", name="direct", longitude=120.01, latitude=30.0)
+    query = PlanRequest(origin=origin, destination=destination, departure=NOW,
+                        tasks=[Task(id="pickup", title="pickup", place=waypoint),
+                               Task(id="water", title="buy water", place_type="SUPERMARKET")])
+
+    class WaypointMaps(Maps):
+        def __init__(self):
+            super().__init__()
+            self.queries = []
+
+        def route(self, a, b, mode):
+            meters = round(hypot(a.longitude - b.longitude, a.latitude - b.latitude) * 100000)
+            return Leg(seconds=meters, meters=meters, polyline=f"{a.location};{b.location}")
+
+        def nearby(self, keyword, center):
+            self.queries.append(center.id)
+            return [near_direct_line, near_waypoint] if center.id == "parcel" else []
+
+    provider = WaypointMaps()
+    options = discover(query, provider)
+    assert options[0] == [waypoint]
+    assert options[1][0] == near_waypoint
+    assert "parcel" in provider.queries
+    assert "end" in provider.queries
 
 
 def test_map_query_time_cannot_make_expired_deadline_look_feasible(monkeypatch):

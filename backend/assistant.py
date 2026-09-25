@@ -39,9 +39,11 @@ NavigationRequest.model_rebuild()
 
 class NavigationIntent(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    action: Literal['adjust', 'clarify']
+    action: Literal['adjust', 'clarify', 'add_stop']
     destination: str = Field(default='', max_length=100)
     keep_task_ids: list[str] = Field(default_factory=list, max_length=6)
+    new_task_title: str = Field(default='', max_length=100)
+    new_place_type: Literal['', 'PRINT_SHOP', 'SUPERMARKET', 'PHARMACY'] = ''
     reply: str = Field(default='', max_length=500)
 
 
@@ -58,7 +60,8 @@ keep_task_ids 是调整后还要经过的任务，不是已完成任务。destin
 “打印完再回家”同理保留 PRINT_SHOP，destination=家。“不取快递了”移除 PARCEL，其他任务保留。
 仅“改去图书馆”时更换终点，保留全部当前任务。“直接回宿舍”“直接去目的地”移除全部途经任务。
 家、宿舍、学校、公司是可使用的预设地点名称，无需追问地址，手机会解析。
-若要求的任务不在当前任务中、要求新增事项、否定或假设表达无法明确执行，则 action=clarify，reply 简短说明，不擅自改成直达。
+用户明确提出新增顺路事项，例如“附近买瓶水”“顺路找打印店”，action=add_stop；new_task_title 是要办的事，new_place_type 分别用 SUPERMARKET、PRINT_SHOP、PHARMACY。它是待确认的新事项，不能声称已加入路线或已保存。取快递、取外卖需要确切领取地点，不得用 add_stop 猜地点，应 clarify。
+add_stop 可同时更换终点、保留或移除原路线事项：根据用户整句要求填 destination 和 keep_task_ids；没有明确更改原路线事项时继承 proposed_task_ids 或当前全部任务。例如“取完快递去上方山，中途买水”应保留快递、把上方山设为终点并新增买水，给出一份待确认方案。只有一个新事项可被提议；不明确时才 clarify。普通 adjust、clarify 的 new_task_title/new_place_type 必须留空。
 回复应概述保留事项和终点；真实路线由程序试算，用户确认后才更新。'''
     content = completion([{'role': 'system', 'content': prompt},
                           {'role': 'user', 'content': body.model_dump_json()}],
@@ -68,6 +71,11 @@ keep_task_ids 是调整后还要经过的任务，不是已完成任务。destin
         allowed = {task.id for task in body.tasks}
         if len(set(intent.keep_task_ids)) != len(intent.keep_task_ids) or not set(intent.keep_task_ids) <= allowed:
             raise ValueError('invalid task ids')
+        if intent.action == 'add_stop':
+            if not intent.new_task_title.strip() or not intent.new_place_type:
+                raise ValueError('invalid new stop')
+        elif intent.new_task_title or intent.new_place_type:
+            raise ValueError('unexpected new stop')
         return intent
     except (ValueError, ValidationError):
         raise HTTPException(502, '导航调整结果未通过校验，请重新说一次。') from None
@@ -81,6 +89,7 @@ class Message(BaseModel):
 class ChatRequest(BaseModel):
     messages: list[Message] = Field(min_length=1, max_length=20)
     now: datetime
+    route_active: bool = False
 
 
 class Proposal(BaseModel):
@@ -122,13 +131,13 @@ def completion(messages, model, structured=False):
 @router.post('/assistant/chat', response_model=Proposal)
 def chat(body: ChatRequest):
     schema = json.dumps(Proposal.model_json_schema(), ensure_ascii=False)
-    prompt = f'''你是顺路生活助手。现在是{body.now.isoformat()}。用简短中文回复，只输出符合以下 schema 的 JSON：{schema}。
+    prompt = f'''你是顺路生活助手。现在是{body.now.isoformat()}。当前正在导航={body.route_active}。历史对话中的旧路线不代表仍在导航；当前未导航时，新的出行请求必须重新规划，不能沿用旧路线或旧耗时。只创建待办而没有目的地时，保存后可请用户提供本次目的地。用简短中文回复，只输出符合以下 schema 的 JSON：{schema}。
 你只能提出建议，不能声称已保存、完成或启动。create_task 每次只提出一个任务草稿，用户确认后手机才保存。
 多个任务应逐个确认；不清楚的信息先 reply 追问。不要将否定、取消、假设表达当成创建或导航指令。
 仅支持打印、购物、买药、取快递、取外卖；其他类型先解释限制。取快递/外卖的地点必须由用户随后指定，不能猜测。
 deadline 仅在用户明确表达截止时间且可确定时填含时区 ISO8601，否则留空并在需要时追问；不要把期望办理时间当截止时间。
 list_tasks 用于查看待办，实际列表由手机读取。plan_route 必须有用户表达的目的地名称，不能生成坐标、路线或耗时。
-家、宿舍、学校、公司也都是合法目的地名称，原样放入 destination，手机会匹配常用地点或请用户搜索。
+家、宿舍、学校、公司及用户自定义常用地点（例如快递站、外卖点、东门驿站）都是合法目的地名称，原样放入 destination，手机会匹配常用地点或请用户搜索。
 用户只说一个明确地点名称（例如“苏州科技大学石湖校区图书馆”）也按 plan_route 处理，保留完整名称。不要要求用户先手动定位或勾选待办，手机会自动定位并计算顺路建议。
 mode 仅在本次用户明确说步行/走路或骑行/骑自行车时填写 walking/cycling，否则必须留空，由手机询问出行方式，不沿用旧对话的方式。
 例如“我要回宿舍”返回 action=plan_route,destination=宿舍,mode=""；“骑车去图书馆”返回 mode=cycling。如果需要追问而无法生成有效操作，action 必须是 reply，不能返回空字段的 create_task/plan_route。

@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, timezone
-from math import hypot
+from math import ceil, cos, hypot, radians
 
 from ortools.sat.python import cp_model
 
@@ -10,14 +10,99 @@ class PlanningError(Exception):
     pass
 
 
-KEYWORDS = {"PRINT_SHOP": "打印店", "SUPERMARKET": "超市", "PHARMACY": "药店", "PARCEL": "快递驿站"}
+KEYWORDS = {"PRINT_SHOP": "打印店", "SUPERMARKET": "超市|便利店|小卖部",
+            "PHARMACY": "药店", "PARCEL": "快递驿站"}
 HORIZON = 86400
 
 
+def _reference_route(request: PlanRequest, provider) -> tuple[list[Place], list[Leg]]:
+    direct = provider.route(request.origin, request.destination, request.mode)
+    if direct is None:
+        raise PlanningError("起点到目的地没有可用路线，请修改地点或出行方式。")
+    fixed = [task for task in request.tasks if task.place]
+    # Confirmed navigation changes keep existing stops. Use their optimized order
+    # as the corridor for searching a new stop, not the direct origin-to-end line.
+    if not fixed or request.allow_partial:
+        return [request.origin, request.destination], [direct]
+    unconstrained = request.model_copy(update={
+        "tasks": [task.model_copy(update={"deadline": None}) for task in fixed],
+        "arrive_by": None, "max_extra_minutes": None, "allow_partial": False,
+    })
+    ordered = solve(unconstrained, [[task.place] for task in fixed], provider)
+    anchors = [request.origin] + [stop.place for stop in ordered.stops] + [request.destination]
+    legs = [provider.route(a, b, request.mode) for a, b in zip(anchors, anchors[1:])]
+    if any(leg is None for leg in legs):
+        raise PlanningError("已有途经点之间没有可用路线，请检查地点或出行方式。")
+    return anchors, legs
+
+
+def _route_points(anchors: list[Place], legs: list[Leg]) -> list[tuple[float, float]]:
+    points = [(anchors[0].longitude, anchors[0].latitude)]
+    for end, leg in zip(anchors[1:], legs):
+        for raw in leg.polyline.split(";"):
+            try:
+                longitude, latitude = map(float, raw.split(","))
+                points.append((longitude, latitude))
+            except (ValueError, TypeError):
+                continue
+        points.append((end.longitude, end.latitude))
+    return points
+
+
+def _distance_meters(a: tuple[float, float], b: tuple[float, float], latitude: float) -> float:
+    return hypot((a[0] - b[0]) * 111320 * cos(radians(latitude)),
+                 (a[1] - b[1]) * 110540)
+
+
+def _distance_to_route(place: Place, points: list[tuple[float, float]]) -> float:
+    scale = cos(radians(place.latitude))
+    x, y = place.longitude * scale, place.latitude
+    nearest = float("inf")
+    for a, b in zip(points, points[1:]):
+        ax, ay = a[0] * scale, a[1]
+        bx, by = b[0] * scale, b[1]
+        dx, dy = bx - ax, by - ay
+        length_squared = dx * dx + dy * dy
+        fraction = max(0.0, min(1.0, ((x - ax) * dx + (y - ay) * dy) / length_squared)) if length_squared else 0.0
+        nearest = min(nearest, hypot(x - ax - fraction * dx, y - ay - fraction * dy))
+    if nearest == float("inf"):
+        return _distance_meters((place.longitude, place.latitude), points[0], place.latitude)
+    return nearest * 111000
+
+
+def _search_centers(anchors: list[Place], points: list[tuple[float, float]]) -> list[Place]:
+    # Always query around confirmed waypoints and destination. Add evenly spaced
+    # centers on the actual route, while limiting outbound POI requests.
+    centers = list({place.location: place for place in anchors}.values())
+    lengths = [_distance_meters(a, b, anchors[0].latitude) for a, b in zip(points, points[1:])]
+    total = sum(lengths)
+    samples = min(7, max(3, ceil(total / 1200) - 1), max(0, 10 - len(centers)))
+    for number in range(1, samples + 1):
+        target = total * number / (samples + 1)
+        travelled = 0.0
+        for index, length in enumerate(lengths):
+            if travelled + length >= target or index == len(lengths) - 1:
+                ratio = (target - travelled) / length if length else 0.0
+                a, b = points[index], points[index + 1]
+                center = Place(id=f"route:{number}", name="路线附近",
+                               longitude=a[0] + (b[0] - a[0]) * ratio,
+                               latitude=a[1] + (b[1] - a[1]) * ratio)
+                if all(_distance_meters((center.longitude, center.latitude),
+                                        (prior.longitude, prior.latitude), center.latitude) >= 250
+                       for prior in centers):
+                    centers.append(center)
+                break
+            travelled += length
+    return centers
+
+
 def discover(request: PlanRequest, provider) -> list[list[Place]]:
-    midpoint = Place(id="midpoint", name="路线中点",
-                     longitude=(request.origin.longitude + request.destination.longitude) / 2,
-                     latitude=(request.origin.latitude + request.destination.latitude) / 2)
+    if all(task.place for task in request.tasks):
+        return [[task.place] for task in request.tasks]
+    anchors, legs = _reference_route(request, provider)
+    points = _route_points(anchors, legs)
+    segment_points = [_route_points([a, b], [leg]) for a, b, leg in zip(anchors, anchors[1:], legs)]
+    centers = _search_centers(anchors, points)
     candidates = []
     by_type = {}
     for task in request.tasks:
@@ -26,14 +111,46 @@ def discover(request: PlanRequest, provider) -> list[list[Place]]:
             continue
         if task.place_type not in by_type:
             found = {}
-            for center in (request.origin, midpoint, request.destination):
+            for center in centers:
                 for place in provider.nearby(KEYWORDS[task.place_type], center):
                     found[place.location] = place
-            # Approximate geometric detour only screens POIs; actual optimization uses map times.
-            def score(p):
-                return (hypot(p.longitude-request.origin.longitude, p.latitude-request.origin.latitude)
-                        + hypot(p.longitude-request.destination.longitude, p.latitude-request.destination.latitude))
-            by_type[task.place_type] = sorted(found.values(), key=score)[:2]
+
+            def corridor_distance(place):
+                return _distance_to_route(place, points)
+
+            # AMap sorts each local search by distance to its own center. Merge
+            # them, then keep shops near all route sections before road routing.
+            first = [min(found.values(), key=lambda p: _distance_meters(
+                (p.longitude, p.latitude), (center.longitude, center.latitude), p.latitude))
+                for center in centers] if found else []
+            first += sorted(found.values(), key=lambda p: (corridor_distance(p), p.id))
+            shortlist = {}
+            for place in first:
+                shortlist[place.location] = place
+                if len(shortlist) == 12:
+                    break
+            reachable = []
+            for place in shortlist.values():
+                best_insertion = None
+                # Routing every shop against every stop is expensive. Test the
+                # two route sections closest to this shop, including either
+                # side of a waypoint where the best insertion may differ.
+                closest_sections = sorted(range(len(legs)),
+                                          key=lambda i: _distance_to_route(place, segment_points[i]))[:2]
+                for index in closest_sections:
+                    a, b, original = anchors[index], anchors[index + 1], legs[index]
+                    incoming = provider.route(a, place, request.mode)
+                    outgoing = provider.route(place, b, request.mode)
+                    if incoming is None or outgoing is None:
+                        continue
+                    score = (incoming.meters + outgoing.meters - original.meters,
+                             incoming.seconds + outgoing.seconds - original.seconds)
+                    if best_insertion is None or score < best_insertion:
+                        best_insertion = score
+                if best_insertion is not None:
+                    reachable.append((*best_insertion, corridor_distance(place), place.id, place))
+            reachable.sort(key=lambda entry: entry[:4])
+            by_type[task.place_type] = [entry[4] for entry in reachable[:2]]
         candidates.append(by_type[task.place_type])
     return candidates
 

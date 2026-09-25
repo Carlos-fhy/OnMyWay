@@ -20,18 +20,57 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.time.OffsetDateTime
 
+
+internal fun retainedNavigationTasks(request: JSONArray, result: JSONObject, keepIds: Set<String>): List<JSONObject> {
+    val actualStops = result.optJSONArray("stops") ?: JSONArray()
+    val actualPlaces = mutableMapOf<String, JSONObject>()
+    for (index in 0 until actualStops.length()) {
+        val stop = actualStops.optJSONObject(index) ?: continue
+        val place = stop.optJSONObject("place") ?: continue
+        val ids = stop.optJSONArray("task_ids") ?: continue
+        for (taskIndex in 0 until ids.length()) actualPlaces[ids.getString(taskIndex)] = place
+    }
+    return (0 until request.length()).map { JSONObject(request.getJSONObject(it).toString()) }
+        .filter { it.getString("id") in keepIds }
+        .onEach { task ->
+            if (task.isNull("place")) actualPlaces[task.getString("id")]?.let { selected ->
+                task.put("place", JSONObject(selected.toString()))
+                task.put("place_type", JSONObject.NULL)
+            }
+        }
+}
+
+
 class AppViewModel internal constructor(application: Application, private val database: TaskDatabase) : AndroidViewModel(application) {
     constructor(application: Application) : this(application, TaskDatabase.get(application))
     private val dao = database.tasks()
     private val trips = database.trips()
+    private val suggestionFeedback = database.suggestionFeedback()
     private val tripMutex = Mutex()
     private var savedTrip by mutableStateOf<SavedTrip?>(null)
     private val navigationMemory = NavigationConversationState()
     private var navigationMemoryTrip: SavedTrip? = null
+    private val navigationContextPrefs = application.getSharedPreferences("navigation_context", 0)
+    private fun persistNavigationMemory() {
+        val trip = navigationMemoryTrip
+        if (trip == null || navigationMemory.history.isEmpty() && navigationMemory.proposedBody == null) {
+            navigationContextPrefs.edit { remove("snapshot") }
+        } else {
+            navigationContextPrefs.edit { putString("snapshot", navigationMemory.snapshot(trip).toString()) }
+        }
+    }
     internal val navigationConversation: NavigationConversationState get() {
         if (navigationMemoryTrip != savedTrip) {
+            navigationMemory.persist = null
             navigationMemory.clear()
             navigationMemoryTrip = savedTrip
+            val stored = savedTrip
+            val snapshot = navigationContextPrefs.getString("snapshot", null)
+            if (stored != null && snapshot != null) {
+                val restored = runCatching { navigationMemory.restore(JSONObject(snapshot), stored) }.getOrDefault(false)
+                if (!restored) navigationContextPrefs.edit { remove("snapshot") }
+            }
+            navigationMemory.persist = ::persistNavigationMemory
         }
         return navigationMemory
     }
@@ -47,19 +86,61 @@ class AppViewModel internal constructor(application: Application, private val da
             Place.from(request.getJSONObject("destination")), stored.plannedAt, stored.startedAt, stored.requestJson, stored.resultJson)
     }
     private val prefs = application.getSharedPreferences("settings", 0)
+    var preferredDetourMinutes by mutableStateOf(prefs.getInt("preferred_detour_minutes", 10).coerceIn(0, 240))
+        private set
+    fun savePreferredDetourMinutes(minutes: Int) {
+        preferredDetourMinutes = minutes.coerceIn(0, 240)
+        prefs.edit { putInt("preferred_detour_minutes", preferredDetourMinutes) }
+    }
     var familiarPlaces by mutableStateOf<Map<String, Place>>(runCatching {
         val json = JSONObject(prefs.getString("familiar_places", "{}")!!)
         json.keys().asSequence().associateWith { Place.from(json.getJSONObject(it)) }
     }.getOrDefault(emptyMap()))
         private set
-    fun saveFamiliarPlace(name: String, place: Place?) {
-        familiarPlaces = if (place == null) familiarPlaces - name else familiarPlaces + (name to place)
+    private fun persistFamiliarPlaces() {
         val json = JSONObject()
         familiarPlaces.forEach { (alias, point) -> json.put(alias, point.json()) }
         prefs.edit { putString("familiar_places", json.toString()) }
     }
+    fun saveFamiliarPlace(name: String, place: Place?) {
+        val alias = familiarPlaceAlias(name)
+        require(alias.isNotBlank() && alias.length <= 24) { "常用地点称呼应为 1–24 个字" }
+        familiarPlaces = if (place == null) familiarPlaces - alias else familiarPlaces + (alias to place)
+        persistFamiliarPlaces()
+    }
+    fun renameFamiliarPlace(oldName: String, newName: String): Boolean {
+        val oldAlias = familiarPlaceAlias(oldName)
+        val newAlias = familiarPlaceAlias(newName)
+        val place = familiarPlaces[oldAlias] ?: return false
+        if (newAlias.isBlank() || newAlias.length > 24 || newAlias != oldAlias && newAlias in familiarPlaces) return false
+        familiarPlaces = if (newAlias == oldAlias) familiarPlaces else (familiarPlaces - oldAlias) + (newAlias to place)
+        persistFamiliarPlaces()
+        return true
+    }
     fun familiarPlace(name: String): Place? = familiarPlaces[familiarPlaceAlias(name)]
     suspend fun routeHistory() = trips.history()
+    suspend fun routeHistoryById(id: String) = trips.historyById(id)
+    var lastPlannedHistoryId: String? = null
+        private set
+    suspend fun recordSuggestionShown(mode: String, taskCount: Int, extraSeconds: Int): String? {
+        if (taskCount <= 0 || mode !in listOf("walking", "cycling")) return null
+        val feedback = SuggestionFeedback(mode = mode, offeredTaskCount = taskCount, offeredExtraSeconds = extraSeconds)
+        return try {
+            suggestionFeedback.show(feedback)
+            feedback.id
+        } catch (e: CancellationException) { throw e }
+        catch (_: Exception) { null } // A trace failure must not block route planning.
+    }
+    fun recordSuggestionDecision(id: String, decision: String, taskCount: Int, extraSeconds: Int) {
+        if (decision !in setOf("ACCEPTED", "DIRECT", "REJECTED", "MANUAL", "SUPERSEDED")) return
+        viewModelScope.launch {
+            try {
+                suggestionFeedback.decide(id, decision, taskCount.coerceAtLeast(0), extraSeconds, System.currentTimeMillis())
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) { /* Route actions still work if feedback storage fails. */ }
+        }
+    }
+    suspend fun suggestionDecisions(): List<SuggestionFeedback> = suggestionFeedback.recentDecisions()
     val tasks = dao.observe().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     var server by mutableStateOf(prefs.getString("server", "http://127.0.0.1:8000")!!)
         private set
@@ -135,6 +216,17 @@ class AppViewModel internal constructor(application: Application, private val da
             try {
                 tripMutex.withLock {
                     val stored = trips.load()
+                    if (stored != null && stored.started && revision == 0) {
+                        database.withTransaction {
+                            trips.record(RouteHistory(sessionId = stored.sessionId, state = NavigationState.CANCELLED.name,
+                                timestamp = System.currentTimeMillis(), requestJson = stored.requestJson, resultJson = stored.resultJson))
+                            trips.clear()
+                        }
+                        terminalState = NavigationState.CANCELLED
+                        navigationContextPrefs.edit { remove("snapshot") }
+                        message = "上次导航已结束，方案保存在行程记录；再次出发请重新规划。"
+                        return@withLock
+                    }
                     if (stored != null && revision == 0) {
                         val request = JSONObject(stored.requestJson)
                         val response = JSONObject(stored.resultJson)
@@ -202,9 +294,9 @@ class AppViewModel internal constructor(application: Application, private val da
             finally { updatingTrip = false }
         }
     }
-    fun finishTrip(arrived: Boolean) {
-        if (busy || updatingTrip || restoringTrip) return
-        val stored = savedTrip ?: return
+    fun finishTrip(arrived: Boolean): Boolean {
+        if (busy || updatingTrip || restoringTrip) return false
+        val stored = savedTrip ?: return false
         updatingTrip = true
         viewModelScope.launch {
             try {
@@ -217,12 +309,17 @@ class AppViewModel internal constructor(application: Application, private val da
                         trips.clear()
                     }
                     revision++; savedTrip = null; result = null; tripStarted = false
+                    origin = null; destination = null; selected = emptySet(); extra = ""; arriveBy = ""; partial = false
                     editingPlan = false; draftBackup = null; tripPlaces = emptyMap(); terminalState = state
-                    message = if (arrived) "行程已结束，未办完的事项仍保留。" else "已结束本应用行程；高德导航需在高德内结束。"
+                    navigationMemory.persist = null; navigationMemory.clear(); navigationMemoryTrip = null
+                    navigationContextPrefs.edit { remove("snapshot") }
+                    message = if (arrived) "已到达，行程保存在记录中；未办事项仍保留。"
+                        else "导航已结束，方案保存在行程记录；再次出发请重新规划。"
                 }
             } catch (_: Exception) { message = "行程结束失败，请重试" }
             finally { updatingTrip = false }
         }
+        return true
     }
     fun cancelLocation() { locationJob?.cancel() }
     suspend fun assistantOrigin(): Place {
@@ -324,31 +421,44 @@ class AppViewModel internal constructor(application: Application, private val da
         val previous = savedTrip ?: error("没有正在进行的行程。")
         val old = JSONObject(previous.requestJson)
         val oldTasks = old.getJSONArray("tasks")
-        val activeIds = (0 until oldTasks.length()).map { oldTasks.getJSONObject(it).getString("id") }.toSet()
-        val active = tasks.value.filter { it.id in activeIds && it.status == "pending" }
+        val oldIds = (0 until oldTasks.length()).map { oldTasks.getJSONObject(it).getString("id") }
+        val existing = oldIds.mapNotNull { dao.get(it) }.filter { it.status == "pending" }
         val memory = navigationConversation
-        val proposed = memory.proposedBody
-            ?: memory.draft?.takeIf { it.previous == previous }?.body
+        val proposed = memory.proposedBody ?: memory.draft?.takeIf { it.previous == previous }?.body
+        val proposedIds = proposed?.optJSONArray("tasks")?.let { array ->
+            (0 until array.length()).map { array.getJSONObject(it).getString("id") }.toSet()
+        } ?: emptySet()
+        val previousNewTask = memory.pendingNewTask?.takeIf { it.id in proposedIds }
+        val active = existing + listOfNotNull(previousNewTask)
+        memory.setProposal(proposed, previousNewTask)
+        val selectedTasks = if (proposed == null) active else active.filter { it.id in proposedIds }
         val pendingIds = memory.pendingIds
-        // Keep the last understood proposal as context, but never leave an older
-        // executable preview available after a new request fails or is cancelled.
-        memory.proposedBody = proposed
+        val pendingChoiceNewTask = memory.pendingChoiceNewTask
         memory.invalidatePreview()
-        val selectedTasks = proposed?.getJSONArray("tasks")?.let { ids ->
-            val chosenIds = (0 until ids.length()).map { ids.getJSONObject(it).getString("id") }.toSet()
-            active.filter { it.id in chosenIds }
-        } ?: active
         var target = chosenDestination
-        var keep = if (chosenDestination != null) pendingIds else navigationSelection(text, selectedTasks)
+        var keep = if (target != null) pendingIds else navigationSelection(text, selectedTasks)
+        var requestedNewTask: Errand? = if (target != null) pendingChoiceNewTask else null
         val history = JSONArray(memory.history.map { (role, content) -> JSONObject().put("role", role).put("content", content) })
-        memory.record("user", if (chosenDestination == null) text else "选择地点：${chosenDestination.name}")
+        memory.record("user", if (target == null) text else "选择地点：${target.name}")
         if (keep == null) {
             val answer = Api(server).navigation(text, old.getJSONObject("destination").getString("name"), active, history, proposed)
             memory.record("assistant", answer.optString("reply").ifBlank { "已理解调整意图，尚未执行。" })
-            check(answer.optString("action") == "adjust") { answer.optString("reply").ifBlank { "请说明要保留的事项和终点。" } }
+            val action = answer.optString("action")
+            check(action == "adjust" || action == "add_stop") {
+                answer.optString("reply").ifBlank { "请说明要保留的事项和终点。" }
+            }
             val ids = answer.getJSONArray("keep_task_ids")
             keep = (0 until ids.length()).map { ids.getString(it) }.toSet()
             check(keep.all { id -> active.any { it.id == id } }) { "返回的任务不在当前行程中，请重试。" }
+            if (action == "add_stop") {
+                check(previousNewTask == null) { "上一个新增事项尚未确认，请先确认或取消后再添加。" }
+                val type = answer.getString("new_place_type")
+                val title = answer.getString("new_task_title").trim()
+                check(type in listOf("SUPERMARKET", "PRINT_SHOP", "PHARMACY") && title.isNotBlank()) {
+                    "新增事项类型不受支持，请换一种说法。"
+                }
+                requestedNewTask = Errand(title = title, placeType = type)
+            }
             val keyword = answer.optString("destination")
             if (target == null && keyword.isNotBlank()) target = familiarPlace(keyword)
             if (target == null && keyword.isNotBlank()) {
@@ -358,22 +468,71 @@ class AppViewModel internal constructor(application: Application, private val da
                 val places = search(keyword, searchCity)
                 check(places.isNotEmpty()) { "没有找到该地点，请补充城市或完整名称。" }
                 memory.record("assistant", "请选目的地：" + places.mapIndexed { index, place -> "${index + 1}. ${place.name}" }.joinToString("；"))
-                throw NavigationDestinationChoice(places, checkNotNull(keep))
+                throw NavigationDestinationChoice(places, checkNotNull(keep), requestedNewTask)
             }
         }
         val keptIds = checkNotNull(keep)
+        val tentativeNewTask = requestedNewTask ?: previousNewTask?.takeIf { it.id in keptIds }
+        val retainedOld = retainedNavigationTasks(oldTasks, JSONObject(previous.resultJson), keptIds)
+        check(retainedOld.size + (if (tentativeNewTask == null) 0 else 1) <= 6) {
+            "一趟路线最多 6 件事，请先移除一件。"
+        }
         val effectiveDestination = target?.json() ?: proposed?.getJSONObject("destination") ?: old.getJSONObject("destination")
-        check(effectiveDestination.toString() != old.getJSONObject("destination").toString() || keptIds != active.map { it.id }.toSet()) { "这条指令没有改变当前路线。" }
+        check(effectiveDestination.toString() != old.getJSONObject("destination").toString() ||
+            keptIds != existing.map { it.id }.toSet() || requestedNewTask != null || tentativeNewTask != null) {
+            "这条指令没有改变当前路线。"
+        }
         val body = JSONObject(previous.requestJson)
             .put("destination", effectiveDestination)
             .put("origin", assistantOrigin().json())
             .put("departure", OffsetDateTime.now().toString()).put("allow_partial", false)
-            .put("tasks", JSONArray((0 until oldTasks.length()).map { oldTasks.getJSONObject(it) }.filter { it.getString("id") in keptIds }))
+            .put("tasks", JSONArray(retainedOld + listOfNotNull(tentativeNewTask?.json())))
         val route = Api(server).plan(body)
         check(savedTrip == previous) { "行程已变化，请重新提出调整。" }
-        memory.proposedBody = body
-        memory.record("assistant", "待确认方案：终点${body.getJSONObject("destination").getString("name")}；保留事项：" + active.filter { it.id in keptIds }.joinToString("、") { it.title })
-        return NavigationChange(previous, body, route, active)
+        val newTask = tentativeNewTask?.let { task ->
+            val stops = route.getJSONArray("stops")
+            val stop = (0 until stops.length()).map { stops.getJSONObject(it) }.firstOrNull { stop ->
+                val ids = stop.getJSONArray("task_ids")
+                (0 until ids.length()).any { ids.getString(it) == task.id }
+            } ?: error("没有找到新增事项的实际停靠点，请重试。")
+            task.copy(placeJson = stop.getJSONObject("place").toString())
+        }
+        if (newTask != null) {
+            val tasksInBody = body.getJSONArray("tasks")
+            for (index in 0 until tasksInBody.length()) {
+                if (tasksInBody.getJSONObject(index).getString("id") == newTask.id)
+                    tasksInBody.put(index, newTask.json())
+            }
+        }
+        memory.setProposal(body, newTask)
+        memory.record("assistant", "待确认方案：终点${effectiveDestination.getString("name")}；停靠点：" +
+            (0 until route.getJSONArray("stops").length()).joinToString("、") {
+                route.getJSONArray("stops").getJSONObject(it).getJSONObject("place").getString("name")
+            })
+        return NavigationChange(previous, body, route, existing, newTask)
+    }
+
+    internal suspend fun recalculateNavigationProposal(): NavigationChange {
+        check(!busy && !updatingTrip && !editingPlan) { "行程正在更新，请稍后重试。" }
+        val previous = savedTrip ?: error("没有正在进行的行程。")
+        val memory = navigationConversation
+        val proposed = memory.proposedBody ?: error("没有待恢复的方案。")
+        val ids = proposed.getJSONArray("tasks")
+        val pending = memory.pendingNewTask
+        val existing = (0 until ids.length()).mapNotNull { index ->
+            val id = ids.getJSONObject(index).getString("id")
+            if (id == pending?.id) null else dao.get(id)
+        }
+        check(existing.all { it.status == "pending" } && existing.size + (if (pending == null) 0 else 1) == ids.length()) {
+            "待办已经变化，请重新提出调整。"
+        }
+        val body = JSONObject(proposed.toString()).put("origin", assistantOrigin().json())
+            .put("departure", OffsetDateTime.now().toString())
+        val route = Api(server).plan(body)
+        check(savedTrip == previous) { "行程已变化，请重新提出调整。" }
+        memory.setProposal(body, pending)
+        memory.record("assistant", "已重新计算待确认方案，请检查路线后再确认。")
+        return NavigationChange(previous, body, route, existing, pending)
     }
 
     internal suspend fun confirmNavigationChange(change: NavigationChange) {
@@ -392,12 +551,13 @@ class AppViewModel internal constructor(application: Application, private val da
                 database.withTransaction {
                     trips.record(RouteHistory(sessionId = stored.sessionId, state = NavigationState.REPLANNING.name,
                         timestamp = System.currentTimeMillis(), requestJson = change.previous.requestJson, resultJson = change.previous.resultJson))
+                    change.addedTask?.let { dao.save(it) }
                     trips.save(stored)
                 }
                 savedTrip = stored; result = change.route
                 navigationMemoryTrip = stored
                 navigationMemory.invalidatePreview()
-                navigationMemory.proposedBody = null
+                navigationMemory.setProposal(null, null)
                 navigationMemory.record("assistant", "用户已确认，路线已更新。终点：${change.body.getJSONObject("destination").getString("name")}")
                 origin = Place.from(change.body.getJSONObject("origin"))
                 destination = Place.from(change.body.getJSONObject("destination"))
@@ -440,14 +600,19 @@ class AppViewModel internal constructor(application: Application, private val da
                         val previous = savedTrip
                         val stored = SavedTrip(requestJson = body.toString(), resultJson = response.toString(),
                             sessionId = previous?.sessionId ?: java.util.UUID.randomUUID().toString())
+                        val plannedEvent = RouteHistory(sessionId = stored.sessionId,
+                            state = NavigationState.READY.name, timestamp = stored.plannedAt,
+                            requestJson = stored.requestJson, resultJson = stored.resultJson)
                         database.withTransaction {
                             if (previous != null) trips.record(RouteHistory(sessionId = previous.sessionId,
                                 state = NavigationState.REPLANNING.name, timestamp = System.currentTimeMillis(),
                                 requestJson = previous.requestJson, resultJson = previous.resultJson))
                             trips.save(stored)
+                            trips.record(plannedEvent)
                         }
                         if (revision == requestRevision) {
                             savedTrip = stored; result = response; tripStarted = false
+                            lastPlannedHistoryId = plannedEvent.id
                             draftBackup = null; editingPlan = false
                             onPlanned?.invoke(response)
                         }

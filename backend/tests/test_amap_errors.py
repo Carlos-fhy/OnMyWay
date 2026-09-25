@@ -62,3 +62,17 @@ def test_unknown_error_does_not_echo_arbitrary_fields():
         provider._get('/v4/direction/bicycling', {})
     assert '未知' in str(error.value)
     assert 'secret' not in str(error.value)
+
+
+
+def test_nearby_fetches_full_first_page_without_exposing_key():
+    urls = []
+    def respond(request):
+        urls.append(request.url)
+        return httpx.Response(200, json={'status': '1', 'pois': []})
+    provider = Amap('secret', 0, httpx.MockTransport(respond))
+    from backend.models import Place
+    center = Place(id='school', name='school', longitude=120.576480, latitude=31.249126)
+    assert provider.nearby('supermarket|convenience store', center) == []
+    assert len(urls) == 1
+    assert urls[0].params['offset'] == '25'
