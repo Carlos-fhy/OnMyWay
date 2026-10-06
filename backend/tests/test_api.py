@@ -1,3 +1,4 @@
+import asyncio
 import httpx
 import pytest
 from fastapi.testclient import TestClient
@@ -9,6 +10,17 @@ from backend.models import Place
 
 ORIGIN = Place(id="a", name="a", longitude=110, latitude=30)
 END = Place(id="b", name="b", longitude=110.01, latitude=30)
+
+
+def test_remote_client_cannot_reach_paid_or_health_endpoints():
+    async def call():
+        transport = httpx.ASGITransport(app=app, client=("198.51.100.7", 12345))
+        async with httpx.AsyncClient(transport=transport, base_url="http://local") as client:
+            return await client.get("/health"), await client.post("/assistant/chat", json={})
+
+    health, assistant = asyncio.run(call())
+    assert health.status_code == 403
+    assert assistant.status_code == 403
 
 
 @pytest.mark.parametrize("mode,payload,path", [

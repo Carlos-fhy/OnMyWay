@@ -18,6 +18,7 @@ private data class ArchiveRoute(
     val request: JSONObject,
     val result: JSONObject,
     val event: RouteHistory?,
+    val planId: String = event?.planId.orEmpty(),
 )
 
 private fun routeLabel(state: String): String = when (state) {
@@ -41,6 +42,17 @@ internal fun RouteArchiveSheet(
     var events by remember { mutableStateOf<List<RouteHistory>?>(null) }
     var loadError by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<ArchiveRoute?>(null) }
+    var showVersions by remember { mutableStateOf(false) }
+    var versions by remember { mutableStateOf<List<RouteHistory>>(emptyList()) }
+    var versionsError by remember { mutableStateOf(false) }
+    LaunchedEffect(selected?.sessionId, showVersions) {
+        versions = emptyList(); versionsError = false
+        if (showVersions) selected?.let { route ->
+            try { versions = vm.routeVersions(route.sessionId, route.planId).distinctBy { it.requestJson to it.resultJson } }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) { versionsError = true }
+        }
+    }
     var missingLinkedRoute by remember { mutableStateOf(false) }
     LaunchedEffect(initialEventId) {
         if (initialEventId != null) {
@@ -61,9 +73,9 @@ internal fun RouteArchiveSheet(
     }
     val current = vm.routeSession?.let { session ->
         runCatching { ArchiveRoute(session.id, session.plannedAt, session.state.name,
-            JSONObject(session.requestJson), JSONObject(session.routeJson), null) }.getOrNull()
+            JSONObject(session.requestJson), JSONObject(session.routeJson), null, vm.planningBase()?.planId.orEmpty()) }.getOrNull()
     }
-    val past = events.orEmpty().distinctBy { it.sessionId }.filter { it.sessionId != current?.sessionId }
+    val past = events.orEmpty().distinctBy { it.planId.ifBlank { it.sessionId } }.filter { it.sessionId != current?.sessionId && (it.planId.isBlank() || it.planId != current?.planId) }
         .mapNotNull { event ->
             runCatching { ArchiveRoute(event.sessionId, event.timestamp, event.state,
                 JSONObject(event.requestJson), JSONObject(event.resultJson), event) }.getOrNull()
@@ -95,7 +107,7 @@ internal fun RouteArchiveSheet(
                 }
             } else {
                 val route = checkNotNull(selected)
-                TextButton(onClick = { selected = null }) { Text("返回路线记录") }
+                TextButton(onClick = { selected = null; showVersions = false }) { Text("返回路线记录") }
                 Text(route.request.optJSONObject("destination")?.optString("name").orEmpty(), style = MaterialTheme.typography.headlineSmall)
                 Text("${displayTimestamp(route.timestamp)} · ${routeLabel(route.state)}",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -110,6 +122,19 @@ internal fun RouteArchiveSheet(
                 }
                 if (route.result.optJSONArray("legs") != null && route.result.optJSONObject("origin") != null &&
                     route.result.optJSONObject("destination") != null && stops != null) RouteMapPreview(route.result)
+                TextButton({ showVersions = !showVersions }) {
+                    Text(if (showVersions) "收起修改记录" else "查看修改记录")
+                }
+                if (showVersions) {
+                    if (versionsError) Text("修改记录读取失败，请收起后重试。", color = MaterialTheme.colorScheme.error)
+                    versions.forEach { event ->
+                        TextButton({
+                            selected = ArchiveRoute(event.sessionId, event.timestamp, event.state,
+                                JSONObject(event.requestJson), JSONObject(event.resultJson), event)
+                        }) { Text(displayTimestamp(event.timestamp) + " · " +
+                            JSONObject(event.requestJson).optJSONObject("destination")?.optString("name").orEmpty()) }
+                    }
+                }
                 if (route.event == null) {
                     Button(onClick = { dismiss(); openCurrent() }, enabled = vm.result != null && !vm.editingPlan) { Text("查看当前路线") }
                 } else {

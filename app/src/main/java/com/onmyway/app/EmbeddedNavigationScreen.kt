@@ -3,6 +3,14 @@ package com.onmyway.app
 import android.Manifest
 import android.content.Intent
 import android.content.Context
+import androidx.room.withTransaction
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.CancellationException
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -37,18 +45,26 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 
 @Composable
-internal fun EmbeddedNavigationScreen(mode: String, destination: Place, via: List<Place>, onExit: (Boolean) -> Unit) {
+internal fun EmbeddedNavigationScreen(sessionId: String, mode: String, destination: Place, via: List<Place>, onStarted: () -> Unit, onExit: (Boolean) -> Unit) {
     val context = LocalContext.current
     val owner = LocalLifecycleOwner.current
     val hostView = LocalView.current
     val exit by rememberUpdatedState(onExit)
     var confirmExit by remember { mutableStateOf(false) }
-    val controller = remember(mode, destination, via) { NavigationController(context, mode, destination, via) { confirmExit = true } }
+    val started by rememberUpdatedState(onStarted)
+    val controller = remember(sessionId, mode, destination, via) {
+        NavigationRuntime.obtain(context, sessionId, mode, destination, via)
+    }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         controller.permissionResult()
     }
+    var notificationAllowed by remember { mutableStateOf(notificationsAllowed(context)) }
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        notificationAllowed = notificationsAllowed(context)
+    }
     BackHandler { confirmExit = true }
     DisposableEffect(controller, owner) {
+        controller.attach(context, { started() }, { confirmExit = true })
         val previousKeepScreenOn = hostView.keepScreenOn
         hostView.keepScreenOn = true
         if (owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) controller.resume()
@@ -56,7 +72,6 @@ internal fun EmbeddedNavigationScreen(mode: String, destination: Place, via: Lis
             when (event) {
                 Lifecycle.Event.ON_RESUME -> controller.resume()
                 Lifecycle.Event.ON_PAUSE -> controller.pause()
-                Lifecycle.Event.ON_STOP -> controller.stop()
                 else -> Unit
             }
         }
@@ -65,10 +80,19 @@ internal fun EmbeddedNavigationScreen(mode: String, destination: Place, via: Lis
         onDispose {
             owner.lifecycle.removeObserver(observer)
             hostView.keepScreenOn = previousKeepScreenOn
-            controller.destroy()
+            controller.detach()
         }
     }
-    controller.Content { permission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)) }
+    Column(Modifier.fillMaxSize()) {
+        if (android.os.Build.VERSION.SDK_INT >= 33 && !notificationAllowed) {
+            TextButton({ notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS) }) {
+                Text("允许导航通知，方便锁屏后返回导航")
+            }
+        }
+        Box(Modifier.weight(1f)) {
+            controller.Content { permission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)) }
+        }
+    }
     if (confirmExit) AlertDialog(
         onDismissRequest = { confirmExit = false },
         title = { Text(if (controller.arrived) "确认到达终点？" else "结束本次导航？") },
@@ -78,22 +102,38 @@ internal fun EmbeddedNavigationScreen(mode: String, destination: Place, via: Lis
     )
 }
 
-private class NavigationController(
+internal class NavigationController(
     private val context: Context,
+    val sessionId: String,
     private val mode: String,
     private val destination: Place,
     private val via: List<Place>,
-    private val onExit: () -> Unit,
 ) {
+    val runId = java.util.UUID.randomUUID().toString()
+    var serviceLease = 0L
+        private set
+    private var engineStartIssued = false
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var startCommit: Job? = null
+    private var originRequest: Job? = null
+    private var originMeasuredAt = 0L
+    private var onStarted: () -> Unit = {}
+    private var onExit: () -> Unit = {}
+    private var viewContext: Context? = null
+    var phase by mutableStateOf(NavigationPhase.PREPARING)
+        private set
+    val needsService get() = phase.needsService
+    private fun transition(event: NavigationEvent) { phase = navigationTransition(phase, event) }
+    fun matches(id: String, travelMode: String, end: Place, stops: List<Place>) =
+        sessionId == id && mode == travelMode && destination == end && via == stops
     private var disposed = false
     private var engine: AMapNavi? = null
     private var view by mutableStateOf<AMapNaviView?>(null)
     private var status by mutableStateOf("准备导航")
-    private var ready by mutableStateOf(false)
-    private var running by mutableStateOf(false)
-    var arrived by mutableStateOf(false)
-        private set
-    private var calculating by mutableStateOf(false)
+    private val ready get() = phase in setOf(NavigationPhase.READY, NavigationPhase.PAUSED)
+    private val running get() = phase in setOf(NavigationPhase.NAVIGATING, NavigationPhase.REPLANNING)
+    val arrived get() = phase == NavigationPhase.ARRIVED
+    private val calculating get() = phase in setOf(NavigationPhase.CALCULATING, NavigationPhase.REPLANNING)
     private var consent by mutableStateOf(false)
     private var hasPermission by mutableStateOf(false)
     private var initialized = false
@@ -105,11 +145,37 @@ private class NavigationController(
     private var foreground = false
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
     private val timeout = Runnable {
-        if (calculating) { calculating = false; status = "算路超时，请检查网络后重试" }
+        if (calculating || phase == NavigationPhase.STARTING) serviceFailed("导航准备超时，请检查网络后重试")
     }
     private val listener = object : SimpleNaviListener() {
-        override fun onInitNaviSuccess() { initialized = true; if (view != null) calculate() }
-        override fun onInitNaviFailure() { calculating = false; status = "导航初始化失败，请检查 Android Key" }
+        override fun onInitNaviSuccess() { if (!disposed) { initialized = true; handler.post { if (!disposed) calculate() } } }
+        override fun onInitNaviFailure() { if (!disposed) serviceFailed("导航初始化失败，请检查 Android Key") }
+        override fun onStartNavi(type: Int) {
+            if (disposed || phase != NavigationPhase.STARTING) return
+            if (startCommit != null) return
+            startCommit = scope.launch {
+                try {
+                    val database = TaskDatabase.get(context)
+                    database.withTransaction {
+                        val trip = database.trips().load()
+                        check(trip != null && trip.sessionId == sessionId) { "导航方案已变化" }
+                        val opened = trip.copy(started = true,
+                            startedAt = trip.startedAt.takeIf { it > 0 } ?: System.currentTimeMillis())
+                        database.trips().save(opened)
+                        if (!trip.started) database.trips().record(RouteHistory(sessionId = sessionId, planId = trip.planId,
+                            state = NavigationState.NAVIGATION_OPENED.name, timestamp = opened.startedAt,
+                            requestJson = trip.requestJson, resultJson = trip.resultJson))
+                    }
+                    if (!disposed && phase == NavigationPhase.STARTING) {
+                        handler.removeCallbacks(timeout)
+                        transition(NavigationEvent.SDK_STARTED)
+                        status = "导航中 · 请留意实际道路"
+                        onStarted()
+                    }
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { serviceFailed("导航状态保存失败，已停止导航，请重试") }
+            }
+        }
         @Deprecated("SDK compatibility callback")
         override fun onCalculateRouteSuccess(ids: IntArray?) { routeReady() }
         override fun onCalculateRouteSuccess(result: AMapCalcRouteResult?) { routeReady() }
@@ -128,11 +194,19 @@ private class NavigationController(
         override fun onGetNavigationText(type: Int, text: String?) { if (!text.isNullOrBlank()) { instruction = text; spokenInstruction = true } }
         override fun onManeuverInfoUpdate(type: Int, bitmap: android.graphics.Bitmap?) { turnIcon = bitmap }
         override fun onArriveDestination() {
-            engine?.stopNavi(); running = false; ready = false; arrived = true
+            if (disposed || !running) return
+            transition(NavigationEvent.ARRIVE)
+            stopEngine()
+            stopService()
             status = "已到达终点，请确认到达"
         }
         override fun onGpsSignalWeak(weak: Boolean) { if (weak && running) status = "定位信号较弱，请留意实际道路" }
-        override fun onReCalculateRouteForYaw() { status = "正在重新计算路线" }
+        override fun onReCalculateRouteForYaw() {
+            if (disposed || !running) return
+            transition(NavigationEvent.REPLAN)
+            status = "正在重新计算路线"
+            handler.removeCallbacks(timeout); handler.postDelayed(timeout, 30_000)
+        }
     }
     private val viewListener = object : AMapNaviViewListener {
         override fun onNaviCancel() { onExit() }
@@ -202,15 +276,12 @@ private class NavigationController(
                             if (calculating) LinearProgressIndicator(Modifier.fillMaxWidth())
                             Button({
                                 when {
-                                    running -> { startRequested = false; engine?.stopNavi(); running = false; status = "导航已暂停" }
-                                    ready -> {
-                                        running = engine?.startNavi(NaviType.GPS) == true
-                                        status = if (running) "导航中 · 请留意实际道路" else "导航启动失败，请重试"
-                                    }
+                                    running -> pauseNavigation()
+                                    ready -> startNavigation()
                                     else -> if (engine == null) initialize() else calculate()
                                 }
-                            }, enabled = !calculating, modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-                                Text(if (running) "暂停导航" else if (ready) "开始导航" else "重新算路")
+                            }, enabled = !calculating && phase != NavigationPhase.STARTING, modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                                Text(if (phase == NavigationPhase.STARTING) "正在启动…" else if (running) "暂停导航" else if (phase == NavigationPhase.PAUSED) "重新定位并继续" else if (ready) "开始导航" else "重新算路")
                             }
                         }
                     }
@@ -228,7 +299,11 @@ private class NavigationController(
     }
 
     private fun initialize() {
-        if (engine != null || !consent || !hasPermission) return
+        if (!consent || !hasPermission) return
+        if (engine != null) {
+            if (initialized && phase == NavigationPhase.FAILED) calculate()
+            return
+        }
         try {
             MapsInitializer.updatePrivacyShow(context, true, true)
             MapsInitializer.updatePrivacyAgree(context, true)
@@ -236,46 +311,61 @@ private class NavigationController(
                 it.setUseInnerVoice(true)
                 it.addAMapNaviListener(listener)
             }
-            view = AMapNaviView(context).also {
-                it.viewOptions = it.viewOptions.apply { setLayoutVisible(false) }
-                it.setAMapNaviViewListener(viewListener)
-                it.onCreate(null)
-                it.setOnMapLoadedListener { drawRoute() }
-                if (foreground) it.onResume()
-            }
+            createView()
             if (initialized) calculate()
-        } catch (_: Exception) { status = "导航初始化失败，请检查配置后返回重试" }
+        } catch (_: Exception) { serviceFailed("导航初始化失败，请检查配置后返回重试") }
     }
 
     private fun calculate() {
         val navi = engine ?: return
         if (calculating) return
-        navi.stopNavi(); running = false; ready = false; arrived = false; calculating = true
-        status = "正在从当前位置计算路线"
-        handler.removeCallbacks(timeout); handler.postDelayed(timeout, 30_000)
-        fun Place.poi() = NaviPoi(name, LatLng(latitude, longitude), id.takeIf { it.startsWith("B") })
-        val accepted = try {
-            if (via.isEmpty()) {
-                val end = NaviLatLng(destination.latitude, destination.longitude)
-                if (mode == "walking") navi.calculateWalkRoute(end) else navi.calculateRideRoute(end)
-            } else {
-                if (mode == "walking") navi.calculateWalkRoute(null, via.map { it.poi() }, destination.poi(), TravelStrategy.SINGLE)
-                else navi.calculateRideRoute(null, via.map { it.poi() }, destination.poi(), TravelStrategy.SINGLE)
+        if (needsService || disposed) return
+        stopEngine()
+        startRequested = true
+        transition(NavigationEvent.CALCULATE)
+        status = "正在获取当前位置"
+        originRequest = scope.launch {
+            val origin = try {
+                val fix = readCurrentLocation(context)
+                originMeasuredAt = fix.elapsedRealtimeNanos / 1_000_000L
+                com.amap.api.maps.CoordinateConverter(context)
+                    .from(com.amap.api.maps.CoordinateConverter.CoordType.GPS)
+                    .coord(LatLng(fix.latitude, fix.longitude)).convert()
+            } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+                serviceFailed("定位超时，请开启精确位置并到信号较好的地方重试")
+                return@launch
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                serviceFailed(e.message ?: "无法获取当前位置，请检查定位后重试")
+                return@launch
             }
-        } catch (_: Exception) { false }
-        if (!accepted) routeFailed(-1)
+            if (disposed || phase != NavigationPhase.CALCULATING) return@launch
+            originRequest = null
+            status = "正在从当前位置计算路线"
+            handler.removeCallbacks(timeout); handler.postDelayed(timeout, 30_000)
+            fun Place.poi() = NaviPoi(name, LatLng(latitude, longitude), id.takeIf { it.startsWith("B") })
+            val accepted = try {
+                if (via.isEmpty()) {
+                    val start = NaviLatLng(origin.latitude, origin.longitude)
+                    val end = NaviLatLng(destination.latitude, destination.longitude)
+                    if (mode == "walking") navi.calculateWalkRoute(start, end) else navi.calculateRideRoute(start, end)
+                } else {
+                    val start = NaviPoi("当前位置", origin, null)
+                    if (mode == "walking") navi.calculateWalkRoute(start, via.map { it.poi() }, destination.poi(), TravelStrategy.SINGLE)
+                    else navi.calculateRideRoute(start, via.map { it.poi() }, destination.poi(), TravelStrategy.SINGLE)
+                }
+            } catch (_: Exception) { false }
+            if (!accepted) routeFailed(-1)
+        }
     }
 
     private fun routeReady() {
-        if (disposed) return
+        if (disposed || !calculating) return
         handler.removeCallbacks(timeout)
-        calculating = false; ready = true
-        if (startRequested && foreground) {
-            startRequested = false
-            running = engine?.startNavi(NaviType.GPS) == true
-            status = if (running) "导航中 · 请留意实际道路" else "导航启动失败，请重试"
-        }
-        if (!running) {
+        transition(NavigationEvent.ROUTE_READY)
+        if (startRequested && foreground) startNavigation(checkFreshness = false)
+        if (ready) {
             status = "路线已就绪" + if (via.isEmpty()) "" else " · 途经 ${via.size} 站"
             view?.displayOverview()
         }
@@ -292,24 +382,121 @@ private class NavigationController(
     }
 
     private fun routeFailed(code: Int) {
-        if (disposed) return
-        handler.removeCallbacks(timeout)
-        calculating = false; ready = false
-        status = "算路失败（$code），请检查网络和导航权限" + if (via.isEmpty()) "" else "，包括途经点权限"
+        if (disposed || !calculating) return
+        val reason = when (code) {
+            3 -> "起点无效，请重新定位后重试"
+            6 -> "终点无效，请重新选择目的地"
+            10 -> "起点附近没有可通行道路，请调整位置后重试"
+            11 -> "没有找到通向终点的道路，请调整目的地"
+            12, 21 -> "途经点无法通行，请调整途经点"
+            13, 22 -> "导航授权校验失败，请检查 Android Key、包名和签名配置"
+            else -> "算路失败，请检查网络后重试"
+        }
+        serviceFailed("$reason（$code）")
     }
 
-    fun resume() { foreground = true; view?.onResume() }
-    fun pause() { view?.onPause() }
-    fun stop() {
-        foreground = false
+    private fun startNavigation(checkFreshness: Boolean = true) {
+        if (!ready || !foreground || disposed) return
+        if (checkFreshness && requiresFreshNavigationRoute(phase,
+                android.os.SystemClock.elapsedRealtime() - originMeasuredAt)) {
+            calculate()
+            return
+        }
+        if (!hasLocationPermission(context)) {
+            serviceFailed("位置权限已关闭，请重新允许后重试")
+            hasPermission = false
+            return
+        }
         startRequested = false
-        if (running) { engine?.stopNavi(); running = false; status = "导航已暂停" }
+        transition(NavigationEvent.START)
+        serviceLease++
+        engineStartIssued = false
+        startCommit = null
+        status = "正在启动导航"
+        handler.removeCallbacks(timeout); handler.postDelayed(timeout, 15_000)
+        try {
+            androidx.core.content.ContextCompat.startForegroundService(context,
+                Intent(context, NavigationService::class.java).putExtra("run_id", runId).putExtra("lease", serviceLease))
+        } catch (_: Exception) { serviceFailed("无法启动后台导航，请返回前台并检查定位权限后重试") }
+    }
+
+    fun serviceReady() {
+        if (disposed || phase != NavigationPhase.STARTING || engineStartIssued) return
+        engineStartIssued = true
+        val accepted = runCatching { engine?.startNavi(NaviType.GPS) == true }.getOrDefault(false)
+        if (!accepted) serviceFailed("导航启动失败，请重试")
+        // Only onStartNavi confirms that navigation actually began.
+    }
+    fun serviceFailed(reason: String) {
+        if (disposed) return
+        handler.removeCallbacks(timeout)
+        transition(NavigationEvent.FAIL)
+        startRequested = false
+        stopEngine()
+        stopService()
+        status = reason
+    }
+    private fun pauseNavigation() {
+        transition(NavigationEvent.PAUSE)
+        startRequested = false
+        handler.removeCallbacks(timeout)
+        stopEngine()
+        stopService()
+        status = "导航已暂停，继续时将从当前位置重新算路"
+    }
+    private fun stopEngine() {
+        originRequest?.cancel(); originRequest = null
+        startCommit?.cancel(); startCommit = null
+        runCatching { engine?.stopNavi() }
+        runCatching { engine?.stopGPS() }
+    }
+    private fun stopService() { serviceLease++; context.stopService(Intent(context, NavigationService::class.java)) }
+
+    fun attach(activityContext: Context, started: () -> Unit, exit: () -> Unit) {
+        viewContext = activityContext
+        onStarted = started
+        onExit = exit
+        if (engine != null) createView()
+        if (running) onStarted()
+    }
+    private fun createView() {
+        val activityContext = viewContext ?: return
+        if (view != null) return
+        view = AMapNaviView(activityContext).also {
+            it.viewOptions = it.viewOptions.apply { setLayoutVisible(false) }
+            it.setAMapNaviViewListener(viewListener)
+            it.onCreate(null)
+            it.setOnMapLoadedListener { drawRoute() }
+            if (foreground) it.onResume()
+        }
+    }
+    fun resume() {
+        foreground = true
+        view?.onResume()
+        if (needsService && !hasLocationPermission(context)) {
+            hasPermission = false
+            serviceFailed("位置权限已关闭，导航已停止，请允许定位后重试")
+        }
+        if (startRequested && ready) startNavigation()
+    }
+    fun pause() { foreground = false; view?.onPause() }
+    fun detach() {
+        foreground = false
+        routeLine?.remove(); routeLine = null
+        view?.onPause(); view?.onDestroy(); view = null
+        viewContext = null
+        onStarted = {}; onExit = {}
+        if (disposed && (NavigationRuntime.current == null || NavigationRuntime.current === this)) AMapNavi.destroy()
     }
     fun destroy() {
+        if (disposed) return
         disposed = true
+        scope.cancel()
+        transition(NavigationEvent.CLOSE)
         handler.removeCallbacksAndMessages(null)
-        engine?.stopNavi(); engine?.removeAMapNaviListener(listener)
-        view?.onPause(); view?.onDestroy()
-        if (engine != null) AMapNavi.destroy()
+        stopEngine()
+        engine?.removeAMapNaviListener(listener)
+        stopService()
+        if (view == null) AMapNavi.destroy()
     }
 }

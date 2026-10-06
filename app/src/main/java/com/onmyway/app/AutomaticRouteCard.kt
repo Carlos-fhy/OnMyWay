@@ -17,15 +17,17 @@ internal fun AutomaticRouteCard(auto: AutomaticRoutePlanner, vm: AppViewModel, r
     var details by remember { mutableStateOf(false) }
     var editingBudget by remember { mutableStateOf(false) }
     var customBudget by remember { mutableStateOf("") }
+    var directBecauseDetour by remember(auto.preview) { mutableStateOf(false) }
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest)) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (auto.busy || vm.busy) {
                 LinearProgressIndicator(Modifier.fillMaxWidth())
                 Text(if (vm.busy) "正在确认并更新行程…" else auto.stage, style = MaterialTheme.typography.bodyMedium)
             }
-            auto.choices.forEach { place ->
+            if (auto.choices.isNotEmpty()) Text(clarificationPrompt("DESTINATION"))
+            auto.choices.forEachIndexed { index, place ->
                 OutlinedButton({ auto.choose(vm, place) }, enabled = !auto.busy && !vm.busy, modifier = Modifier.fillMaxWidth()) {
-                    Column { Text(place.name); if (place.address.isNotBlank()) Text(place.address, style = MaterialTheme.typography.bodySmall) }
+                    Column { Text("${index + 1}. ${place.name}"); if (place.address.isNotBlank()) Text(place.address, style = MaterialTheme.typography.bodySmall) }
                 }
             }
             auto.preview?.let { preview ->
@@ -35,7 +37,14 @@ internal fun AutomaticRouteCard(auto: AutomaticRoutePlanner, vm: AppViewModel, r
                 Text("直达约 ${formatDuration(direct.getInt("total_seconds"))}", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
                 Text("${if (direct.getString("mode") == "cycling") "骑行" else "步行"} · ${formatDistance(direct.optInt("total_meters"))} · 返回候选中距离最短", style = MaterialTheme.typography.bodySmall)
                 Text("本次顺路预算 · 最多多花 ${auto.budget} 分钟", style = MaterialTheme.typography.titleSmall)
-                Text("我的常用预算 ${vm.preferredDetourMinutes} 分钟；按实际时间和出行方式调整。", style = MaterialTheme.typography.bodySmall)
+                val budgetSource = if (vm.modeDetourOverride(auto.travelMode) == auto.budget.toInt()) {
+                    "你设定的${if (auto.travelMode == "cycling") "骑行" else "步行"}预算"
+                } else when (auto.budgetGuidance.source) {
+                    GuidanceSource.EXPLICIT -> "你设定的${if (auto.travelMode == "cycling") "骑行" else "步行"}预算"
+                    GuidanceSource.LEARNED -> "根据同种出行方式的 ${auto.budgetGuidance.evidenceCount} 次选择估计"
+                    GuidanceSource.DEFAULT -> "默认预算；积累选择后可按出行方式调整"
+                }
+                Text(budgetSource, style = MaterialTheme.typography.bodySmall)
                 listOf(listOf(5, 10, 15), listOf(20, 30)).forEach { row ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         row.forEach { mins ->
@@ -59,8 +68,8 @@ internal fun AutomaticRouteCard(auto: AutomaticRoutePlanner, vm: AppViewModel, r
                         } }, enabled = customBudget.toIntOrNull()?.let { it in 0..240 } == true) { Text("应用") }
                     }
                 }
-                if (auto.budget.toInt() != vm.preferredDetourMinutes) {
-                    TextButton({ vm.savePreferredDetourMinutes(auto.budget.toInt()) }) { Text("设为我的常用预算") }
+                if (auto.budget.toInt() != vm.modeDetourOverride(auto.travelMode)) {
+                    TextButton({ vm.saveModeDetourOverride(auto.travelMode, auto.budget.toInt()) }) { Text("设为此出行方式的预算") }
                 }
                 if (auto.budgetChanged) {
                     Text("预算已变，助手建议需按新预算重新计算。", style = MaterialTheme.typography.bodySmall)
@@ -115,7 +124,13 @@ internal fun AutomaticRouteCard(auto: AutomaticRoutePlanner, vm: AppViewModel, r
                     }
                 }
                 if (auto.note.isNotBlank()) Text(auto.note, style = MaterialTheme.typography.bodySmall)
-                Button({ auto.accept(vm, auto.selectedIds, accepted) }, enabled = !vm.busy && auto.canConfirm) {
+                if (auto.selectedIds.isEmpty() && suggested != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = directBecauseDetour, onCheckedChange = { directBecauseDetour = it })
+                        Text("这次直达是因为绕路太久（可选，仅用于学习预算）", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                Button({ auto.accept(vm, auto.selectedIds, directBecauseDetour, accepted) }, enabled = !vm.busy && auto.canConfirm) {
                     Text(if (auto.selectedIds.isEmpty()) "确认直达" else "确认所选 ${auto.selectedIds.size} 件事并规划")
                 }
                 Text("按所选事项重新计算组合路线；若超出预算，会提示调整。", style = MaterialTheme.typography.bodySmall)

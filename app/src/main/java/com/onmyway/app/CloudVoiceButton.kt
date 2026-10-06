@@ -37,7 +37,7 @@ private class ShortRecording(private val context: Context) {
     @Volatile private var failed = false
     @android.annotation.SuppressLint("MissingPermission")
     fun start() {
-        cancel()
+        stop()
         output.reset(); failed = false
         val min = android.media.AudioRecord.getMinBufferSize(16000, android.media.AudioFormat.CHANNEL_IN_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT)
         require(min > 0)
@@ -50,16 +50,19 @@ private class ShortRecording(private val context: Context) {
             worker = Thread {
                 val buffer = ByteArray(3200)
                 while (active && output.size() < 960000) {
-                    val count = recording.read(buffer, 0, minOf(buffer.size, 960000 - output.size()))
+                    val count = try {
+                        recording.read(buffer, 0, minOf(buffer.size, 960000 - output.size()))
+                    } catch (_: Exception) { if (active) failed = true; break }
+                    if (!active) break
                     if (count > 0) output.write(buffer, 0, count)
-                    else { if (active) failed = true; break }
+                    else { failed = true; break }
                 }
             }.also { it.start() }
         } catch (e: Exception) { cancel(); throw e }
     }
     fun finish(): ByteArray {
         stop()
-        check(!failed && output.size() >= 6400)
+        check(!failed && output.size() >= 6400) { "录音太短或录音失败，请重新说一次。" }
         val pcm = output.toByteArray()
         output.reset()
         return java.nio.ByteBuffer.allocate(44 + pcm.size).order(java.nio.ByteOrder.LITTLE_ENDIAN).apply {
@@ -70,11 +73,22 @@ private class ShortRecording(private val context: Context) {
     }
     private fun stop() {
         active = false
-        runCatching { recorder?.stop() }
-        worker?.join(1000)
-        recorder?.release(); recorder = null; worker = null
+        val microphone = recorder
+        val thread = worker
+        runCatching { microphone?.stop() }
+        thread?.join(300)
+        // Releasing the recorder unblocks a stalled read. Never read or reset
+        // the byte buffer until the writer has actually terminated.
+        runCatching { microphone?.release() }
+        recorder = null
+        if (thread?.isAlive == true) thread.join(700)
+        check(thread?.isAlive != true) { "录音设备仍在停止，请重试。" }
+        worker = null
     }
-    fun cancel() { stop(); output.reset() }
+    fun cancel() {
+        runCatching { stop() }
+        if (worker?.isAlive != true) output.reset()
+    }
 }
 
 @Composable
@@ -112,7 +126,9 @@ internal fun CloudVoiceButton(server: String, enabled: Boolean, result: (String)
         if (!recording) return
         recording = false
         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-        val bytes = try { recordingDevice.finish() } catch (_: Exception) { onFailure("录音太短，请重新说一次。"); return }
+        val bytes = try { recordingDevice.finish() } catch (e: Exception) {
+            onFailure(e.message ?: "录音失败，请重新说一次。"); return
+        }
         processing = true
         job = scope.launch {
             try { onResult(Api(server).transcribe(bytes)) }

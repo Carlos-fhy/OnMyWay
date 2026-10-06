@@ -52,3 +52,6 @@ Thumbs.db
 # Local screen captures from device debugging
 /current-screen*.png
 /current-screen*.jpg
+
+# Local PC backups contain private tasks, trips and conversation history.
+/backend/data/

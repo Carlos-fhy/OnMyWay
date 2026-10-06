@@ -4,6 +4,8 @@ import json
 import os
 import io
 import wave
+from uuid import UUID
+from .harness import propose
 from datetime import datetime
 from typing import Literal
 
@@ -21,6 +23,7 @@ class NavigationTask(BaseModel):
 
 
 class NavigationRequest(BaseModel):
+    request_id: UUID | None = None
     text: str = Field(min_length=1, max_length=4000)
     destination: str = Field(max_length=200)
     tasks: list[NavigationTask] = Field(max_length=6)
@@ -49,6 +52,15 @@ class NavigationIntent(BaseModel):
 
 @router.post('/assistant/navigation', response_model=NavigationIntent)
 def navigation(body: NavigationRequest):
+    if body.request_id is None:
+        return _navigation(body)
+    result = propose(str(body.request_id), "navigation",
+                     body.model_dump(mode="json", exclude={"request_id"}),
+                     lambda: _navigation(body).model_dump(mode="json"))
+    return NavigationIntent.model_validate(result)
+
+
+def _navigation(body: NavigationRequest):
     schema = json.dumps(NavigationIntent.model_json_schema(), ensure_ascii=False)
     prompt = f'''你理解正在导航中的路线调整。只输出符合 schema 的 JSON：{schema}。
 输入提供当前终点和当前未完成任务。任务 id 只能从输入选择。不要创建任务、标记完成、编造地点或坐标。
@@ -87,6 +99,7 @@ class Message(BaseModel):
 
 
 class ChatRequest(BaseModel):
+    request_id: UUID | None = None
     messages: list[Message] = Field(min_length=1, max_length=20)
     now: datetime
     route_active: bool = False
@@ -130,6 +143,15 @@ def completion(messages, model, structured=False):
 
 @router.post('/assistant/chat', response_model=Proposal)
 def chat(body: ChatRequest):
+    if body.request_id is None:
+        return _chat(body)
+    result = propose(str(body.request_id), "chat",
+                     body.model_dump(mode="json", exclude={"request_id"}),
+                     lambda: _chat(body).model_dump(mode="json"))
+    return Proposal.model_validate(result)
+
+
+def _chat(body: ChatRequest):
     schema = json.dumps(Proposal.model_json_schema(), ensure_ascii=False)
     prompt = f'''你是顺路生活助手。现在是{body.now.isoformat()}。当前正在导航={body.route_active}。历史对话中的旧路线不代表仍在导航；当前未导航时，新的出行请求必须重新规划，不能沿用旧路线或旧耗时。只创建待办而没有目的地时，保存后可请用户提供本次目的地。用简短中文回复，只输出符合以下 schema 的 JSON：{schema}。
 你只能提出建议，不能声称已保存、完成或启动。create_task 每次只提出一个任务草稿，用户确认后手机才保存。
@@ -138,7 +160,7 @@ def chat(body: ChatRequest):
 deadline 仅在用户明确表达截止时间且可确定时填含时区 ISO8601，否则留空并在需要时追问；不要把期望办理时间当截止时间。
 list_tasks 用于查看待办，实际列表由手机读取。plan_route 必须有用户表达的目的地名称，不能生成坐标、路线或耗时。
 家、宿舍、学校、公司及用户自定义常用地点（例如快递站、外卖点、东门驿站）都是合法目的地名称，原样放入 destination，手机会匹配常用地点或请用户搜索。
-用户只说一个明确地点名称（例如“苏州科技大学石湖校区图书馆”）也按 plan_route 处理，保留完整名称。不要要求用户先手动定位或勾选待办，手机会自动定位并计算顺路建议。
+用户只说一个明确地点名称（例如“示例大学东校区图书馆”）也按 plan_route 处理，保留完整名称。不要要求用户先手动定位或勾选待办，手机会自动定位并计算顺路建议。
 mode 仅在本次用户明确说步行/走路或骑行/骑自行车时填写 walking/cycling，否则必须留空，由手机询问出行方式，不沿用旧对话的方式。
 例如“我要回宿舍”返回 action=plan_route,destination=宿舍,mode=""；“骑车去图书馆”返回 mode=cycling。如果需要追问而无法生成有效操作，action 必须是 reply，不能返回空字段的 create_task/plan_route。
 对话中的确认不代表此前工具执行成功；以手机给出的真实执行结果为准。当前不支持通过对话删除或完成任务，提示去待办操作。'''

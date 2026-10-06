@@ -132,13 +132,14 @@ internal fun NavigationConversation(vm: AppViewModel, dismiss: () -> Unit) {
     val state = vm.navigationConversation
     var input by state::input
     var busy by remember { mutableStateOf(false) }
+    var progress by remember { mutableStateOf("") }
     var error by remember { mutableStateOf("") }
     var draft by state::draft
     var places by state::places
     var pendingInstruction by state::pendingInstruction
     fun recalculatePending() {
         if (busy) return
-        busy = true; error = ""
+        busy = true; error = ""; progress = "正在重新定位并计算方案"
         scope.launch {
             try { draft = vm.recalculateNavigationProposal() }
             catch (e: CancellationException) { throw e }
@@ -148,7 +149,7 @@ internal fun NavigationConversation(vm: AppViewModel, dismiss: () -> Unit) {
     }
     fun confirm(change: NavigationChange) {
         if (busy) return
-        busy = true; error = ""
+        busy = true; error = ""; progress = "正在保存并更新导航"
         scope.launch {
             try { vm.confirmNavigationChange(change); dismiss() }
             catch (e: CancellationException) { throw e }
@@ -170,9 +171,9 @@ internal fun NavigationConversation(vm: AppViewModel, dismiss: () -> Unit) {
         if (index != null && chosen == null) { error = "没有这个选项，请说列表中的序号。"; return }
         focus.clearFocus()
         val instruction = if (chosen != null && pendingInstruction.isNotBlank()) pendingInstruction else text
-        input = text; error = ""; busy = true
+        input = text; error = ""; busy = true; progress = "正在处理调整"
         scope.launch {
-            try { draft = vm.previewNavigationChange(instruction, chosen); places = emptyList(); state.pendingIds = null }
+            try { draft = vm.previewNavigationChange(instruction, chosen) { progress = it }; places = emptyList(); state.pendingIds = null }
             catch (e: NavigationDestinationChoice) { state.setChoices(e.places, e.keepIds, instruction, e.newTask) }
             catch (e: CancellationException) { throw e }
             catch (e: Exception) { error = networkMessage(e) }
@@ -195,7 +196,10 @@ internal fun NavigationConversation(vm: AppViewModel, dismiss: () -> Unit) {
                 }
                 Button({ send(input) }, modifier = Modifier.heightIn(min = 56.dp), enabled = !busy && input.isNotBlank()) { Text("发送") }
             }
-            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (busy) {
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+                Text(progress, style = MaterialTheme.typography.bodySmall)
+            }
             if (draft == null && state.proposedBody != null) {
                 Text("有一份未确认的调整方案。请重新计算当前位置和路线，检查后再确认。")
                 OutlinedButton(onClick = ::recalculatePending, enabled = !busy) { Text("重新计算上次方案") }

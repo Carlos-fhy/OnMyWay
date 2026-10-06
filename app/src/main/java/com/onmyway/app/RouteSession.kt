@@ -1,10 +1,11 @@
 package com.onmyway.app
 
 /** External navigation launch is observable; actual progress inside Amap is not. */
-enum class NavigationState { IDLE, PLANNING, READY, NAVIGATION_OPENED, REPLANNING, ARRIVED, CANCELLED }
+enum class NavigationState { IDLE, PLANNING, READY, STARTING, NAVIGATING, PAUSED, FAILED, NAVIGATION_OPENED, REPLANNING, ARRIVED, CANCELLED }
 
 data class RouteSession(val id: String, val state: NavigationState, val origin: Place, val destination: Place,
-    val plannedAt: Long, val startedAt: Long, val requestJson: String, val routeJson: String)
+    val plannedAt: Long, val startedAt: Long, val requestJson: String, val routeJson: String,
+    val planId: String = id)
 
 /** Conservative V0.2 command extraction; ambiguous intents never run tools. */
 fun destinationQuery(input: String): String? {

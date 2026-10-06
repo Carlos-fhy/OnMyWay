@@ -8,9 +8,16 @@ import android.location.LocationManager
 import androidx.core.content.ContextCompat
 import androidx.core.location.LocationManagerCompat
 import android.os.CancellationSignal
+import android.os.SystemClock
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
 import kotlin.coroutines.resume
+
+/** A route origin must be recent enough for a moving user and precise enough to price a detour. */
+internal fun usablePlanningFix(ageNanos: Long, accuracyMeters: Float?,
+    maxAgeNanos: Long = 20_000_000_000L, maxAccuracyMeters: Float = 100f): Boolean =
+    ageNanos in 0..maxAgeNanos && accuracyMeters != null &&
+        accuracyMeters.isFinite() && accuracyMeters in 0f..maxAccuracyMeters
 
 fun hasLocationPermission(context: Context): Boolean =
     ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
@@ -31,6 +38,7 @@ suspend fun readCurrentLocation(context: Context): Location {
         return withTimeout(20_000) {
             suspendCancellableCoroutine { continuation ->
                 var remaining = providers.size
+                var hadUnusableFix = false
                 continuation.invokeOnCancellation { signals.forEach { it.cancel() } }
                 providers.forEach { provider ->
                     if (continuation.isActive) {
@@ -38,8 +46,16 @@ suspend fun readCurrentLocation(context: Context): Location {
                         LocationManagerCompat.getCurrentLocation(manager, provider, signal, ContextCompat.getMainExecutor(context)) { location ->
                             if (continuation.isActive) {
                                 remaining--
-                                if (location != null) continuation.resume(location)
-                                else if (remaining == 0) continuation.resumeWith(Result.failure(IllegalStateException("暂时无法获取位置，请到信号较好的地方重试。")))
+                                val usable = location != null && usablePlanningFix(
+                                    SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos,
+                                    location.accuracy.takeIf { location.hasAccuracy() })
+                                if (usable) continuation.resume(location!!)
+                                else {
+                                    hadUnusableFix = hadUnusableFix || location != null
+                                    if (remaining == 0) continuation.resumeWith(Result.failure(IllegalStateException(
+                                        if (hadUnusableFix) "定位已过期或精度不足，请到信号较好的地方重试，或手动选择起点。"
+                                        else "暂时无法获取位置，请到信号较好的地方重试，或手动选择起点。")))
+                                }
                             }
                         }
                     }

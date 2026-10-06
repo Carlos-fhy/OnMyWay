@@ -232,10 +232,8 @@ private fun TripOverview(result: JSONObject, tasks: List<Errand>, vm: AppViewMod
     var changingPlace by remember { mutableStateOf<Errand?>(null) }
     val enabled = !vm.updatingTrip && !vm.busy
     fun launchEmbedded() {
-        vm.launchTrip {
-            onNavigationChanged(true)
-            true
-        }
+        if (vm.planNeedsRefresh && !vm.tripStarted) { vm.beginPlanEdit(); return }
+        onNavigationChanged(true)
     }
     fun launch(place: Place, whole: Boolean) {
         val action = {
@@ -256,12 +254,15 @@ private fun TripOverview(result: JSONObject, tasks: List<Errand>, vm: AppViewMod
         var conversation by remember { mutableStateOf(false) }
         Column(Modifier.fillMaxSize()) {
         Box(Modifier.weight(1f)) {
-        EmbeddedNavigationScreen(result.getString("mode"), destination,
+        EmbeddedNavigationScreen(vm.routeSession?.id.orEmpty(), result.getString("mode"), destination,
             remaining.map { Place.from(it.getJSONObject("place")) }.distinctBy { it.id }
-                .filterNot { it.latitude == destination.latitude && it.longitude == destination.longitude }) {
-            if (vm.finishTrip(it)) onNavigationChanged(false)
+                .filterNot { it.latitude == destination.latitude && it.longitude == destination.longitude },
+            onStarted = vm::embeddedNavigationStarted) { arrived ->
+            vm.finishTrip(arrived) { onNavigationChanged(false) }
         }
         }
+        if (vm.message.isNotBlank()) Text(vm.message, Modifier.padding(horizontal = 16.dp),
+            color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
         TextButton({ conversation = true }, modifier = Modifier.fillMaxWidth()) { Text("和助手调整路线") }
         }
         if (conversation) NavigationConversation(vm) { conversation = false }
@@ -282,6 +283,14 @@ private fun TripOverview(result: JSONObject, tasks: List<Errand>, vm: AppViewMod
                             DropdownMenuItem(text = { Text("使用外部高德") }, onClick = { menu = false; launch(destination, true) })
                             DropdownMenuItem(text = { Text(if (vm.tripStarted) "结束行程" else "清除方案") }, onClick = { menu = false; end = true })
                         }
+                    }
+                }
+            }
+            if (vm.planNeedsRefresh) item {
+                Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.large) {
+                    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("待办有变化，当前路线仍是上次规划结果。", style = MaterialTheme.typography.bodyMedium)
+                        TextButton({ vm.beginPlanEdit() }, enabled = enabled) { Text("检查并重新规划") }
                     }
                 }
             }
@@ -359,7 +368,9 @@ private fun TripOverview(result: JSONObject, tasks: List<Errand>, vm: AppViewMod
                 TextButton({ launch(destination, false) }, enabled = enabled) { Text("只导航到终点") }
             }
         }
-        PlanAction(if (vm.updatingTrip) "正在保存…" else if (vm.tripStarted) "继续导航" else "开始导航", enabled) { launchEmbedded() }
+        PlanAction(if (vm.updatingTrip) "正在保存…" else if (vm.planNeedsRefresh && !vm.tripStarted) "重新规划" else if (vm.tripStarted) "继续导航" else "开始导航", enabled) {
+            if (vm.planNeedsRefresh && !vm.tripStarted) vm.beginPlanEdit() else launchEmbedded()
+        }
     }
     if (cycling != null) AlertDialog(onDismissRequest = { cycling = null }, title = { Text("确认自行车模式") },
         text = { Text("高德可能沿用电动车设置，请确认选择自行车，并检查途经点。") },
