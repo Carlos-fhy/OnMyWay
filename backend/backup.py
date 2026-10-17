@@ -12,9 +12,9 @@ from fastapi import APIRouter, Header, HTTPException, Request
 
 router = APIRouter(prefix="/backup", tags=["backup"])
 MAX_BYTES = 8 * 1024 * 1024
-ROOM_VERSION = 11
+ROOM_VERSION = 12
 LEGACY_ROOM_VERSION = 7
-# Keep this in lockstep with the Room v11 schema. Names are fixed, never user SQL.
+# Keep this in lockstep with the Room v12 schema. Names are fixed, never user SQL.
 TABLE_COLUMNS = {
     "tasks": (
         ("id", "TEXT"), ("title", "TEXT"), ("priority", "INTEGER"),
@@ -23,6 +23,7 @@ TABLE_COLUMNS = {
         ("createdAt", "INTEGER"), ("updatedAt", "INTEGER"),
         ("completedAt", "INTEGER"), ("lastRemindedAt", "INTEGER"),
         ("reminderCount", "INTEGER"), ("reminderPending", "INTEGER"),
+        ("plannedDate", "TEXT"),
     ),
     "saved_trip": (
         ("id", "INTEGER"), ("requestJson", "TEXT"), ("resultJson", "TEXT"),
@@ -74,43 +75,51 @@ TABLE_COLUMNS = {
         ("longitude", "REAL"), ("latitude", "REAL"), ("address", "TEXT"),
         ("position", "INTEGER"),
     ),
+    "assistant_task_drafts": (
+        ("id", "TEXT"), ("planId", "TEXT"), ("position", "INTEGER"),
+        ("version", "INTEGER"), ("title", "TEXT"), ("placeType", "TEXT"),
+        ("deadline", "TEXT"), ("plannedDate", "TEXT"), ("priority", "INTEGER"),
+        ("serviceMinutes", "INTEGER"), ("placeJson", "TEXT"),
+    ),
 
 }
 LEGACY_TABLE_NAMES = tuple(TABLE_COLUMNS)[:5]
 
 
 def _columns_for(version: int) -> dict:
-    if version not in (LEGACY_ROOM_VERSION, 8, 9, 10, ROOM_VERSION):
+    if version not in (LEGACY_ROOM_VERSION, 8, 9, 10, 11, ROOM_VERSION):
         raise HTTPException(409, "Backup was written by an unsupported app version")
     return {
         name: tuple(
             column for column in columns
             if not (column[0] == "draftId" and version < 10)
             and not (column[0] == "planId" and version < 11)
+            and not (column[0] == "plannedDate" and version < 12)
         )
         for name, columns in TABLE_COLUMNS.items()
         if not (version == 7 and name not in LEGACY_TABLE_NAMES)
         and not (version < 9 and name in ("planning_draft", "planning_draft_tasks"))
         and not (version < 11 and name in ("assistant_clarification", "assistant_place_choices"))
+        and not (version < 12 and name == "assistant_task_drafts")
     }
 
 
 def _position_column(name: str) -> str:
-    # The new POI table has its own user-visible candidate order.
-    return "_snapshot_position" if name == "assistant_place_choices" else "position"
+    # Candidate and draft item order are data, separate from snapshot serialization order.
+    return "_snapshot_position" if name in ("assistant_place_choices", "assistant_task_drafts") else "position"
 
 
 def _ensure_added_columns(db: sqlite3.Connection, table: str, columns: tuple) -> None:
     """Upgrade known additive columns without rewriting or dropping stored versions."""
     existing = {row[1] for row in db.execute(f'PRAGMA table_info("{table}")')}
     for column, _ in columns:
-        if column not in existing and column in ("draftId", "planId"):
+        if column not in existing and column in ("draftId", "planId", "plannedDate"):
             default = "legacy-draft" if column == "draftId" else ""
             db.execute(f'ALTER TABLE "{table}" ADD COLUMN "{column}" TEXT NOT NULL DEFAULT \'{default}\'')
 
 
 def _column_definition(column: str, affinity: str) -> str:
-    if column == "planId":
+    if column in ("planId", "plannedDate"):
         return f'"{column}" {affinity} NOT NULL DEFAULT \'\''
     return f'"{column}" {affinity}'
 
@@ -118,7 +127,7 @@ def _column_definition(column: str, affinity: str) -> str:
 def _stored_value(row: dict, column: str):
     if column == "draftId":
         return row.get(column, "legacy-draft")
-    if column == "planId":
+    if column in ("planId", "plannedDate"):
         return row.get(column, "")
     return row[column]
 
@@ -140,7 +149,7 @@ def _authorize(token: str | None) -> None:
 
 
 def _validate(snapshot: object) -> dict:
-    if not isinstance(snapshot, dict) or snapshot.get("format") != 1 or snapshot.get("room_version") not in (LEGACY_ROOM_VERSION, 8, 9, 10, ROOM_VERSION):
+    if not isinstance(snapshot, dict) or snapshot.get("format") != 1 or snapshot.get("room_version") not in (LEGACY_ROOM_VERSION, 8, 9, 10, 11, ROOM_VERSION):
         raise HTTPException(422, "Unsupported backup format")
     tables = snapshot.get("tables")
     columns_by_table = _columns_for(snapshot["room_version"])

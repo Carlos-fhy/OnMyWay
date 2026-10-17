@@ -26,7 +26,8 @@ import androidx.compose.ui.unit.dp
 @Composable
 internal fun TaskScreen(tasks: List<Errand>, add: () -> Unit, edit: (Errand) -> Unit, delete: (Errand) -> Unit, save: (Errand) -> Unit, acknowledge: () -> Unit) {
     var filter by rememberSaveable { mutableStateOf("pending") }
-    val sections = taskDateSections(tasks, filter)
+    val currentDate = rememberCurrentDate()
+    val sections = taskDateSections(tasks, filter, currentDate.date, currentDate.zone)
     val visible = sections.flatMap { it.tasks }
     val reminders = tasks.count { it.status == "pending" && it.reminderPending }
     val listState = rememberLazyListState()
@@ -75,8 +76,10 @@ internal fun TaskScreen(tasks: List<Errand>, add: () -> Unit, edit: (Errand) -> 
                                 Text("${task.place()?.name ?: if (requiresFixedPlace(task.placeType)) "请补全领取地点" else "${placeTypes[task.placeType]} · 系统选店"} · ${task.serviceMinutes} 分钟",
                                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                            if (!completed && (task.priority > 1 || task.deadline.isNotBlank() || task.reminderPending)) Text(
-                                listOfNotNull(if (task.priority > 1) priorities[task.priority] else null, if (task.reminderPending) "三天提醒" else null, if (task.deadline.isNotBlank()) "${displayTime(task.deadline)} 前" else null).joinToString(" · "),
+                            if (!completed && (task.priority > 1 || task.plannedDate.isNotBlank() || task.deadline.isNotBlank() || task.reminderPending)) Text(
+                                listOfNotNull(if (task.priority > 1) priorities[task.priority] else null,
+                                    task.plannedDate.takeIf { it.isNotBlank() }?.let { "计划 $it" },
+                                    if (task.reminderPending) "三天提醒" else null, if (task.deadline.isNotBlank()) "${displayTime(task.deadline)} 前" else null).joinToString(" · "),
                                 style = MaterialTheme.typography.labelMedium, color = if (task.priority > 2) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary)
                         }
                         Box {

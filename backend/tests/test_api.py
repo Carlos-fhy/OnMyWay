@@ -23,6 +23,15 @@ def test_remote_client_cannot_reach_paid_or_health_endpoints():
     assert assistant.status_code == 403
 
 
+@pytest.mark.parametrize("path", ["/assistant/chat/status", "/assistant/navigation/status"])
+def test_remote_client_cannot_query_intent_runs(path):
+    async def call():
+        transport = httpx.ASGITransport(app=app, client=("198.51.100.7", 12345))
+        async with httpx.AsyncClient(transport=transport, base_url="http://local") as client:
+            return await client.post(path, json={})
+    assert asyncio.run(call()).status_code == 403
+
+
 @pytest.mark.parametrize("mode,payload,path", [
     ("walking", {"status": "1", "route": {"paths": [{"duration": "12", "distance": "20", "steps": []}]}}, "/v3/direction/walking"),
     ("cycling", {"errcode": 0, "data": {"paths": [{"duration": 12, "distance": 20, "steps": []}]}}, "/v4/direction/bicycling"),

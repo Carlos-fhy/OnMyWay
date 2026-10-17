@@ -34,6 +34,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -49,6 +51,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.core.net.toUri
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import org.json.JSONObject
 import kotlin.math.ceil
 
@@ -220,15 +223,18 @@ private fun InfoCard(title: String, text: String) {
 }
 
 @Composable
-internal fun TaskEditor(vm: AppViewModel, task: Errand?, dismiss: () -> Unit, save: (Errand) -> Unit) {
+internal fun TaskEditor(vm: AppViewModel, task: Errand?, dismiss: () -> Unit,
+    allowIncompleteDraft: Boolean = false, saveLabel: String = "保存任务", save: (Errand) -> Unit) {
     val context = LocalContext.current
     var title by rememberSaveable { mutableStateOf(task?.title ?: "") }
     var duration by rememberSaveable { mutableStateOf(task?.serviceMinutes?.toString() ?: "5") }
     var deadline by rememberSaveable { mutableStateOf(task?.deadline?.takeIf { it.isNotBlank() }?.let(::displayTime) ?: "") }
     var priority by rememberSaveable { mutableIntStateOf(task?.priority ?: 2) }
+    var plannedDate by rememberSaveable { mutableStateOf(task?.plannedDate.orEmpty()) }
     var type by rememberSaveable { mutableStateOf(task?.placeType ?: "SUPERMARKET") }
     var fixed by rememberSaveable { mutableStateOf(task?.place() != null) }
-    var place by remember { mutableStateOf(task?.place()) }
+    var selectedPlaceJson by rememberSaveable { mutableStateOf(task?.placeJson.orEmpty()) }
+    val place = selectedPlaceJson.takeIf { it.isNotBlank() }?.let { Place.from(JSONObject(it)) }
     var search by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var more by rememberSaveable { mutableStateOf(task?.deadline?.isNotBlank() == true) }
@@ -240,10 +246,18 @@ internal fun TaskEditor(vm: AppViewModel, task: Errand?, dismiss: () -> Unit, sa
             Column(Modifier.padding(20.dp).verticalScroll(rememberScrollState()).imePadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(if (task == null) "记下一件事" else "编辑任务", style = MaterialTheme.typography.headlineSmall)
                 OutlinedTextField(title, { title = it.take(100) }, label = { Text("要办什么") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedButton(onClick = {
+                    val current = runCatching { java.time.LocalDate.parse(plannedDate) }.getOrElse { java.time.LocalDate.now() }
+                    DatePickerDialog(context, { _, year, month, day ->
+                        plannedDate = java.time.LocalDate.of(year, month + 1, day).toString()
+                    }, current.year, current.monthValue - 1, current.dayOfMonth).show()
+                }, modifier = Modifier.fillMaxWidth().semantics { contentDescription = "计划日期" }) { Text(plannedDate.ifBlank { "设置计划日期（可选）" }) }
+                if (plannedDate.isNotBlank()) TextButton({ plannedDate = "" }) { Text("清除计划日期") }
+                Text("计划日期用于安排待办；有必须完成的时限时，再设置截止时间。", style = MaterialTheme.typography.bodySmall)
                 Text("优先级", style = MaterialTheme.typography.labelLarge)
                 ChoiceRow(priorities.map { it.key.toString() to it.value }, priority.toString()) { priority = it.toInt() }
                 Text("去哪办", style = MaterialTheme.typography.labelLarge)
-                ChoiceRow(placeTypes.toList(), type) { if (type != it) { type = it; place = null } }
+                ChoiceRow(placeTypes.toList(), type) { if (type != it) { type = it; selectedPlaceJson = "" } }
                 if (!mustSpecify) ChoiceRow(listOf("type" to "系统选顺路门店", "fixed" to "指定门店"), if (fixed) "fixed" else "type") { fixed = it == "fixed" }
                 if (fixed || mustSpecify) {
                     if (mustSpecify) Text("按取件/取餐通知选择实际领取点", style = MaterialTheme.typography.bodySmall)
@@ -252,10 +266,12 @@ internal fun TaskEditor(vm: AppViewModel, task: Errand?, dismiss: () -> Unit, sa
                         Text("从常用地点选择本次实际领取点", style = MaterialTheme.typography.bodySmall)
                         ChoiceRow(vm.familiarPlaces.map { (alias, saved) -> alias to "$alias · ${saved.name}" },
                             vm.familiarPlaces.entries.firstOrNull { it.value.id == place?.id }?.key ?: "") { alias ->
-                            place = vm.familiarPlaces[alias]
+                            selectedPlaceJson = vm.familiarPlaces[alias]?.json()?.toString().orEmpty()
                         }
                     }
-                    if (recentPlaces.isNotEmpty()) ChoiceRow(recentPlaces.map { it.id to it.name }, place?.id ?: "") { id -> place = recentPlaces.first { it.id == id } }
+                    if (recentPlaces.isNotEmpty()) ChoiceRow(recentPlaces.map { it.id to it.name }, place?.id ?: "") { id ->
+                        selectedPlaceJson = recentPlaces.first { it.id == id }.json().toString()
+                    }
                 } else {
                     Text("规划时选店，方案中可换一家。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -286,18 +302,23 @@ internal fun TaskEditor(vm: AppViewModel, task: Errand?, dismiss: () -> Unit, sa
                         require(title.isNotBlank()) { "请填写任务名称" }
                         val minutes = duration.toIntOrNull()
                         require(minutes != null && minutes in 1..240) { "办事时长应为 1–240 分钟" }
-                        require(!(fixed || mustSpecify) || place != null) { "请选择实际领取地点" }
-                        val date = try { parseTime(deadline) ?: "" } catch (e: Exception) { throw IllegalArgumentException("截止时间格式应为 yyyy-MM-dd HH:mm") }
+                        require(allowIncompleteDraft || !(fixed || mustSpecify) || place != null) { "请选择实际领取地点" }
+                        val originalDeadline = task?.deadline.orEmpty()
+                        val originalDisplay = originalDeadline.takeIf { it.isNotBlank() }?.let(::displayTime).orEmpty()
+                        val date = if (deadline == originalDisplay) originalDeadline else try {
+                            parseTime(deadline) ?: ""
+                        } catch (e: Exception) { throw IllegalArgumentException("截止时间格式应为 yyyy-MM-dd HH:mm") }
                         val updated = (task ?: Errand(title = title.trim())).copy(title = title.trim(), priority = priority,
-                            serviceMinutes = minutes, deadline = date, placeJson = if (fixed || mustSpecify) place!!.json().toString() else "", placeType = type)
+                            serviceMinutes = minutes, deadline = date, plannedDate = plannedDate,
+                            placeJson = if (fixed || mustSpecify) place?.json()?.toString().orEmpty() else "", placeType = type)
                         save(updated)
                     } catch (e: Exception) { error = e.message ?: "请检查输入" }
-                }, modifier = Modifier.fillMaxWidth()) { Text("保存任务") }
+                }, modifier = Modifier.fillMaxWidth()) { Text(saveLabel) }
                 TextButton(onClick = dismiss, modifier = Modifier.fillMaxWidth()) { Text("取消") }
             }
         }
     }
-    if (search) PlacePicker(vm, { search = false }) { place = it; search = false }
+    if (search) PlacePicker(vm, { search = false }) { selectedPlaceJson = it.json().toString(); search = false }
 }
 
 @Composable
@@ -367,12 +388,14 @@ private fun SettingsScreen(vm: AppViewModel, repeatRoute: (RouteHistory) -> Unit
     var lastBackupAt by remember { mutableLongStateOf(backupPrefs.getLong("last_success_at", 0)) }
     var lastBackupError by remember { mutableStateOf(backupPrefs.getString("last_error", "").orEmpty()) }
     var syncState by remember { mutableStateOf(backupPrefs.getString("sync_state", "pending")) }
+    var taskProtocol by remember { mutableIntStateOf(backupPrefs.getInt("task_protocol", -1)) }
     var needsReload by remember { mutableStateOf(backupPrefs.getBoolean("needs_reload", false)) }
     DisposableEffect(backupPrefs) {
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
             if (key == "last_success_at") lastBackupAt = prefs.getLong(key, 0)
             if (key == "last_error") lastBackupError = prefs.getString(key, "").orEmpty()
             if (key == "sync_state") syncState = prefs.getString(key, "pending")
+            if (key == "task_protocol") taskProtocol = prefs.getInt(key, -1)
             if (key == "needs_reload") needsReload = prefs.getBoolean(key, false)
         }
         backupPrefs.registerOnSharedPreferenceChangeListener(listener)
@@ -425,7 +448,7 @@ private fun SettingsScreen(vm: AppViewModel, repeatRoute: (RouteHistory) -> Unit
         OutlinedButton(vm::health, enabled = !vm.checking && server.trim().trimEnd('/') == vm.server, modifier = Modifier.fillMaxWidth()) { Text(if (vm.checking) "检查中…" else "检查已保存地址的连接") }
         HorizontalDivider()
         Text("电脑数据同步", style = MaterialTheme.typography.titleMedium)
-        Text("使用同一个数据服务口令连接。新安装会先读取电脑记录；离线修改留在手机，联网后重试。两端修改冲突时保留双方，电脑保存历史版本。", style = MaterialTheme.typography.bodySmall)
+        Text("使用同一个数据服务口令连接。新安装会先读取电脑记录；离线修改留在手机，联网后提交。电脑确认保存后才显示同步成功，两端发生冲突时保留双方记录。", style = MaterialTheme.typography.bodySmall)
         OutlinedTextField(backupToken, { backupToken = it }, label = { Text("数据服务口令") },
             visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
         Button(onClick = { scope.launch {
@@ -436,12 +459,12 @@ private fun SettingsScreen(vm: AppViewModel, repeatRoute: (RouteHistory) -> Unit
                     ?: error("请输入数据服务口令")
                 PcBackupSync.enable(context, vm.server, token)
                 backupConfigured = true
-                val restored = PcSyncEngine.synchronize(context, BackupCredential(vm.server, token))
-                backupPrefs.edit().putLong("last_success_at", System.currentTimeMillis()).remove("last_error")
-                    .putString("sync_state", "synced")
-                    .also { if (restored) it.putBoolean("needs_reload", true) }.apply()
+                val restored = PcBackupSync.synchronizeNow(context, BackupCredential(vm.server, token))
                 vm.message = if (restored) "电脑记录已恢复。请重新打开 App 加载恢复的对话和设置。"
+                    else if (backupPrefs.getString("sync_state", "pending") != "synced") "本次同步完成，新增修改正在排队保存。"
                     else "记录已同步到电脑；后续修改自动同步。"
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
                 backupPrefs.edit().putString("last_error", e.message ?: "同步失败").apply()
                 vm.message = "同步尚未完成：" + (e.message ?: "请检查电脑连接与口令")
@@ -450,6 +473,11 @@ private fun SettingsScreen(vm: AppViewModel, repeatRoute: (RouteHistory) -> Unit
         } }, enabled = !backupBusy && (backupToken.length >= 32 || backupConfigured) && server.trim().trimEnd('/') == vm.server,
             modifier = Modifier.fillMaxWidth()) { Text(if (backupBusy) "同步中…" else "连接电脑并同步") }
         if (backupConfigured) {
+            Text(when (taskProtocol) {
+                1 -> "待办由电脑保存，手机支持离线使用。"
+                0 -> "当前连接旧版数据服务，请升级电脑后端以启用待办版本校验。"
+                else -> "首次同步完成后确认待办保存状态。"
+            }, style = MaterialTheme.typography.bodySmall)
             Text(when (syncState) {
                 "synced" -> "已同步到电脑"
                 "syncing" -> "正在同步"

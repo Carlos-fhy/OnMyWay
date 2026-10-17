@@ -10,6 +10,8 @@ import androidx.core.content.edit
 import androidx.room.InvalidationTracker
 import androidx.work.*
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.security.KeyStore
 import java.util.concurrent.TimeUnit
 import javax.crypto.Cipher
@@ -63,14 +65,37 @@ internal object BackupCredentials {
 }
 
 internal object PcBackupSync {
+    private val attemptMutex = Mutex()
     fun schedule(context: Context) {
         if (BackupCredentials.load(context) == null) return
-        context.getSharedPreferences("pc_backup", 0).edit { putString("sync_state", "pending") }
+        val generation = PcSyncProgress(context.getSharedPreferences("pc_backup", 0)).changed()
         val request = OneTimeWorkRequestBuilder<PcBackupWorker>()
-            .setInitialDelay(15, TimeUnit.SECONDS)
+            .setInputData(workDataOf("generation" to generation))
+            .setInitialDelay(2, TimeUnit.SECONDS)
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .build()
-        WorkManager.getInstance(context).enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.KEEP, request)
+        // KEEP drops changes arriving during a running worker (including its completion window).
+        // A successor survives that window. Workers already covered by an earlier pass skip I/O.
+        WorkManager.getInstance(context).enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.APPEND_OR_REPLACE, request)
+    }
+
+    suspend fun synchronizeNow(context: Context, credential: BackupCredential): Boolean = attemptMutex.withLock {
+        if (BackupCredentials.load(context) != credential ||
+            context.getSharedPreferences("settings", 0).getString("server", "http://127.0.0.1:8000") != credential.server)
+            throw SyncConflict("同步连接已变化，请使用当前数据服务重试")
+        val progress = PcSyncProgress(context.getSharedPreferences("pc_backup", 0))
+        val generation = progress.begin()
+        try {
+            val restored = PcSyncEngine.synchronize(context, credential)
+            val protocol = PcSyncEngine.taskProtocol(context, credential)
+            if (BackupCredentials.load(context) == credential) progress.succeeded(generation, protocol, restored)
+            restored
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            if (BackupCredentials.load(context) == credential) progress.failed(error)
+            throw error
+        }
     }
 
     fun enable(context: Context, server: String, token: String) {
@@ -96,23 +121,14 @@ internal class PcBackupWorker(context: Context, params: WorkerParameters) : Coro
         val currentServer = applicationContext.getSharedPreferences("settings", 0)
             .getString("server", "http://127.0.0.1:8000")
         if (currentServer != credential.server) return Result.failure()
+        val progress = PcSyncProgress(applicationContext.getSharedPreferences("pc_backup", 0))
+        if (progress.covered(inputData.getLong("generation", -1))) return Result.success()
         return try {
-            applicationContext.getSharedPreferences("pc_backup", 0).edit { putString("sync_state", "syncing") }
-            val restored = PcSyncEngine.synchronize(applicationContext, credential)
-            applicationContext.getSharedPreferences("pc_backup", 0).edit {
-                putLong("last_success_at", System.currentTimeMillis())
-                remove("last_error")
-                putString("sync_state", "synced")
-                if (restored) putBoolean("needs_reload", true)
-            }
+            PcBackupSync.synchronizeNow(applicationContext, credential)
             Result.success()
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
-            applicationContext.getSharedPreferences("pc_backup", 0).edit {
-                putString("last_error", error.message?.take(160) ?: "同步失败")
-                putString("sync_state", if (error is SyncConflict || error is ApiHttpException && error.status == 409) "conflict" else "pending")
-            }
             if (error is SyncConflict || error is ApiHttpException && error.status in listOf(401, 403, 409, 413, 422))
                 Result.failure() else Result.retry()
         }
@@ -137,7 +153,7 @@ class OnMyWayApplication : Application() {
         }
         databaseObserver = object : InvalidationTracker.Observer(
             "tasks", "saved_trip", "route_history", "suggestion_feedback", "agent_events",
-            "assistant_messages", "assistant_draft", "planning_draft", "planning_draft_tasks", "assistant_clarification", "assistant_place_choices") {
+            "assistant_messages", "assistant_draft", "assistant_task_drafts", "planning_draft", "planning_draft_tasks", "assistant_clarification", "assistant_place_choices") {
             override fun onInvalidated(tables: Set<String>) { PcBackupSync.schedule(this@OnMyWayApplication) }
         }.also { TaskDatabase.get(this).invalidationTracker.addObserver(it) }
         PcBackupSync.schedule(this)

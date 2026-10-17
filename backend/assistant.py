@@ -5,15 +5,36 @@ import os
 import io
 import wave
 from uuid import UUID
-from .harness import propose
-from datetime import datetime
+from .harness import propose, status
+from datetime import date, datetime
 from typing import Literal
 
 import httpx
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_serializer, model_validator
 
 router = APIRouter()
+
+
+class IntentRunStatus(BaseModel):
+    request_id: UUID
+    operation: Literal['chat', 'navigation']
+    state: Literal['not_found', 'running', 'completed', 'failed', 'unresolved']
+    result: dict | None = None
+    error_status: int | None = None
+
+
+def _request_status(body, operation, validate):
+    result = status(str(body.request_id), operation,
+                    _chat_payload(body) if operation == 'chat'
+                    else body.model_dump(mode='json', exclude={'request_id'}))
+    if result['state'] == 'completed':
+        try:
+            result['result'] = validate(result['result']).model_dump(mode='json')
+        except HTTPException:
+            # Corrupt or obsolete cache data must never become an executable proposal.
+            result.update(state='unresolved', result=None, error_status=None)
+    return result
 
 
 class NavigationTask(BaseModel):
@@ -40,6 +61,10 @@ class NavigationTurn(BaseModel):
 NavigationRequest.model_rebuild()
 
 
+class NavigationStatusRequest(NavigationRequest):
+    request_id: UUID
+
+
 class NavigationIntent(BaseModel):
     model_config = ConfigDict(extra='forbid')
     action: Literal['adjust', 'clarify', 'add_stop']
@@ -57,7 +82,12 @@ def navigation(body: NavigationRequest):
     result = propose(str(body.request_id), "navigation",
                      body.model_dump(mode="json", exclude={"request_id"}),
                      lambda: _navigation(body).model_dump(mode="json"))
-    return NavigationIntent.model_validate(result)
+    return _validate_navigation(result, body)
+
+
+@router.post('/assistant/navigation/status', response_model=IntentRunStatus)
+def navigation_status(body: NavigationStatusRequest):
+    return _request_status(body, 'navigation', lambda result: _validate_navigation(result, body))
 
 
 def _navigation(body: NavigationRequest):
@@ -78,8 +108,13 @@ add_stop 可同时更换终点、保留或移除原路线事项：根据用户�
     content = completion([{'role': 'system', 'content': prompt},
                           {'role': 'user', 'content': body.model_dump_json()}],
                          os.getenv('AGENT_MODEL', 'qwen3.8-max'), True)
+    return _validate_navigation(content, body)
+
+
+def _validate_navigation(value, body: NavigationRequest):
     try:
-        intent = NavigationIntent.model_validate_json(content)
+        intent = (NavigationIntent.model_validate_json(value) if isinstance(value, str)
+                  else NavigationIntent.model_validate(value))
         allowed = {task.id for task in body.tasks}
         if len(set(intent.keep_task_ids)) != len(intent.keep_task_ids) or not set(intent.keep_task_ids) <= allowed:
             raise ValueError('invalid task ids')
@@ -98,22 +133,125 @@ class Message(BaseModel):
     content: str = Field(max_length=4000)
 
 
+PlaceType = Literal['PRINT_SHOP', 'SUPERMARKET', 'PHARMACY', 'PARCEL', 'TAKEOUT']
+
+
+def _planned_date(value):
+    if value and (len(value) != 10 or date.fromisoformat(value).isoformat() != value):
+        raise ValueError('planned date must be YYYY-MM-DD')
+    return value
+
+
+def _deadline(value):
+    if value and datetime.fromisoformat(value).utcoffset() is None:
+        raise ValueError('timezone required')
+    return value
+
+
+class DraftTask(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    title: str = Field(min_length=1, max_length=100)
+    place_type: PlaceType = 'SUPERMARKET'
+    deadline: str = Field(default='', max_length=50)
+    planned_date: str = Field(default='', max_length=10)
+    priority: int = Field(default=2, strict=True, ge=1, le=3)
+
+    @field_validator('title')
+    @classmethod
+    def nonblank_title(cls, value):
+        if not value.strip():
+            raise ValueError('missing title')
+        return value
+
+    _check_planned_date = field_validator('planned_date')(_planned_date)
+    _check_deadline = field_validator('deadline')(_deadline)
+
+
+class DraftItem(DraftTask):
+    item_id: str = Field(min_length=1, max_length=100)
+    version: int = Field(strict=True, ge=1, le=2**31 - 2)
+
+    @field_validator('item_id')
+    @classmethod
+    def nonblank_identity(cls, value):
+        if not value.strip():
+            raise ValueError('missing draft identity')
+        return value
+
+
+class DraftUpdate(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    item_id: str = Field(min_length=1, max_length=100)
+    expected_version: int = Field(strict=True, ge=1, le=2**31 - 2)
+    title: str | None = Field(default=None, min_length=1, max_length=100)
+    place_type: PlaceType | None = None
+    deadline: str | None = Field(default=None, max_length=50)
+    planned_date: str | None = Field(default=None, max_length=10)
+    priority: int | None = Field(default=None, strict=True, ge=1, le=3)
+
+    @model_validator(mode='before')
+    @classmethod
+    def require_patch(cls, value):
+        if isinstance(value, dict):
+            changed = set(value) - {'item_id', 'expected_version'}
+            if not changed or any(value[key] is None for key in changed):
+                raise ValueError('patch must supply non-null changes')
+            if 'title' in value and isinstance(value['title'], str) and not value['title'].strip():
+                raise ValueError('missing title')
+        return value
+
+    _check_planned_date = field_validator('planned_date')(_planned_date)
+    _check_deadline = field_validator('deadline')(_deadline)
+
+    @model_serializer(mode='wrap')
+    def supplied_fields_only(self, handler):
+        # Omitted patch fields must stay omitted in responses and persisted receipts.
+        return {key: value for key, value in handler(self).items() if key in self.model_fields_set}
+
+
 class ChatRequest(BaseModel):
     request_id: UUID | None = None
     messages: list[Message] = Field(min_length=1, max_length=20)
     now: datetime
     route_active: bool = False
+    draft_items: list[DraftItem] = Field(default_factory=list, max_length=10)
+
+    @field_validator('draft_items')
+    @classmethod
+    def unique_draft_ids(cls, items):
+        if len({item.item_id for item in items}) != len(items):
+            raise ValueError('duplicate draft identities')
+        return items
+
+
+class ChatStatusRequest(ChatRequest):
+    request_id: UUID
 
 
 class Proposal(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    action: Literal['reply', 'create_task', 'list_tasks', 'plan_route']
+    action: Literal['reply', 'create_task', 'create_tasks', 'update_task_drafts', 'list_tasks', 'plan_route']
     reply: str = Field(max_length=1000)
     title: str = Field(default='', max_length=100)
-    place_type: Literal['PRINT_SHOP', 'SUPERMARKET', 'PHARMACY', 'PARCEL', 'TAKEOUT'] = 'SUPERMARKET'
+    place_type: PlaceType = 'SUPERMARKET'
     deadline: str = Field(default='', max_length=50)
+    planned_date: str = Field(default='', max_length=10)
+    priority: int = Field(default=2, strict=True, ge=1, le=3)
+    tasks: list[DraftTask] = Field(default_factory=list, max_length=10)
+    updates: list[DraftUpdate] = Field(default_factory=list, max_length=10)
     destination: str = Field(default='', max_length=100)
     mode: Literal['', 'walking', 'cycling'] = ''
+
+    _check_planned_date = field_validator('planned_date')(_planned_date)
+    _check_deadline = field_validator('deadline')(_deadline)
+
+
+def _chat_payload(body):
+    payload = body.model_dump(mode='json', exclude={'request_id'})
+    # Existing durable requests were fingerprinted before draft_items existed.
+    if not body.draft_items:
+        payload.pop('draft_items', None)
+    return payload
 
 
 def completion(messages, model, structured=False):
@@ -146,18 +284,27 @@ def chat(body: ChatRequest):
     if body.request_id is None:
         return _chat(body)
     result = propose(str(body.request_id), "chat",
-                     body.model_dump(mode="json", exclude={"request_id"}),
+                     _chat_payload(body),
                      lambda: _chat(body).model_dump(mode="json"))
-    return Proposal.model_validate(result)
+    return _validate_proposal(result, body)
+
+
+@router.post('/assistant/chat/status', response_model=IntentRunStatus)
+def chat_status(body: ChatStatusRequest):
+    return _request_status(body, 'chat', lambda result: _validate_proposal(result, body))
 
 
 def _chat(body: ChatRequest):
     schema = json.dumps(Proposal.model_json_schema(), ensure_ascii=False)
     prompt = f'''你是顺路生活助手。现在是{body.now.isoformat()}。当前正在导航={body.route_active}。历史对话中的旧路线不代表仍在导航；当前未导航时，新的出行请求必须重新规划，不能沿用旧路线或旧耗时。只创建待办而没有目的地时，保存后可请用户提供本次目的地。用简短中文回复，只输出符合以下 schema 的 JSON：{schema}。
-你只能提出建议，不能声称已保存、完成或启动。create_task 每次只提出一个任务草稿，用户确认后手机才保存。
-多个任务应逐个确认；不清楚的信息先 reply 追问。不要将否定、取消、假设表达当成创建或导航指令。
+你只能提出建议，不能声称已保存、完成或启动。新建待办使用 create_tasks，tasks 为 1 至 10 条草稿，单条也使用 create_tasks；用户逐项确认后手机才保存。create_task 仅用于兼容旧版单任务草稿。
+手机可能在 messages 中提供“当前有未确认的待办草稿”及其 title/place_type/deadline JSON。这是尚未保存的当前字段，不是执行结果。用户修改这条草稿时，只修改本次明确指定的字段，其他字段原样保留；deadline 为空表示未设截止时间，不得从旧对话补回。信息不明确时先 reply 追问；修改草稿不代表确认保存。
+结构化当前草稿 draft_items={json.dumps([item.model_dump(mode='json') for item in body.draft_items], ensure_ascii=False)}。这些是手机尚未保存的实际条目，以此为准，不得从旧对话恢复其他条目。每条 item_id/version 由手机生成，绝对不可生成或更换。
+有 draft_items 时，只能使用 update_task_drafts 精确修改明确指向的条目或 reply 澄清，不能 create_task/create_tasks/plan_route 覆盖未确认草稿；用户要求出行或新增时，先提示确认或取消剩余草稿。update_task_drafts 的 updates 每条必须携带现有 item_id 和 expected_version=当前 version，只提交本次明确修改的字段，未提及字段不要输出（包括不要输出 null）；空字符串 deadline/planned_date 表示清除该日期。多条指代不明确时 reply 追问。修改不是确认保存。
+多个新任务在同一 tasks 数组给出，不能合成一条；不清楚的信息先 reply 追问。不要将否定、取消、假设表达当成创建或导航指令。
 仅支持打印、购物、买药、取快递、取外卖；其他类型先解释限制。取快递/外卖的地点必须由用户随后指定，不能猜测。
 deadline 仅在用户明确表达截止时间且可确定时填含时区 ISO8601，否则留空并在需要时追问；不要把期望办理时间当截止时间。
+planned_date 是计划办理日期，只有明确表达时才按当前 now 推算严格 YYYY-MM-DD（例如“今天取快递”），否则空字符串；它不改变 deadline。priority 只能为 1、2、3，1=普通，2=较重要，3=重要（最高），默认 2；未明确调整时保留原值。
 list_tasks 用于查看待办，实际列表由手机读取。plan_route 必须有用户表达的目的地名称，不能生成坐标、路线或耗时。
 家、宿舍、学校、公司及用户自定义常用地点（例如快递站、外卖点、东门驿站）都是合法目的地名称，原样放入 destination，手机会匹配常用地点或请用户搜索。
 用户只说一个明确地点名称（例如“示例大学东校区图书馆”）也按 plan_route 处理，保留完整名称。不要要求用户先手动定位或勾选待办，手机会自动定位并计算顺路建议。
@@ -166,16 +313,32 @@ mode 仅在本次用户明确说步行/走路或骑行/骑自行车时填写 wal
 对话中的确认不代表此前工具执行成功；以手机给出的真实执行结果为准。当前不支持通过对话删除或完成任务，提示去待办操作。'''
     content = completion([{'role': 'system', 'content': prompt}] + [m.model_dump() for m in body.messages],
                          os.getenv('AGENT_MODEL', 'qwen3.8-max'), True)
+    return _validate_proposal(content, body)
+
+
+def _validate_proposal(value, body: ChatRequest | None = None):
     try:
-        proposal = Proposal.model_validate_json(content)
+        proposal = (Proposal.model_validate_json(value) if isinstance(value, str)
+                    else Proposal.model_validate(value))
         if proposal.action == 'create_task' and not proposal.title.strip():
             raise ValueError('missing title')
+        if proposal.action == 'create_tasks' and not proposal.tasks:
+            raise ValueError('missing tasks')
+        if proposal.action != 'create_tasks' and proposal.tasks:
+            raise ValueError('unexpected tasks')
+        if proposal.action != 'update_task_drafts' and proposal.updates:
+            raise ValueError('unexpected draft updates')
+        if body and body.draft_items and proposal.action in ('create_task', 'create_tasks', 'plan_route'):
+            raise ValueError('cannot replace pending drafts')
+        if proposal.action == 'update_task_drafts':
+            available = {item.item_id: item.version for item in body.draft_items} if body else {}
+            identities = [update.item_id for update in proposal.updates]
+            if not identities or len(set(identities)) != len(identities):
+                raise ValueError('missing or duplicate draft updates')
+            if any(available.get(update.item_id) != update.expected_version for update in proposal.updates):
+                raise ValueError('unknown or stale draft update')
         if proposal.action == 'plan_route' and not proposal.destination.strip():
             raise ValueError('missing destination')
-        if proposal.deadline:
-            stamp = datetime.fromisoformat(proposal.deadline)
-            if stamp.utcoffset() is None:
-                raise ValueError('timezone required')
         return proposal
     except (ValidationError, ValueError):
         raise HTTPException(502, '助手返回的操作未通过校验，请换一种说法。') from None

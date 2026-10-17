@@ -10,6 +10,19 @@ from pathlib import Path
 from fastapi import HTTPException
 
 
+UNRESOLVED_AFTER_SECONDS = 300
+
+
+def _input_hash(payload):
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False,
+                                    separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+
+
+def _check_identity(row, operation, digest):
+    if row[0] != operation or row[1] != digest:
+        raise HTTPException(409, "请求编号已用于其他内容，请重新提交。")
+
+
 def _open():
     path = Path(os.getenv("ONMYWAY_HARNESS_DB", "").strip() or
                 Path(__file__).with_name("data") / "harness.db")
@@ -30,16 +43,14 @@ def _open():
 
 
 def propose(request_id, operation, payload, execute):
-    digest = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False,
-                                      separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+    digest = _input_hash(payload)
     with closing(_open()) as db:
         db.execute("BEGIN IMMEDIATE")
         row = db.execute("SELECT operation,input_hash,state,result FROM intent_runs WHERE request_id=?",
                          (request_id,)).fetchone()
         if row:
             db.rollback()
-            if row[0] != operation or row[1] != digest:
-                raise HTTPException(409, "请求编号已用于其他内容，请重新提交。")
+            _check_identity(row, operation, digest)
             if row[2] == "completed":
                 return json.loads(row[3])
             # Do not reissue paid upstream calls after crashes or uncertain delivery.
@@ -60,3 +71,40 @@ def propose(request_id, operation, payload, execute):
             db.execute("UPDATE intent_runs SET state='failed',error_status=?,updated_at=? WHERE request_id=?",
                        (error.status_code if isinstance(error, HTTPException) else 500, time.time(), request_id))
         raise
+
+
+def status(request_id, operation, payload):
+    """Read one matching run without submitting work or changing its durable state.
+
+    An old running row may represent a crashed process or a slow upstream request.
+    It remains running in SQLite so that a late completion can still be recovered.
+    """
+    digest = _input_hash(payload)
+    with closing(_open()) as db:
+        row = db.execute(
+            "SELECT operation,input_hash,state,result,error_status,updated_at "
+            "FROM intent_runs WHERE request_id=?", (request_id,)
+        ).fetchone()
+    response = dict(request_id=request_id, operation=operation, state="not_found",
+                    result=None, error_status=None)
+    if row is None:
+        return response
+    _check_identity(row, operation, digest)
+    state = row[2]
+    if state == "completed":
+        try:
+            result = json.loads(row[3])
+            if not isinstance(result, dict):
+                raise ValueError("invalid cached proposal")
+        except (ValueError, TypeError):
+            response["state"] = "unresolved"
+        else:
+            response.update(state="completed", result=result)
+    elif state == "failed":
+        code = row[4]
+        response.update(state="failed", error_status=code if isinstance(code, int) and 400 <= code < 600 else 500)
+    elif state == "running":
+        response["state"] = ("unresolved" if time.time() - row[5] >= UNRESOLVED_AFTER_SECONDS else "running")
+    else:
+        response["state"] = "unresolved"
+    return response

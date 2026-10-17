@@ -16,7 +16,15 @@ class TaskDateSectionsTest {
         )
         val sections = taskDateSections(tasks, "pending", today, ZoneId.of("Asia/Shanghai"))
         assertEquals(listOf("overdue", "today", "tomorrow", "undated"), sections.flatMap { it.tasks }.map { it.id })
-        assertEquals(listOf("已逾期 · 9月24日", "今天 · 9月25日", "明天 · 9月26日", "未设截止时间"), sections.map { it.title })
+        assertEquals(listOf("此前待办 · 9月24日", "今天 · 9月25日", "明天 · 9月26日", "未安排日期"), sections.map { it.title })
+    }
+
+    @Test fun plannedDateGroupsTasksWithoutChangingDeadline() {
+        val task = Errand(title = "打印论文", plannedDate = "2026-10-15", deadline = "2026-10-18T18:00:00+08:00")
+        val sections = taskDateSections(listOf(task), "pending", LocalDate.of(2026, 10, 16), ZoneId.of("Asia/Shanghai"))
+        assertEquals("2026-10-15", sections.single().key)
+        assertEquals("此前待办 · 10月15日", sections.single().title)
+        assertEquals("2026-10-18T18:00:00+08:00", sections.single().tasks.single().deadline)
     }
 
     @Test fun completedTasksUseCompletionDateRatherThanDeadline() {

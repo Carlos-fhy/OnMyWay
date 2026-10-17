@@ -43,6 +43,7 @@ class NavigationChangeTest {
                 assertNull(memory.draft)
                 assertNotNull(memory.proposedBody)
                 assertTrue(memory.history.any { it.second == "之前的调整" })
+                memory.draft = change
                 vm.confirmNavigationChange(change)
                 assertNull(memory.proposedBody)
                 assertTrue(vm.tripStarted)
@@ -56,7 +57,9 @@ class NavigationChangeTest {
             assertEquals(123L, updated.startedAt)
             assertTrue(updated.started)
             assertEquals(newDestination, Place.from(JSONObject(updated.requestJson).getJSONObject("destination")))
-            assertEquals(2, db.trips().history().size)
+            assertEquals(3, db.trips().history().size) // Start, replan, and the confirmed replacement.
+            assertNotNull(db.trips().historyById(change.versionId))
+            assertNotNull(db.trips().historyById("${change.versionId}:replanning"))
         } finally {
             withContext(Dispatchers.Main) { model?.viewModelScope?.cancel() }
             db.close()
@@ -125,7 +128,10 @@ class NavigationChangeTest {
             assertFalse(restored.restore(state.snapshot(stored), stored.copy(sessionId = "different")))
             assertNull(db.tasks().get(newTask.id))
             assertEquals(stored, db.trips().load())
-            withContext(Dispatchers.Main) { vm.confirmNavigationChange(change) }
+            withContext(Dispatchers.Main) {
+                vm.navigationConversation.draft = change
+                vm.confirmNavigationChange(change)
+            }
             assertEquals(newTask.id, db.tasks().get(newTask.id)?.id)
             assertTrue(db.trips().load()!!.requestJson.contains(newTask.id))
         } finally {

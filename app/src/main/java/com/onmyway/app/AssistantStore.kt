@@ -3,6 +3,7 @@ package com.onmyway.app
 import android.content.SharedPreferences
 import androidx.room.*
 import androidx.room.withTransaction
+import kotlinx.coroutines.flow.first
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
@@ -47,12 +48,13 @@ data class AssistantDraft(
 ) {
     fun valid(now: Long = System.currentTimeMillis()) =
         (action == "create_task" && title.isNotBlank()) ||
+            action == "create_tasks" ||
             (action == "plan_route" && destination.isNotBlank() && savedAt > 0)
     fun proposal(): JSONObject {
         val result = JSONObject().put("action", action).put("_draft_id", draftId).put("_plan_id", planId.ifBlank { draftId })
         if (action == "create_task") {
             result.put("title", title).put("place_type", placeType).put("deadline", deadline)
-        } else {
+        } else if (action == "plan_route") {
             result.put("destination", destination).put("mode", mode)
             if (knownPlaceId.isNotBlank() && knownLongitude != null && knownLatitude != null) {
                 result.put("known_destination", Place(knownPlaceId, knownPlaceName,
@@ -64,10 +66,11 @@ data class AssistantDraft(
     companion object {
         fun from(value: JSONObject, savedAt: Long = System.currentTimeMillis()): AssistantDraft? {
             val action = value.optString("action")
-            if (action !in listOf("create_task", "plan_route")) return null
+            if (action !in listOf("create_task", "create_tasks", "plan_route")) return null
             val known = value.optJSONObject("known_destination")
             val place = runCatching { known?.let(Place::from) }.getOrNull()
-            val draft = AssistantDraft(action = action, draftId = value.optString("_draft_id").ifBlank { UUID.randomUUID().toString() }, planId = value.optString("_plan_id").ifBlank { value.optString("_draft_id") }.ifBlank { UUID.randomUUID().toString() }, title = value.optString("title"),
+            val draftId = value.optString("_draft_id").ifBlank { UUID.randomUUID().toString() }
+            val draft = AssistantDraft(action = action, draftId = draftId, planId = value.optString("_plan_id").ifBlank { draftId }, title = value.optString("title"),
                 placeType = value.optString("place_type"), deadline = value.optString("deadline"),
                 destination = value.optString("destination"), mode = value.optString("mode"),
                 knownPlaceId = place?.id.orEmpty(), knownPlaceName = place?.name.orEmpty(),
@@ -83,6 +86,9 @@ data class AssistantDay(val day: String, val count: Int)
 
 @Dao
 interface AssistantDao {
+    @Query("SELECT * FROM assistant_task_drafts ORDER BY position, id") suspend fun draftItems(): List<AssistantDraftItem>
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun saveDraftItems(items: List<AssistantDraftItem>)
+    @Query("DELETE FROM assistant_task_drafts") suspend fun clearDraftItems()
     @Query("SELECT * FROM assistant_clarification WHERE id = 1") suspend fun clarification(): AssistantClarification?
     @Query("SELECT * FROM assistant_place_choices ORDER BY position") suspend fun placeChoices(): List<AssistantPlaceChoice>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun saveClarification(value: AssistantClarification)
@@ -95,13 +101,15 @@ interface AssistantDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun savePlanningTasks(value: List<PlanningDraftTask>)
     @Query("DELETE FROM planning_draft") suspend fun clearPlanningDraft()
     @Query("DELETE FROM planning_draft_tasks") suspend fun clearPlanningTasks()
-    @Query("SELECT strftime('%Y-%m-%d', createdAt / 1000, 'unixepoch', 'localtime') AS day, COUNT(*) AS count FROM assistant_messages GROUP BY day ORDER BY day DESC")
+    @Query("SELECT strftime('%Y-%m-%d', createdAt / 1000, 'unixepoch', 'localtime') AS day, COUNT(*) AS count FROM assistant_messages WHERE role IN ('user', 'assistant') GROUP BY day ORDER BY day DESC")
     suspend fun days(): List<AssistantDay>
-    @Query("SELECT * FROM assistant_messages WHERE createdAt >= :start AND createdAt < :end ORDER BY createdAt, rowid")
+    @Query("SELECT * FROM assistant_messages WHERE createdAt >= :start AND createdAt < :end AND role IN ('user', 'assistant') ORDER BY createdAt, rowid")
     suspend fun messagesInDay(start: Long, end: Long): List<AssistantMessage>
 
-    @Query("SELECT * FROM assistant_messages ORDER BY createdAt DESC, rowid DESC LIMIT 500")
+    @Query("SELECT * FROM assistant_messages WHERE role IN ('user', 'assistant') ORDER BY createdAt DESC, rowid DESC LIMIT 500")
     suspend fun recentMessages(): List<AssistantMessage>
+    @Query("SELECT EXISTS(SELECT 1 FROM assistant_messages WHERE id = :id)")
+    suspend fun hasMessage(id: String): Boolean
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun addMessages(messages: List<AssistantMessage>)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun addMessage(message: AssistantMessage)
     @Query("SELECT * FROM assistant_draft WHERE id = 1") suspend fun draft(): AssistantDraft?
@@ -145,7 +153,9 @@ internal class AssistantStore(private val database: TaskDatabase, private val le
         database.withTransaction {
             val dao = database.assistant()
             if (legacyLines != null) dao.addMessages(legacyLines.map(AssistantMessage::from))
-            if (dao.draft() == null && legacyDraft != null) dao.saveDraft(legacyDraft)
+            if (dao.draft() == null && legacyDraft != null) {
+                if (legacyDraft.action == "create_tasks") setDraft(parsedDraft) else dao.saveDraft(legacyDraft)
+            }
         }
         if (legacyLines != null || parsedDraft != null) {
             val editor = legacy.edit()
@@ -153,10 +163,27 @@ internal class AssistantStore(private val database: TaskDatabase, private val le
             if (parsedDraft != null) editor.remove("proposal").remove("proposal_saved_at")
             check(editor.commit()) { "旧对话记录迁移后清理失败" }
         }
-        val messages = database.assistant().recentMessages().asReversed().map(AssistantMessage::line)
-        val draft = database.assistant().draft()?.takeIf { it.valid() }
-        if (draft == null) database.assistant().clearDraft()
-        return messages to draft?.proposal()
+        return database.withTransaction {
+            val dao = database.assistant()
+            val messages = dao.recentMessages().asReversed().map(AssistantMessage::line)
+            val draft = dao.draft()?.takeIf { it.valid() }
+            val storedItems = dao.draftItems()
+            val items = storedItems.filter { it.planId == draft?.planId }
+            if (draft == null || draft.action == "create_tasks" && items.isEmpty()) {
+                dao.clearDraft(); dao.clearDraftItems()
+                dao.clearClarification(); dao.clearPlaceChoices()
+                dao.clearPlanningDraft(); dao.clearPlanningTasks()
+                messages to null
+            } else {
+                if (draft.action != "create_tasks" || storedItems.size != items.size) {
+                    dao.clearDraftItems()
+                    if (draft.action == "create_tasks") dao.saveDraftItems(items)
+                }
+                messages to draft.proposal().also {
+                    if (draft.action == "create_tasks") it.put("tasks", JSONArray(items.map(AssistantDraftItem::json)))
+                }
+            }
+        }
     }
     suspend fun days() = database.assistant().days()
     suspend fun day(day: java.time.LocalDate): List<ChatLine> {
@@ -178,6 +205,149 @@ internal class AssistantStore(private val database: TaskDatabase, private val le
         }
     }
     suspend fun add(line: ChatLine) = database.assistant().addMessage(AssistantMessage.from(line))
+    suspend fun pendingTasks(): List<Errand> = database.tasks().observe().first().filter { it.status == "pending" }
+    suspend fun responseApplied(requestId: String): Boolean =
+        database.assistant().hasMessage(responseMessageId(requestId))
+
+    /** The confirmation message is the durable receipt, including after task deletion. */
+    suspend fun confirmTask(
+        expectedDraftId: String,
+        task: Errand,
+        successText: String,
+        onCreated: suspend (Errand) -> Unit,
+    ): Boolean {
+        require(expectedDraftId.isNotBlank()) { "待确认任务已失效，请重新确认。" }
+        val receiptId = "assistant-task-confirmed-$expectedDraftId"
+        val taskId = UUID.nameUUIDFromBytes("assistant-task:$expectedDraftId".toByteArray(Charsets.UTF_8)).toString()
+        return database.withTransaction {
+            val dao = database.assistant()
+            // A replay must neither recreate a deleted task nor consume a newer draft.
+            if (dao.hasMessage(receiptId)) return@withTransaction false
+            val draft = dao.draft()
+            check(draft?.draftId == expectedDraftId && draft.action == "create_task") {
+                "待确认任务已变化，请关闭旧编辑页并重新确认。"
+            }
+            require(task.title.isNotBlank()) { "请填写任务名称。" }
+            require(!requiresFixedPlace(task.placeType) || task.place() != null) { "请指定实际领取地点" }
+            check(database.tasks().get(taskId) == null) { "任务确认记录不完整，请重新打开助手。" }
+            val now = System.currentTimeMillis()
+            val created = task.copy(id = taskId, status = "pending", createdAt = now, updatedAt = now,
+                completedAt = 0, lastRemindedAt = 0, reminderCount = 0, reminderPending = false)
+            database.tasks().save(created)
+            onCreated(created)
+            dao.clearPlanningTasks(); dao.clearPlanningDraft()
+            dao.clearPlaceChoices(); dao.clearClarification(); dao.clearDraftItems(); dao.clearDraft()
+            dao.addMessage(AssistantMessage(receiptId, "assistant", successText, now, null))
+            true
+        }
+    }
+
+    /** All selected versions are checked before any task is created; unselected rows stay editable. */
+    suspend fun confirmTasks(
+        expectedDraftId: String,
+        selections: Map<String, Int>,
+        successText: String,
+        onCreated: suspend (Errand) -> Unit,
+    ): Boolean {
+        require(expectedDraftId.isNotBlank() && selections.isNotEmpty()) { "请选择要确认的待办" }
+        val receiptId = "assistant-tasks-confirmed-$expectedDraftId"
+        return database.withTransaction {
+            val dao = database.assistant()
+            if (dao.hasMessage(receiptId)) return@withTransaction false
+            val draft = dao.draft()
+            check(draft?.draftId == expectedDraftId && draft.action == "create_tasks") {
+                "待确认任务已变化，请重新选择后确认。"
+            }
+            val items = dao.draftItems().filter { it.planId == draft.planId }
+            val selected = selections.map { (id, version) ->
+                val item = items.singleOrNull { it.id == id }
+                check(item != null && item.version == version) { "任务条目已变化，请重新选择后确认。" }
+                AssistantDraftItem.fromTask(item.id, item.planId, item.position, item.version, item.task())
+                require(!requiresFixedPlace(item.placeType) || item.task().place() != null) {
+                    "请先为“${item.title}”指定实际领取地点"
+                }
+                val identity = taskItemIdentity(item)
+                check(!dao.hasMessage("assistant-task-item-confirmed-$identity")) { "这项待办已确认，请刷新草稿。" }
+                check(database.tasks().get(identity) == null) { "任务确认记录不完整，请重新打开助手。" }
+                item
+            }
+            val now = System.currentTimeMillis()
+            selected.forEach { item ->
+                val taskId = taskItemIdentity(item)
+                val created = item.task().copy(id = taskId, createdAt = now, updatedAt = now)
+                database.tasks().save(created)
+                onCreated(created)
+                // Internal receipts survive deletion and backup, but never enter the conversation.
+                dao.addMessage(AssistantMessage("assistant-task-item-confirmed-$taskId", "receipt", "", now, null))
+            }
+            val remaining = items.filterNot { it.id in selections }
+            val replacement = if (remaining.isEmpty()) null else draft.proposal()
+                .put("_draft_id", UUID.randomUUID().toString())
+                .put("tasks", JSONArray(remaining.map(AssistantDraftItem::json)))
+            setDraft(replacement)
+            dao.addMessage(AssistantMessage(receiptId, "assistant", successText, now, null))
+            true
+        }
+    }
+
+    /** Editing only changes the proposal. Even a fixed-place task may remain incomplete here. */
+    suspend fun updateDraftItem(
+        expectedDraftId: String,
+        itemId: String,
+        expectedVersion: Int,
+        task: Errand,
+    ): Boolean = database.withTransaction {
+        val dao = database.assistant()
+        val draft = dao.draft()
+        check(draft?.draftId == expectedDraftId && draft.action == "create_tasks") {
+            "待确认任务已变化，请关闭旧编辑页并重新编辑。"
+        }
+        val items = dao.draftItems().filter { it.planId == draft.planId }
+        val item = items.singleOrNull { it.id == itemId }
+        check(item != null && item.version == expectedVersion && expectedVersion < Int.MAX_VALUE) {
+            "任务条目已变化，请关闭旧编辑页并重新编辑。"
+        }
+        val changed = AssistantDraftItem.fromTask(item.id, item.planId, item.position, item.version + 1, task)
+        setDraft(draft.proposal().put("_draft_id", UUID.randomUUID().toString())
+            .put("tasks", JSONArray(items.map { if (it.id == itemId) changed.json() else it.json() })))
+        true
+    }
+
+    private fun taskItemIdentity(item: AssistantDraftItem): String =
+        UUID.nameUUIDFromBytes("assistant-task-item:${item.planId}:${item.id}".toByteArray(Charsets.UTF_8)).toString()
+
+    /** The reply is the durable receipt; messages and its resulting draft commit together. */
+    suspend fun applyResponse(
+        requestId: String,
+        expectedDraftId: String?,
+        userLine: ChatLine,
+        replyLine: ChatLine,
+        replacement: JSONObject?,
+        replaceDraft: Boolean,
+        expectedTripContext: String? = null,
+    ): Boolean {
+        val responseId = responseMessageId(requestId)
+        return database.withTransaction {
+            val dao = database.assistant()
+            // Check the receipt first: replaying an old response must never clear a newer draft.
+            if (dao.hasMessage(responseId)) return@withTransaction false
+            if (dao.draft()?.draftId != expectedDraftId) return@withTransaction false
+            if (expectedTripContext != null && assistantTripContext(database.trips().load()) != expectedTripContext)
+                return@withTransaction false
+            dao.addMessages(listOf(AssistantMessage.from(userLine)))
+            dao.addMessage(AssistantMessage.from(replyLine.copy(id = responseId, role = "assistant")))
+            if (replaceDraft) setDraft(replacement)
+            true
+        }
+    }
+
+    private fun responseMessageId(requestId: String): String {
+        require(runCatching { UUID.fromString(requestId).toString() == requestId }.getOrDefault(false)) {
+            "Request ID must be a canonical UUID"
+        }
+        return "agent-response-$requestId"
+    }
+
     suspend fun planningChoices(): PlanningChoices? = database.withTransaction {
         val dao = database.assistant()
         val value = dao.planningDraft() ?: return@withTransaction null
@@ -214,6 +384,12 @@ internal class AssistantStore(private val database: TaskDatabase, private val le
     suspend fun setDraft(value: JSONObject?) {
         val draft = value?.let(AssistantDraft::from)
         if (value != null && draft == null) error("无效的待确认方案")
+        val items = if (draft?.action == "create_tasks") {
+            val array = value!!.getJSONArray("tasks")
+            require(array.length() in 1..10) { "待确认任务数量无效" }
+            (0 until array.length()).map { AssistantDraftItem.from(array.getJSONObject(it), draft.planId, it) }
+                .also { rows -> require(rows.map { it.id }.distinct().size == rows.size) { "待办条目标识重复" } }
+        } else emptyList()
         database.withTransaction {
             val dao = database.assistant()
             val old = dao.draft()
@@ -221,15 +397,18 @@ internal class AssistantStore(private val database: TaskDatabase, private val le
                 dao.clearPlanningDraft(); dao.clearPlanningTasks()
             }
             dao.clearClarification(); dao.clearPlaceChoices()
+            dao.clearDraftItems()
             if (draft == null) dao.clearDraft() else {
                 dao.saveDraft(draft)
+                dao.saveDraftItems(items)
                 val kind = when {
                     draft.action == "create_task" -> if (requiresFixedPlace(draft.placeType)) "TASK_PLACE" else "CONFIRM_TASK"
+                    draft.action == "create_tasks" -> "CONFIRM_TASKS"
                     draft.mode.isBlank() -> "MODE"
                     else -> "CONFIRM_ROUTE"
                 }
                 dao.saveClarification(AssistantClarification(draftId = draft.draftId, planId = draft.planId,
-                    kind = kind, prompt = clarificationPrompt(kind), destination = draft.destination,
+                    kind = kind, prompt = if (kind == "CONFIRM_TASKS") "请逐项检查待办，选择要保存的事项。" else clarificationPrompt(kind), destination = draft.destination,
                     mode = draft.mode, savedAt = draft.savedAt))
             }
         }

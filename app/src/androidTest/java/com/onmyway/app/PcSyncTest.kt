@@ -167,6 +167,45 @@ class PcSyncTest {
         } finally { source.close(); restored.close() }
     }
 
+    @Test fun room11BaselineUpgradeDoesNotCreateFalseConflictWhenRemoteAdvances() = runBlocking {
+        val phone = Device()
+        val remote = Remote()
+        try {
+            phone.db.tasks().save(Errand(id = "task", title = "before", createdAt = 1, updatedAt = 1))
+            val legacy = phone.repository.snapshot().put("room_version", 11)
+            legacy.getJSONObject("tables").remove("assistant_task_drafts")
+            legacy.getJSONObject("tables").getJSONArray("tasks").getJSONObject(0).remove("plannedDate")
+            val scope = syncScope(phone.credential.server, phone.credential.token)
+            SyncJournal(phone.context, phone.journal).use { it.accept(scope, "test-store", 1, legacy) }
+            remote.revision = 2
+            remote.snapshot = JSONObject(legacy.toString()).apply {
+                getJSONObject("tables").getJSONArray("tasks").getJSONObject(0).put("title", "remote edit")
+            }
+            assertTrue(phone.sync(remote))
+            assertEquals("remote edit", phone.db.tasks().get("task")!!.title)
+            assertEquals("", phone.db.tasks().get("task")!!.plannedDate)
+            assertEquals(0, remote.commits)
+            assertFalse(phone.sync(remote))
+        } finally { phone.close() }
+    }
+
+    @Test fun schemaOnlyUpgradeDoesNotGenerateTaskCommandsOrResetLocalNavigation() = runBlocking {
+        val phone = Device()
+        try {
+            phone.db.tasks().save(Errand(id = "task", title = "same", createdAt = 1, updatedAt = 1))
+            val current = phone.repository.snapshot()
+            val legacy = JSONObject(current.toString()).put("room_version", 11)
+            legacy.getJSONObject("tables").remove("assistant_task_drafts")
+            legacy.getJSONObject("tables").getJSONArray("tasks").getJSONObject(0).remove("plannedDate")
+            assertEquals(0, taskCommands(legacy, current, TaskAuthority(1, JSONObject().put("task", 4))).length())
+            legacy.getJSONObject("preferences").getJSONObject("navigation_context").put("snapshot", "local runtime")
+            assertEquals("local runtime", phone.repository.normalizedSchema(legacy).getJSONObject("preferences")
+                .getJSONObject("navigation_context").getString("snapshot"))
+            assertFalse(phone.repository.normalizedRestore(legacy).getJSONObject("preferences")
+                .getJSONObject("navigation_context").has("snapshot"))
+        } finally { phone.close() }
+    }
+
     @Test fun httpRoundTripRestoresFreshDeviceFromComputerSqlite() = runBlocking {
         val args = InstrumentationRegistry.getArguments()
         val server = args.getString("sync_test_server")
@@ -178,7 +217,7 @@ class PcSyncTest {
         try {
             val api = Api(credential.server)
             assertTrue(api.readSync(credential.token).isNull("snapshot"))
-            a.db.tasks().save(Errand(id = "http-task", title = "Restored over HTTP"))
+            a.db.tasks().save(Errand(id = "http-task", title = "Restored over HTTP", plannedDate = "2026-10-16"))
             a.db.assistant().addMessage(AssistantMessage("http-chat", "user", "Keep my history", 10, null))
             val draft = AssistantDraft(action = "plan_route", draftId = "http-draft", planId = "http-plan",
                 destination = "Library", mode = "cycling", savedAt = System.currentTimeMillis())
@@ -204,6 +243,7 @@ class PcSyncTest {
             PcSyncEngine.synchronize(a.context, credential, a.repository, HttpSyncTransport(credential), a.journal)
             assertTrue(PcSyncEngine.synchronize(b.context, credential, b.repository, HttpSyncTransport(credential), b.journal))
             assertEquals("Restored over HTTP", b.db.tasks().get("http-task")!!.title)
+            assertEquals("2026-10-16", b.db.tasks().get("http-task")!!.plannedDate)
             assertEquals("Keep my history", b.db.assistant().recentMessages().single().text)
             assertEquals(draft, b.db.assistant().draft())
             assertEquals(planning, b.db.assistant().planningDraft())
@@ -214,8 +254,62 @@ class PcSyncTest {
             assertEquals(trip.copy(needsReplan = true), b.db.trips().load())
             assertEquals(event, b.db.trips().history().single())
             val remote = api.readSync(credential.token)
-            assertEquals(11, remote.getJSONObject("snapshot").getInt("room_version"))
+            assertEquals(12, remote.getJSONObject("snapshot").getInt("room_version"))
             assertEquals(1, remote.getInt("revision"))
+            assertEquals(1, remote.getInt("task_protocol"))
+            assertEquals(1, remote.getJSONObject("task_versions").getInt("http-task"))
+            val task = a.db.tasks().get("http-task")!!
+            a.db.tasks().save(task.copy(status = "done", completedAt = System.currentTimeMillis()))
+            PcSyncEngine.synchronize(a.context, credential, a.repository, HttpSyncTransport(credential), a.journal)
+            repeat(2) {
+                assertFalse(PcSyncEngine.synchronize(a.context, credential, a.repository, HttpSyncTransport(credential), a.journal))
+            }
+            val completed = api.readSync(credential.token)
+            assertEquals(2, completed.getJSONObject("task_versions").getInt("http-task"))
+            assertEquals("done", completed.getJSONObject("snapshot").getJSONObject("tables")
+                .getJSONArray("tasks").getJSONObject(0).getString("status"))
+            a.db.tasks().delete(task)
+            PcSyncEngine.synchronize(a.context, credential, a.repository, HttpSyncTransport(credential), a.journal)
+            val deleted = api.readSync(credential.token)
+            assertEquals(3, deleted.getJSONObject("task_versions").getInt("http-task"))
+            assertEquals(0, deleted.getJSONObject("snapshot").getJSONObject("tables").getJSONArray("tasks").length())
+            val afterDeletion = Device()
+            try {
+                assertTrue(PcSyncEngine.synchronize(afterDeletion.context, credential, afterDeletion.repository,
+                    HttpSyncTransport(credential), afterDeletion.journal))
+                assertNull(afterDeletion.db.tasks().get("http-task"))
+                SyncJournal(afterDeletion.context, afterDeletion.journal).use {
+                    assertEquals(3, it.binding(syncScope(credential.server, credential.token))!!.tasks.versions.getInt("http-task"))
+                }
+            } finally { afterDeletion.close() }
+            val store = AssistantStore(a.db, a.context.getSharedPreferences("assistant_conversation", 0))
+            val multi = taskDraftReplacement(JSONObject().put("action", "create_tasks").put("tasks", org.json.JSONArray()
+                .put(JSONObject().put("title", "取快递").put("place_type", "PARCEL").put("planned_date", "2026-10-15"))
+                .put(JSONObject().put("title", "打印论文").put("place_type", "PRINT_SHOP").put("planned_date", "2026-10-16"))),
+                null, UUID.randomUUID().toString())
+            store.setDraft(multi)
+            val print = taskDraftItems(multi)[1]
+            assertTrue(store.confirmTasks(multi.getString("_draft_id"), mapOf(print.getString("item_id") to 1), "Saved print") {})
+            PcSyncEngine.synchronize(a.context, credential, a.repository, HttpSyncTransport(credential), a.journal)
+            val restoredDrafts = Device()
+            try {
+                assertTrue(PcSyncEngine.synchronize(restoredDrafts.context, credential, restoredDrafts.repository,
+                    HttpSyncTransport(credential), restoredDrafts.journal))
+                val restoredStore = AssistantStore(restoredDrafts.db, restoredDrafts.context.getSharedPreferences("assistant_conversation", 0))
+                val pending = restoredStore.load().second!!
+                assertEquals(store.load().second.toString(), pending.toString())
+                assertEquals(1, restoredDrafts.db.assistant().draftItems().size)
+                assertFalse(restoredStore.confirmTasks(multi.getString("_draft_id"), mapOf(print.getString("item_id") to 1), "Replay") {})
+                val parcel = taskDraftItems(pending).single()
+                restoredStore.updateDraftItem(pending.getString("_draft_id"), parcel.getString("item_id"), 1,
+                    taskDraftErrand(parcel).copy(placeJson = Place("test-station", "Test pickup point", 120.0, 31.0).json().toString()))
+                assertTrue(restoredStore.confirmTasks(restoredStore.load().second!!.getString("_draft_id"),
+                    mapOf(parcel.getString("item_id") to 2), "Saved parcel") {})
+                PcSyncEngine.synchronize(restoredDrafts.context, credential, restoredDrafts.repository,
+                    HttpSyncTransport(credential), restoredDrafts.journal)
+                assertNull(restoredStore.load().second)
+                assertEquals(2, api.readSync(credential.token).getJSONObject("snapshot").getJSONObject("tables").getJSONArray("tasks").length())
+            } finally { restoredDrafts.close() }
         } finally { a.close(); b.close() }
     }
 }

@@ -12,7 +12,8 @@ internal class BackupRepository(private val context: Context, private val databa
     private val legacyTables = listOf("tasks", "saved_trip", "route_history", "suggestion_feedback", "agent_events")
     private val v8Tables = legacyTables + listOf("assistant_messages", "assistant_draft")
     private val v10Tables = v8Tables + listOf("planning_draft", "planning_draft_tasks")
-    private val tables = v10Tables + listOf("assistant_clarification", "assistant_place_choices")
+    private val v11Tables = v10Tables + listOf("assistant_clarification", "assistant_place_choices")
+    private val tables = v11Tables + "assistant_task_drafts"
     private val preferenceKeys = mapOf(
         "settings" to listOf("city", "familiar_places", "preferred_detour_minutes",
             "walking_detour_minutes", "cycling_detour_minutes", "learning_enabled"),
@@ -42,16 +43,16 @@ internal class BackupRepository(private val context: Context, private val databa
             }
             preferences.put(name, values)
         }
-        JSONObject().put("format", 1).put("room_version", 11)
+        JSONObject().put("format", 1).put("room_version", 12)
             .put("tables", data).put("preferences", preferences)
     }
 
     fun validate(snapshot: JSONObject) {
-        require(snapshot.optInt("format") == 1 && snapshot.optInt("room_version") in 7..11) {
+        require(snapshot.optInt("format") == 1 && snapshot.optInt("room_version") in 7..12) {
             "电脑备份格式与当前版本不兼容"
         }
         val data = snapshot.getJSONObject("tables")
-        val snapshotTables = when (snapshot.getInt("room_version")) { 7 -> legacyTables; 8 -> v8Tables; 9, 10 -> v10Tables; else -> tables }
+        val snapshotTables = when (snapshot.getInt("room_version")) { 7 -> legacyTables; 8 -> v8Tables; 9, 10 -> v10Tables; 11 -> v11Tables; else -> tables }
         require(data.keys().asSequence().toSet() == snapshotTables.toSet()) { "备份数据表不完整" }
         for (table in snapshotTables) {
             val array = data.getJSONArray(table)
@@ -77,9 +78,10 @@ internal class BackupRepository(private val context: Context, private val databa
         applySyncedSnapshot(snapshot, current)
     }
 
-    fun normalizedRestore(snapshot: JSONObject): JSONObject {
+    /** Schema-only upgrades must not masquerade as user edits or stop an active local trip. */
+    fun normalizedSchema(snapshot: JSONObject): JSONObject {
         validate(snapshot)
-        val result = JSONObject(snapshot.toString()).put("room_version", 11)
+        val result = JSONObject(snapshot.toString()).put("room_version", 12)
         val data = result.getJSONObject("tables")
         for (table in tables) {
             val rows = data.optJSONArray(table) ?: JSONArray()
@@ -93,9 +95,17 @@ internal class BackupRepository(private val context: Context, private val databa
                     "route_history" -> ""
                     else -> it.optString("draftId")
                 }) }
-            if (table == "saved_trip") sorted.forEach { it.put("started", 0).put("needsReplan", 1) }
+            if (snapshot.getInt("room_version") < 12 && table == "tasks")
+                sorted.forEach { it.put("plannedDate", "") }
             data.put(table, JSONArray(sorted))
         }
+        return result
+    }
+
+    fun normalizedRestore(snapshot: JSONObject): JSONObject {
+        val result = normalizedSchema(snapshot)
+        val trips = result.getJSONObject("tables").getJSONArray("saved_trip")
+        for (index in 0 until trips.length()) trips.getJSONObject(index).put("started", 0).put("needsReplan", 1)
         // Navigation runtime state cannot resume after reinstall or on another device.
         result.getJSONObject("preferences").getJSONObject("navigation_context").remove("snapshot")
         return result
@@ -104,6 +114,7 @@ internal class BackupRepository(private val context: Context, private val databa
     /** The expected state is persisted in SyncJournal, so interrupted restores can resume safely. */
     suspend fun applySyncedSnapshot(snapshot: JSONObject, expected: JSONObject) {
         val desired = normalizedRestore(snapshot)
+        val normalizedExpected = normalizedSchema(expected)
         val desiredPreferences = desired.getJSONObject("preferences")
         val expectedPreferences = expected.getJSONObject("preferences")
         fun checkPreferences() {
@@ -148,7 +159,7 @@ internal class BackupRepository(private val context: Context, private val databa
             }
             val current = snapshot().getJSONObject("tables")
             if (canonicalJson(current) != canonicalJson(data)) {
-                check(canonicalJson(current) == canonicalJson(expected.getJSONObject("tables"))) {
+                check(canonicalJson(current) == canonicalJson(normalizedExpected.getJSONObject("tables"))) {
                     "同步期间本机记录已变化；已保留本机修改，请先处理冲突"
                 }
                 for (table in tables) {

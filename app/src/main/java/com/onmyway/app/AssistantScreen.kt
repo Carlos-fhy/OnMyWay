@@ -31,6 +31,8 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -66,6 +68,8 @@ internal class AssistantViewModel internal constructor(
     application: Application,
     conversationPrefs: SharedPreferences,
     database: TaskDatabase = TaskDatabase.get(application),
+    private val requestTransport: AssistantRequestTransport = HttpAssistantRequestTransport,
+    private val requestJournalName: String = "onmyway-assistant-requests.db",
 ) : AndroidViewModel(application) {
     constructor(application: Application) : this(application, application.getSharedPreferences("assistant_conversation", 0))
     private val store = AssistantStore(database, conversationPrefs)
@@ -75,7 +79,7 @@ internal class AssistantViewModel internal constructor(
     val lines: List<ChatLine> get() = storedLines
     var ready by mutableStateOf(false)
         private set
-    private fun addLine(role: String, text: String, routeHistoryId: String? = null) {
+    private fun addLine(role: String, text: String, routeHistoryId: String? = null): ChatLine {
         val line = ChatLine(role, text, routeHistoryId = routeHistoryId)
         storedLines = ((if (storedLines.size == 1 && storedLines[0].id == welcome.id) emptyList() else storedLines)
             + line).takeLast(500)
@@ -83,6 +87,7 @@ internal class AssistantViewModel internal constructor(
             try { writeMutex.withLock { store.add(line) } }
             catch (e: Exception) { error = "对话保存失败，请稍后重试：" + (e.message ?: "数据库不可用") }
         }
+        return line
     }
     private var storedProposal by mutableStateOf<JSONObject?>(null)
     var proposal: JSONObject?
@@ -103,6 +108,13 @@ internal class AssistantViewModel internal constructor(
     var input by mutableStateOf("")
     var busy by mutableStateOf(false)
     var error by mutableStateOf("")
+    var pendingRequest by mutableStateOf<PendingAssistantRequest?>(null)
+        private set
+    var recoveryMessage by mutableStateOf("")
+        private set
+    private suspend fun <T> journal(block: (AssistantRequestJournal) -> T): T = withContext(Dispatchers.IO) {
+        AssistantRequestJournal(getApplication(), requestJournalName).use(block)
+    }
     var preparingRoute by mutableStateOf(false)
     var routeResult by mutableStateOf<JSONObject?>(null)
     var historyDestination by mutableStateOf<Place?>(null)
@@ -131,6 +143,13 @@ internal class AssistantViewModel internal constructor(
                 clarification = writeMutex.withLock { store.clarification() }
                 clarification?.let(automatic::restoreQuestion)
                 storedProposal = restored.second
+                val interrupted = journal { it.pending() }
+                if (interrupted != null && store.responseApplied(interrupted.requestId)) {
+                    journal { it.finish(interrupted.requestId) }
+                } else {
+                    pendingRequest = interrupted
+                    if (interrupted != null) recoveryMessage = "上次请求尚未取回结果，可以继续获取。"
+                }
                 ready = true
                 if (store.legacyWarning) error = "旧版对话中有无法读取的记录；原始数据已保留，其余功能可继续使用。"
             } catch (e: CancellationException) { throw e }
@@ -141,7 +160,7 @@ internal class AssistantViewModel internal constructor(
     suspend fun conversationDay(day: LocalDate) = writeMutex.withLock { store.day(day) }
 
     fun chooseMode(mode: String) {
-        if (!ready || busy || mode !in listOf("walking", "cycling")) return
+        if (!ready || busy || pendingRequest != null || mode !in listOf("walking", "cycling")) return
         val current = proposal ?: return
         if (!automatic.clear()) return
         error = ""
@@ -150,7 +169,12 @@ internal class AssistantViewModel internal constructor(
     fun record(text: String) = addLine("assistant", text)
     fun recordRoute(text: String, historyId: String?) = addLine("assistant", text, historyId)
     fun repeatRoute(event: RouteHistory, vm: AppViewModel): Boolean {
-        if (!ready || busy || vm.busy || vm.updatingTrip || vm.restoringTrip) return false
+        if (!ready || busy || pendingRequest != null || vm.busy || vm.updatingTrip || vm.restoringTrip) return false
+        if (proposal?.optString("action") in listOf("create_task", "create_tasks")) {
+            error = "请先保存或取消当前待办草稿，再从历史记录重新规划。"
+            vm.message = error
+            return false
+        }
         if (!automatic.clear()) return false
         val request = JSONObject(event.requestJson)
         val place = Place.from(request.getJSONObject("destination"))
@@ -176,19 +200,235 @@ internal class AssistantViewModel internal constructor(
         }
         recordRoute(message, historyId)
     }
-    fun saveTask(vm: AppViewModel, task: Errand) {
-        if (busy || !ready) return
+    fun saveTask(vm: AppViewModel, task: Errand, expectedDraftId: String): Boolean {
+        if (busy || !ready || pendingRequest != null || automatic.committing) return false
+        if (proposal?.optString("_draft_id") != expectedDraftId || proposal?.optString("action") != "create_task") {
+            error = "待确认任务已变化，请关闭旧编辑页并重新确认。"
+            return false
+        }
         busy = true; error = ""
         viewModelScope.launch {
-            try { vm.saveAssistantTask(task); proposal = null; record(if (vm.routeSession == null)
-                "已记下：${task.title}。准备出发时告诉我目的地，我会重新规划。" else "已记下：${task.title}") }
+            try {
+                writeMutex.withLock {
+                    vm.saveAssistantTask(task, expectedDraftId)
+                    val restored = store.load()
+                    storedLines = restored.first.ifEmpty { listOf(welcome) }
+                    // Do not enqueue another clear: the transaction already consumed the
+                    // draft, and a replacement may have arrived while Room was suspended.
+                    if (storedProposal?.optString("_draft_id") == expectedDraftId) {
+                        val restoredQuestion = store.clarification()
+                        val restoredChoices = store.planningChoices()
+                        if (storedProposal?.optString("_draft_id") == expectedDraftId) {
+                            automatic.clear()
+                            automatic.restoredChoices = restoredChoices
+                            storedProposal = restored.second
+                            clarification = restoredQuestion
+                            historyDestination = null
+                        }
+                    }
+                }
+            }
             catch (e: CancellationException) { throw e }
             catch (e: Exception) { error = networkMessage(e) }
             finally { busy = false }
         }
+        return true
     }
+    private fun mutateTaskDraft(vm: AppViewModel, expectedDraftId: String, operation: suspend () -> Unit): Boolean {
+        if (!ready || busy || pendingRequest != null || automatic.committing || vm.busy || vm.updatingTrip || vm.restoringTrip) return false
+        if (proposal?.optString("_draft_id") != expectedDraftId || proposal?.optString("action") != "create_tasks") {
+            error = "待确认任务已变化，请重新打开当前草稿。"
+            return false
+        }
+        busy = true; error = ""
+        viewModelScope.launch {
+            try {
+                writeMutex.withLock {
+                    operation()
+                    val restored = store.load()
+                    storedLines = restored.first.ifEmpty { listOf(welcome) }
+                    if (storedProposal?.optString("_draft_id") == expectedDraftId) {
+                        storedProposal = restored.second
+                        clarification = store.clarification()
+                    }
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { error = networkMessage(e) }
+            finally { busy = false }
+        }
+        return true
+    }
+
+    fun saveTasks(vm: AppViewModel, expectedDraftId: String, selections: Map<String, Int>): Boolean =
+        mutateTaskDraft(vm, expectedDraftId) { vm.saveAssistantTasks(expectedDraftId, selections) }
+
+    fun editTaskDraft(vm: AppViewModel, edit: TaskDraftEdit, task: Errand): Boolean =
+        mutateTaskDraft(vm, edit.draftId) { store.updateDraftItem(edit.draftId, edit.itemId, edit.version, task) }
+
+    private fun requestContext(vm: AppViewModel): String {
+        return JSONObject().put("draft_id", proposal?.optString("_draft_id") ?: JSONObject.NULL)
+            .put("trip", assistantTripContext(vm.planningBase()))
+            .put("started", vm.tripStarted).toString()
+    }
+
+    private fun contextMatches(request: PendingAssistantRequest, vm: AppViewModel): Boolean =
+        !vm.restoringTrip && !vm.updatingTrip && !vm.busy && !automatic.busy &&
+            runCatching { Api.validateBase(vm.server) == request.server && requestContext(vm) == request.contextKey }.getOrDefault(false)
+
+    /** Explicit recovery queries the saved request before considering a same-ID resubmission. */
+    fun recoverRequest(vm: AppViewModel) {
+        val request = pendingRequest ?: return
+        if (!ready || busy || vm.restoringTrip || vm.updatingTrip || vm.busy || automatic.busy) return
+        busy = true; error = ""
+        viewModelScope.launch {
+            try {
+                if (writeMutex.withLock { store.responseApplied(request.requestId) }) {
+                    refreshConversation(vm)
+                    finishRequest(request)
+                    return@launch
+                }
+                if (!contextMatches(request, vm)) {
+                    recoveryMessage = "服务地址或当前方案已变化，旧结果不会应用。请重新编辑原指令。"
+                    return@launch
+                }
+                if (request.resultJson != null) {
+                    receiveResponse(request, JSONObject(request.resultJson), vm)
+                    return@launch
+                }
+                val status = requestTransport.status(request.server, JSONObject(request.bodyJson))
+                check(status.optString("request_id") == request.requestId && status.optString("operation") == "chat") {
+                    "恢复接口返回了不匹配的请求。"
+                }
+                when (status.getString("state")) {
+                    "completed" -> receiveResponse(request, status.getJSONObject("result"), vm)
+                    "not_found" -> {
+                        // The server did not record this request. Still use the original body
+                        // and ID; a concurrent/late first attempt is deduplicated by the server.
+                        if (contextMatches(request, vm))
+                            receiveResponse(request, requestTransport.submit(request.server, JSONObject(request.bodyJson)), vm)
+                        else recoveryMessage = "当前方案已变化，请重新编辑原指令。"
+                    }
+                    "running" -> recoveryMessage = "服务仍在处理，请稍后继续获取结果；不会重复发送。"
+                    "failed" -> recoveryMessage = "上次请求处理失败（HTTP ${status.optInt("error_status", 500)}），可重新编辑后发送。"
+                    "unresolved" -> recoveryMessage = "暂时无法确定处理结果，可稍后查询，或重新编辑；旧请求的建议不会自动执行。"
+                    else -> error("无法识别请求恢复状态。")
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { error = networkMessage(e); recoveryMessage = "原请求仍已保留，可以稍后继续获取结果。" }
+            finally { busy = false }
+        }
+    }
+
+    fun editInterruptedRequest() {
+        val request = pendingRequest ?: return
+        if (!ready || busy) return
+        busy = true
+        viewModelScope.launch {
+            try {
+                writeMutex.withLock { store.add(ChatLine("user", request.userText, request.userMessageId, request.createdAt)) }
+                finishRequest(request)
+                input = request.userText
+                error = ""
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) { error = "暂时无法更新请求记录，请重试。" }
+            finally { busy = false }
+        }
+    }
+
+    private suspend fun finishRequest(request: PendingAssistantRequest) {
+        journal { it.finish(request.requestId) }
+        if (pendingRequest?.requestId == request.requestId) {
+            pendingRequest = null
+            recoveryMessage = ""
+        }
+    }
+
+    private suspend fun receiveResponse(request: PendingAssistantRequest, answer: JSONObject, vm: AppViewModel) {
+        if (!journal { it.saveResult(request.requestId, answer.toString()) }) return
+        pendingRequest = request.copy(resultJson = answer.toString())
+        if (writeMutex.withLock { store.responseApplied(request.requestId) }) {
+            refreshConversation(vm)
+            finishRequest(request)
+            return
+        }
+        if (!contextMatches(request, vm)) {
+            recoveryMessage = "当前方案或服务地址已变化，回复已保留但未应用。请重新编辑原指令。"
+            return
+        }
+        val action = answer.getString("action")
+        val batch = action in listOf("create_tasks", "update_task_drafts") ||
+            (action == "create_task" && (answer.has("planned_date") || answer.has("priority")))
+        val replace = batch || action in listOf("create_task", "plan_route")
+        check(!replace || batch || taskDraftItems(proposal).isEmpty()) { "请先保存或取消剩余任务草稿。" }
+        val replacement = if (batch) taskDraftReplacement(answer, proposal, request.requestId)
+        else if (replace) JSONObject(answer.toString()).apply {
+            put("_draft_id", request.requestId)
+            val previousPlan = proposal?.takeIf { action == "plan_route" && it.optString("action") == "plan_route" }
+                ?.optString("_plan_id").orEmpty()
+            val activePlan = if (action == "plan_route" && !vm.tripStarted)
+                vm.planningBase()?.let { it.planId.ifBlank { it.sessionId } }.orEmpty() else ""
+            put("_plan_id", previousPlan.ifBlank { activePlan }.ifBlank { request.requestId })
+        } else null
+        val reply = when (action) {
+            "create_tasks" -> "已整理为多项草稿，请逐项核对，可以只保存其中几项。"
+            "update_task_drafts" -> "已修改指定草稿，其他条目保留；核对后再保存。"
+            "create_task" -> "请确认这件事，保存后会加入待办。"
+            "plan_route" -> if (answer.optString("mode").isBlank()) "这次步行还是骑行？" else "我来定位并查看有哪些事可以顺路办。"
+            "list_tasks" -> taskListReply(request)
+            else -> answer.getString("reply")
+        }
+        val expectedDraft = JSONObject(request.contextKey).optString("draft_id").takeIf { it.isNotBlank() && it != "null" }
+        val applied = writeMutex.withLock {
+            if (!contextMatches(request, vm)) false else store.applyResponse(request.requestId, expectedDraft,
+                ChatLine("user", request.userText, request.userMessageId, request.createdAt),
+                ChatLine("assistant", reply), replacement, replace,
+                expectedTripContext = JSONObject(request.contextKey).getString("trip"))
+        }
+        if (!applied && !writeMutex.withLock { store.responseApplied(request.requestId) }) {
+            recoveryMessage = "待确认方案已更新，旧回复未应用。请重新编辑原指令。"
+            return
+        }
+        // Room's receipt is authoritative. If the process dies before journal deletion,
+        // the next launch only removes the journal entry; it never recreates the draft.
+        refreshConversation(vm)
+        finishRequest(request)
+    }
+
+    private suspend fun refreshConversation(vm: AppViewModel) {
+        val (restored, question) = writeMutex.withLock { store.load() to store.clarification() }
+        storedLines = restored.first.ifEmpty { listOf(welcome) }
+        if (storedProposal?.optString("_draft_id") != restored.second?.optString("_draft_id")) {
+            check(automatic.supersede(vm)) { "行程正在更新，请稍后继续获取结果。" }
+            historyDestination = null
+            storedProposal = restored.second
+            clarification = question
+        }
+    }
+
+    private suspend fun taskListReply(request: PendingAssistantRequest): String {
+        val text = request.userText
+        val pending = store.pendingTasks()
+        val day = java.time.OffsetDateTime.parse(JSONObject(request.bodyJson).getString("now")).toLocalDate()
+        val groups = taskDateSections(pending, "pending", LocalDate.now())
+        val queried = when {
+            "明天" in text -> groups.filter { it.key == day.plusDays(1).toString() }
+            "今天" in text -> groups.filter { it.key != "none" && LocalDate.parse(it.key) <= day }
+            else -> groups
+        }
+        val label = if ("明天" in text) "${day.plusDays(1)}" else if ("今天" in text) "$day 及此前" else "全部"
+        val summary = queried.flatMap { group -> listOf(group.title) + group.tasks.map { "· ${it.title}" } }
+            .take(30).joinToString("\n")
+        val unscheduled = if ("今天" in text || "明天" in text) pending.count { it.plannedDate.isBlank() && it.deadline.isBlank() } else 0
+        return (if (summary.isBlank()) "$label 没有安排日期的待办。" else "$label 待办：\n$summary") +
+            if (unscheduled > 0) "\n另有 $unscheduled 件未安排日期的待办，可在待办页查看。" else ""
+    }
+
     fun send(vm: AppViewModel) {
         if (!ready || busy || vm.busy || vm.updatingTrip || vm.restoringTrip || automatic.busy || input.isBlank()) return
+        if (pendingRequest != null) {
+            error = "上一条请求尚未取回，请先继续获取结果或重新编辑。"
+            return
+        }
         val pendingAtSend = proposal
         val command = input.trim().trimEnd('。', '！', '!')
         if (pendingAtSend != null && command in listOf("取消", "不要了", "不做了", "保留原方案")) {
@@ -205,8 +445,22 @@ internal class AssistantViewModel internal constructor(
             addLine("user", input.trim()); input = ""; error = ""
             saveTask(vm, Errand(title = pendingAtSend.getString("title"),
                 placeType = pendingAtSend.getString("place_type"),
-                deadline = pendingAtSend.optString("deadline")))
+                deadline = pendingAtSend.optString("deadline")), pendingAtSend.getString("_draft_id"))
             return
+        }
+        if (pendingAtSend?.optString("action") == "create_tasks") {
+            val items = taskDraftItems(pendingAtSend)
+            val selections = taskDraftConfirmation(command, items)
+            if (selections != null) {
+                addLine("user", input.trim()); input = ""; error = ""
+                saveTasks(vm, pendingAtSend.getString("_draft_id"), selections)
+                return
+            }
+            if (command in listOf("确认", "保存", "记下") ||
+                Regex("(?:只)?(?:确认|保存|记下).+").matches(command)) {
+                error = "请说明保存哪一项，例如“保存第二项”、“保存打印论文”，或说“全部保存”。"
+                return
+            }
         }
         if (pendingAtSend?.optString("action") == "plan_route" && command in listOf("确认", "确认加入", "按所选规划") &&
             automatic.preview == null) {
@@ -248,17 +502,11 @@ internal class AssistantViewModel internal constructor(
         }
         val text = input.trim().take(4000)
         input = ""; error = ""; busy = true
-        addLine("user", text)
+        val userLine = addLine("user", text)
         viewModelScope.launch {
             try {
                 val today = LocalDate.now()
-                val pendingContext = pendingAtSend?.let { draft ->
-                    when (draft.optString("action")) {
-                        "plan_route" -> "当前有未确认的路线草稿：终点${draft.optString("destination")}，出行方式${draft.optString("mode")}。这条路线尚未执行。"
-                        "create_task" -> "当前有未确认的待办草稿：${draft.optString("title")}。任务尚未保存。"
-                        else -> null
-                    }
-                }
+                val pendingContext = pendingAtSend?.let(::assistantDraftContext)
                 // Keep short follow-ups across date boundaries, but mark old turns so
                 // yesterday's route is not mistaken for an active trip.
                 val recentLines = assistantContextLines(lines)
@@ -285,48 +533,25 @@ internal class AssistantViewModel internal constructor(
                     messages.put(JSONObject().put("role", "assistant").put("content", content.take(4000)))
                     messages.put(JSONObject().put("role", "user").put("content", text))
                 }
-                val answer = Api(vm.server).assistant(messages, vm.tripStarted)
-                if (proposal !== pendingAtSend) {
-                    record("待确认建议已变化，这次回复未执行；请重新发送需要的指令。")
-                    return@launch
-                }
-                if (pendingAtSend != null && answer.getString("action") in listOf("create_task", "plan_route")) {
-                    if (answer.optString("action") == "plan_route" && pendingAtSend.optString("action") == "plan_route")
-                        answer.put("_plan_id", pendingAtSend.optString("_plan_id"))
-                    if (!automatic.supersede(vm)) {
-                        error = "行程正在更新，这次回复未替换方案，请稍后重新发送。"
-                        return@launch
-                    }
-                    proposal = null
-                    record("上一个待确认建议已收起，没有执行。")
-                }
-                when (answer.getString("action")) {
-                    "list_tasks" -> {
-                        val pending = vm.tasks.value.filter { it.status == "pending" }
-                        val today = LocalDate.now()
-                        val groups = taskDateSections(pending, "pending", today)
-                        val queried = when {
-                            "明天" in text -> groups.filter { it.key == today.plusDays(1).toString() }
-                            "今天" in text -> groups.filter { it.key != "none" && LocalDate.parse(it.key) <= today }
-                            else -> groups
-                        }
-                        val label = if ("明天" in text) "明天" else if ("今天" in text) "今天及已逾期" else "全部"
-                        val summary = queried.flatMap { group ->
-                            listOf(group.title) + group.tasks.map { "· ${it.title}" }
-                        }.take(30).joinToString("\n")
-                        val unscheduled = if ("今天" in text || "明天" in text) pending.count { it.deadline.isBlank() } else 0
-                        record(if (summary.isBlank()) "$label 没有设截止时间的待办。" else "$label 待办：\n$summary" +
-                            if (unscheduled > 0) "\n另有 $unscheduled 件未设截止时间的待办，可在待办页查看。" else "")
-                    }
-                    "create_task", "plan_route" -> { if (answer.getString("action") == "plan_route") {
-                        historyDestination = null
-                        if (answer.optString("_plan_id").isBlank() && !vm.tripStarted)
-                            vm.planningBase()?.let { answer.put("_plan_id", it.planId.ifBlank { it.sessionId }) }
-                    }; proposal = answer; record(if (answer.getString("action") == "create_task") "请确认这件事，保存后会加入待办。" else if (answer.optString("mode").isBlank()) "这次步行还是骑行？" else "我来定位并查看有哪些事可以顺路办。") }
-                    else -> record(answer.getString("reply"))
-                }
+                val requestId = UUID.randomUUID().toString()
+                val body = JSONObject().put("request_id", requestId).put("messages", messages)
+                    .put("route_active", vm.tripStarted).put("now", java.time.OffsetDateTime.now().toString())
+                if (pendingAtSend?.optString("action") == "create_tasks")
+                    body.put("draft_items", taskDraftRequestItems(pendingAtSend))
+                val request = PendingAssistantRequest(requestId, Api.validateBase(vm.server), body.toString(),
+                    text, userLine.id, userLine.createdAt, requestContext(vm))
+                journal { it.create(request) }
+                pendingRequest = request
+                // The journal always precedes transport. A crash before this message write is
+                // repaired by the response transaction using the same userMessageId.
+                writeMutex.withLock { store.add(userLine) }
+                receiveResponse(request, requestTransport.submit(request.server, JSONObject(request.bodyJson)), vm)
             } catch (e: CancellationException) { throw e }
-            catch (e: Exception) { error = networkMessage(e); input = text }
+            catch (e: Exception) {
+                error = networkMessage(e)
+                if (pendingRequest == null) input = text
+                else recoveryMessage = "结果尚未取回，原指令已保留；继续获取不会重复创建请求。"
+            }
             finally { busy = false }
         }
     }
@@ -336,7 +561,8 @@ internal class AssistantViewModel internal constructor(
 @Composable
 internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: () -> Unit, openPlan: () -> Unit, openNavigation: () -> Unit,
     chat: AssistantViewModel = viewModel()) {
-    var draft by remember { mutableStateOf<Errand?>(null) }
+    var draft by remember { mutableStateOf<Pair<Errand, String>?>(null) }
+    var taskDraftEdit by remember { mutableStateOf<TaskDraftEdit?>(null) }
     var search by remember { mutableStateOf<String?>(null) }
     var showVoice by rememberSaveable { mutableStateOf(false) }
     var showArchive by remember { mutableStateOf(false) }
@@ -377,6 +603,7 @@ internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: ()
     val context = LocalContext.current
     val auto = chat.automatic
     fun beginAutomatic() {
+        if (chat.pendingRequest != null || chat.busy) return
         chat.proposal?.takeIf { it.optString("action") == "plan_route" && it.optString("mode") in listOf("walking", "cycling") }?.let {
             val knownDestination = it.optJSONObject("known_destination")?.let(Place::from) ?: chat.historyDestination
             auto.start(vm, it.getString("destination"), it.optString("mode", "walking"), knownDestination, it.getString("_draft_id"), it.getString("_plan_id"))
@@ -386,10 +613,10 @@ internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: ()
         if (hasLocationPermission(context)) beginAutomatic()
         else chat.error = "未获得位置权限，可重试或手动设置起点。"
     }
-    LaunchedEffect(chat.proposal, chat.ready, vm.restoringTrip, vm.updatingTrip, vm.busy) {
+    LaunchedEffect(chat.proposal, chat.ready, chat.pendingRequest, chat.busy, vm.restoringTrip, vm.updatingTrip, vm.busy) {
         // Re-entering this tab must keep the existing preview, destination choices and edits.
         // Only a new proposal (or an explicit retry) starts a fresh calculation.
-        if (chat.ready && !vm.restoringTrip && !vm.updatingTrip && !vm.busy && chat.proposal?.optString("action") == "plan_route" &&
+        if (chat.ready && chat.pendingRequest == null && !chat.busy && !vm.restoringTrip && !vm.updatingTrip && !vm.busy && chat.proposal?.optString("action") == "plan_route" &&
             chat.proposal?.optString("mode") in listOf("walking", "cycling") &&
             !chat.preparingRoute && !auto.busy && auto.preview == null &&
             auto.choices.isEmpty() && auto.error.isBlank()
@@ -479,7 +706,22 @@ internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: ()
                 }
             }
             if (viewingToday) {
-            if (chat.ready && visibleLines.size <= 1 && chat.proposal == null && vm.result == null && !chat.busy) {
+            chat.pendingRequest?.let { request -> item(key = "interrupted-request") {
+                Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(if (chat.busy) "正在获取结果" else "上次请求尚未完成", style = MaterialTheme.typography.titleSmall)
+                        Text(request.userText, maxLines = 3, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                        if (chat.recoveryMessage.isNotBlank()) Text(chat.recoveryMessage, style = MaterialTheme.typography.bodySmall)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button({ chat.recoverRequest(vm) }, enabled = !chat.busy && !auto.busy && !vm.busy && !vm.restoringTrip && !vm.updatingTrip) {
+                                Text("继续获取结果")
+                            }
+                            TextButton({ chat.editInterruptedRequest() }, enabled = !chat.busy) { Text("重新编辑") }
+                        }
+                    }
+                }
+            } }
+            if (chat.ready && chat.pendingRequest == null && visibleLines.size <= 1 && chat.proposal == null && vm.result == null && !chat.busy) {
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
                         Text("今天想做什么？", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -506,7 +748,7 @@ internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: ()
                     }
                 }
             }
-            chat.proposal?.let { proposal -> item {
+            chat.proposal?.takeIf { chat.pendingRequest == null }?.let { proposal -> item {
                 if (proposal.optString("action") == "plan_route") {
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         listOf("walking" to "步行", "cycling" to "骑行").forEach { (mode, label) ->
@@ -526,6 +768,12 @@ internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: ()
                     })
                     } else TextButton({ if (auto.dismiss(vm)) chat.proposal = null },
                         enabled = !auto.busy && !vm.busy && !vm.updatingTrip && !vm.restoringTrip) { Text("取消") }
+                } else if (proposal.optString("action") == "create_tasks") {
+                    AssistantTaskDraftCard(proposal,
+                        enabled = chat.ready && !chat.busy && !vm.busy && !vm.updatingTrip && !vm.restoringTrip,
+                        edit = { taskDraftEdit = it },
+                        confirm = { chat.saveTasks(vm, proposal.getString("_draft_id"), it) },
+                        cancel = { chat.proposal = null; chat.record("已取消剩余草稿；已保存的待办保留。") })
                 } else {
                 Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest)) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -539,7 +787,8 @@ internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: ()
                         Button(onClick = {
                             if (task) {
                                 val suggestedTask = Errand(title = proposal.getString("title"), placeType = proposal.getString("place_type"), deadline = proposal.optString("deadline"))
-                                if (fixedLocation) draft = suggestedTask else chat.saveTask(vm, suggestedTask)
+                                val draftId = proposal.getString("_draft_id")
+                                if (fixedLocation) draft = suggestedTask to draftId else chat.saveTask(vm, suggestedTask, draftId)
                             } else {
                                 val keyword = proposal.getString("destination")
                                 val familiar = vm.familiarPlace(keyword)
@@ -550,7 +799,7 @@ internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: ()
                         }
                         if (task && !fixedLocation) {
                             TextButton(onClick = {
-                                draft = Errand(title = proposal.getString("title"), placeType = proposal.getString("place_type"), deadline = proposal.optString("deadline"))
+                                draft = Errand(title = proposal.getString("title"), placeType = proposal.getString("place_type"), deadline = proposal.optString("deadline")) to proposal.getString("_draft_id")
                             }, enabled = chat.ready && !chat.busy && !vm.busy) {
                                 Text("微调")
                             }
@@ -582,7 +831,7 @@ internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: ()
                             if (current) Button({
                                 if (vm.planNeedsRefresh && !vm.tripStarted) { vm.beginPlanEdit(); openPlan() }
                                 else openNavigation()
-                            }, enabled = !vm.busy && !vm.updatingTrip && chat.proposal == null) {
+                            }, enabled = !vm.busy && !vm.updatingTrip && chat.proposal == null && chat.pendingRequest == null) {
                                 Text(if (vm.planNeedsRefresh && !vm.tripStarted) "重新规划" else if (vm.tripStarted) "继续导航" else "开始导航")
                             }
                             if (current) TextButton(openPlan) { Text("查看路线") }
@@ -602,7 +851,7 @@ internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: ()
                 Surface(color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.medium) {
                     Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(chat.error, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onErrorContainer)
-                        Text(if (chat.proposal != null) "建议已保留，可再次确认。" else if (chat.input.isNotBlank()) "内容已保留，可修改后重新发送。" else "可重新录音，或切换文字输入。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
+                        Text(if (chat.pendingRequest != null) "原请求已保留，请使用上方恢复入口。" else if (chat.proposal != null) "建议已保留，可再次确认。" else if (chat.input.isNotBlank()) "内容已保留，可修改后重新发送。" else "可重新录音，或切换文字输入。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
                     }
                 }
             }
@@ -617,7 +866,7 @@ internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: ()
             }
             if (showVoice) {
                 Box(Modifier.weight(1f)) {
-                    CloudVoiceButton(vm.server, enabled = chat.ready && !chat.busy && !auto.busy && !vm.busy,
+                    CloudVoiceButton(vm.server, enabled = chat.ready && chat.pendingRequest == null && !chat.busy && !auto.busy && !vm.busy,
                         result = {
                             chat.input = it.take(4000)
                             chat.send(vm)
@@ -645,7 +894,7 @@ internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: ()
                         }
                     } else null
                 )
-                FilledIconButton({ chat.send(vm) }, enabled = chat.ready && !chat.busy && !auto.busy && !vm.busy && chat.input.isNotBlank()) {
+                FilledIconButton({ chat.send(vm) }, enabled = chat.ready && chat.pendingRequest == null && !chat.busy && !auto.busy && !vm.busy && chat.input.isNotBlank()) {
                     Icon(painterResource(R.drawable.ic_send), "发送")
                 }
             }
@@ -654,9 +903,12 @@ internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: ()
     }
     if (showArchive) RouteArchiveSheet(vm, initialEventId = archiveEventId, dismiss = { showArchive = false },
         repeatRoute = { event -> chat.repeatRoute(event, vm) }, openCurrent = openPlan)
-    draft?.let { initial -> TaskEditor(vm, initial, { draft = null }) { updated ->
-        if (!chat.busy) {
-            draft = null; chat.saveTask(vm, updated)
+    draft?.let { (initial, draftId) -> TaskEditor(vm, initial, { draft = null }) { updated ->
+        if (chat.saveTask(vm, updated, draftId)) draft = null
+    } }
+    taskDraftEdit?.let { edit -> key(edit.draftId, edit.itemId, edit.version) {
+        TaskEditor(vm, edit.task, { taskDraftEdit = null }, allowIncompleteDraft = true, saveLabel = "保留草稿修改") { updated ->
+            if (chat.editTaskDraft(vm, edit, updated)) taskDraftEdit = null
         }
     } }
     search?.let { keyword -> PlacePicker(vm, { search = null }, initialKeyword = keyword) { place ->

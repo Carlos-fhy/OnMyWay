@@ -35,6 +35,7 @@ data class Errand(
     @ColumnInfo(defaultValue = "0") val lastRemindedAt: Long = 0,
     @ColumnInfo(defaultValue = "0") val reminderCount: Int = 0,
     @ColumnInfo(defaultValue = "0") val reminderPending: Boolean = false,
+    @ColumnInfo(defaultValue = "''") val plannedDate: String = "",
 ) {
     fun place(): Place? = if (placeJson.isBlank()) null else Place.from(JSONObject(placeJson))
     fun json(): JSONObject = JSONObject().put("id", id).put("title", title).put("priority", priority)
@@ -222,7 +223,15 @@ val MIGRATION_10_11 = object : Migration(10, 11) {
     }
 }
 
-@Database(entities = [Errand::class, SavedTrip::class, RouteHistory::class, SuggestionFeedback::class, AgentEvent::class, AssistantMessage::class, AssistantDraft::class, PlanningDraft::class, PlanningDraftTask::class, AssistantClarification::class, AssistantPlaceChoice::class], version = 11, exportSchema = true)
+val MIGRATION_11_12 = object : Migration(11, 12) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // A planned day is independent of a deadline; never infer it for existing tasks.
+        db.execSQL("ALTER TABLE tasks ADD COLUMN plannedDate TEXT NOT NULL DEFAULT ''")
+        db.execSQL("CREATE TABLE IF NOT EXISTS assistant_task_drafts (id TEXT NOT NULL PRIMARY KEY, planId TEXT NOT NULL, position INTEGER NOT NULL, version INTEGER NOT NULL, title TEXT NOT NULL, placeType TEXT NOT NULL, deadline TEXT NOT NULL, plannedDate TEXT NOT NULL, priority INTEGER NOT NULL, serviceMinutes INTEGER NOT NULL, placeJson TEXT NOT NULL)")
+    }
+}
+
+@Database(entities = [Errand::class, SavedTrip::class, RouteHistory::class, SuggestionFeedback::class, AgentEvent::class, AssistantMessage::class, AssistantDraft::class, AssistantDraftItem::class, PlanningDraft::class, PlanningDraftTask::class, AssistantClarification::class, AssistantPlaceChoice::class], version = 12, exportSchema = true)
 abstract class TaskDatabase : RoomDatabase() {
     abstract fun tasks(): TaskDao
     abstract fun trips(): TripDao
@@ -233,7 +242,7 @@ abstract class TaskDatabase : RoomDatabase() {
         @Volatile private var instance: TaskDatabase? = null
         fun get(context: Context): TaskDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, TaskDatabase::class.java, "onmyway.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
                 .build().also { instance = it }
         }
     }

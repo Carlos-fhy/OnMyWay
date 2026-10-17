@@ -18,7 +18,7 @@ EMPTY = {
 }
 
 
-@pytest.mark.parametrize("version", [7, 8, 9, 10, 11])
+@pytest.mark.parametrize("version", [7, 8, 9, 10, 11, 12])
 def test_backup_contract_matches_exported_android_schema(version):
     from backend.backup import _columns_for
 
@@ -261,3 +261,50 @@ def test_v11_rejects_invalid_clarification_before_any_write(monkeypatch, tmp_pat
             snapshot["tables"][table][0][column] = value
             assert client.put("/backup", headers=headers, json=snapshot).status_code == 422
         assert client.get("/backup", headers=headers).status_code == 404
+
+
+def test_v12_pending_items_dates_and_internal_receipts_survive_old_database_upgrade(monkeypatch, tmp_path):
+    import copy
+    path = tmp_path / "upgrade-v12.sqlite3"
+    monkeypatch.setenv("ONMYWAY_BACKUP_DB", str(path))
+    monkeypatch.setenv("ONMYWAY_BACKUP_TOKEN", "a" * 32)
+    headers = {"X-Backup-Token": "a" * 32}
+    legacy = v11_snapshot()
+    snapshot = copy.deepcopy(legacy)
+    snapshot["room_version"] = 12
+    for row in snapshot["tables"]["tasks"]:
+        row["plannedDate"] = "2026-10-16"
+    snapshot["tables"]["assistant_draft"][0]["action"] = "create_tasks"
+    snapshot["tables"]["assistant_task_drafts"] = [
+        {"id": "parcel", "planId": "plan-library", "position": 7, "version": 3,
+         "title": "取快递", "placeType": "PARCEL", "deadline": "", "plannedDate": "2026-10-15",
+         "priority": 2, "serviceMinutes": 5, "placeJson": ""},
+        {"id": "print", "planId": "plan-library", "position": 2, "version": 1,
+         "title": "打印论文", "placeType": "PRINT_SHOP", "deadline": "2026-10-18T18:00:00+08:00",
+         "plannedDate": "2026-10-16", "priority": 3, "serviceMinutes": 10, "placeJson": ""},
+    ]
+    snapshot["tables"]["assistant_messages"].append({"id": "receipt-print", "role": "receipt", "text": "",
+        "createdAt": 1, "routeHistoryId": None, "conversationId": "primary"})
+    with TestClient(app) as client:
+        assert client.put("/backup", headers=headers, json=legacy).status_code == 200
+        from uuid import uuid4
+        head = client.get("/sync", headers=headers).json()
+        commands = [{"command_id": str(uuid4()), "operation": "upsert", "task_id": row["id"],
+                     "expected_version": head["task_versions"][row["id"]], "task": row}
+                    for row in snapshot["tables"]["tasks"]]
+        response = client.put("/sync", headers=headers, json={"store_id": head["store_id"],
+            "base_revision": head["revision"], "request_id": str(uuid4()), "snapshot": snapshot,
+            "task_commands": commands})
+        assert response.status_code == 200, response.text
+        assert client.get("/backup", headers=headers).json() == snapshot
+        snapshot["tables"]["assistant_task_drafts"].pop()
+        head = client.get("/sync", headers=headers).json()
+        assert client.put("/sync", headers=headers, json={"store_id": head["store_id"],
+            "base_revision": head["revision"], "request_id": str(uuid4()), "snapshot": snapshot,
+            "task_commands": []}).status_code == 200
+    # A new connection must read the exact remaining proposal after partial confirmation.
+    with TestClient(app) as client:
+        assert client.get("/backup", headers=headers).json() == snapshot
+    with sqlite3.connect(path) as db:
+        assert db.execute("SELECT position, _snapshot_position, version FROM backup_assistant_task_drafts").fetchall() == [(7, 0, 3)]
+        assert db.execute("PRAGMA integrity_check").fetchone() == ("ok",)

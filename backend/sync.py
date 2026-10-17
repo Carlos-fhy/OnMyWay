@@ -8,6 +8,7 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
 from .backup import MAX_BYTES, TABLE_COLUMNS, PREFERENCE_KEYS, _columns_for, _position_column, _ensure_added_columns, _column_definition, _authorize, _connect, _read_snapshot, _validate, _write_snapshot
+from .tasks import _ensure_schema, _metadata, _apply_commands, _require_snapshot_tasks
 
 router = APIRouter(prefix="/sync", tags=["sync"])
 
@@ -16,8 +17,11 @@ def _open():
     db = _connect()
     try:
         with db:
+            db.execute("BEGIN IMMEDIATE")
             db.execute("CREATE TABLE IF NOT EXISTS sync_head (id INTEGER PRIMARY KEY CHECK(id=1), store_id TEXT NOT NULL, revision INTEGER NOT NULL)")
             db.execute("CREATE TABLE IF NOT EXISTS sync_receipts (request_id TEXT PRIMARY KEY, digest TEXT NOT NULL, revision INTEGER NOT NULL)")
+            if "task_metadata" not in {row[1] for row in db.execute("PRAGMA table_info(sync_receipts)")}:
+                db.execute("ALTER TABLE sync_receipts ADD COLUMN task_metadata TEXT")
             db.execute("CREATE TABLE IF NOT EXISTS sync_versions (revision INTEGER PRIMARY KEY, room_version INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
             for name, columns in TABLE_COLUMNS.items():
                 fields = ", ".join(_column_definition(column, affinity) for column, affinity in columns)
@@ -29,6 +33,7 @@ def _open():
             # Concurrent initializers must never replace the stable store identity.
             exists = db.execute("SELECT 1 FROM backup_meta WHERE id=1").fetchone()
             db.execute("INSERT OR IGNORE INTO sync_head VALUES (1, ?, ?)", (str(uuid.uuid4()), 1 if exists else 0))
+            _ensure_schema(db)
         return db
     except Exception:
         db.close()
@@ -58,8 +63,9 @@ def read_sync(x_backup_token: str | None = Header(default=None)):
         db.execute("BEGIN")
         store_id, revision = db.execute("SELECT store_id, revision FROM sync_head WHERE id=1").fetchone()
         snapshot = _read_snapshot(db)
+        task_metadata = _metadata(db)
         db.commit()
-    return {"store_id": store_id, "revision": revision, "snapshot": snapshot}
+    return {"store_id": store_id, "revision": revision, "snapshot": snapshot, **task_metadata}
 
 
 def _commit(body):
@@ -76,23 +82,30 @@ def _commit(body):
         actual_store, current = db.execute("SELECT store_id, revision FROM sync_head WHERE id=1").fetchone()
         if actual_store != store_id:
             raise HTTPException(409, "数据服务身份已变化；请重新连接，手机记录已保留")
-        receipt = db.execute("SELECT digest, revision FROM sync_receipts WHERE request_id=?", (request_id,)).fetchone()
+        receipt = db.execute("SELECT digest, revision, task_metadata FROM sync_receipts WHERE request_id=?", (request_id,)).fetchone()
         if receipt:
             if receipt[0] != digest:
                 raise HTTPException(409, "同步请求标识被重复用于不同内容")
-            return {"store_id": actual_store, "revision": receipt[1]}
+            # Old receipt replay remains byte-semantically compatible; never
+            # attach today's task versions to a historical acknowledgement.
+            return {"store_id": actual_store, "revision": receipt[1], **(json.loads(receipt[2]) if receipt[2] else {})}
         if revision != current:
             raise HTTPException(409, "电脑记录已被其他同步更新；手机修改已保留，请先处理版本冲突")
         previous = db.execute("SELECT room_version FROM backup_meta WHERE id=1").fetchone()
         if previous and previous[0] > snapshot["room_version"]:
             raise HTTPException(409, "旧版 App 不能覆盖新版数据")
         _archive(db, current)
+        if "task_commands" in body:
+            _apply_commands(db, body["task_commands"])
+        _require_snapshot_tasks(db, snapshot["tables"]["tasks"])
         _write_snapshot(db, snapshot)
         next_revision = current + 1
         db.execute("UPDATE sync_head SET revision=? WHERE id=1", (next_revision,))
-        db.execute("INSERT INTO sync_receipts VALUES (?, ?, ?)", (request_id, digest, next_revision))
+        task_metadata = _metadata(db)
+        db.execute("INSERT INTO sync_receipts (request_id, digest, revision, task_metadata) VALUES (?, ?, ?, ?)",
+                   (request_id, digest, next_revision, json.dumps(task_metadata, separators=(",", ":"))))
         _archive(db, next_revision)
-    return {"store_id": store_id, "revision": next_revision}
+    return {"store_id": store_id, "revision": next_revision, **task_metadata}
 
 
 @router.put("")

@@ -10,10 +10,12 @@ import androidx.room.withTransaction
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
@@ -41,8 +43,32 @@ internal fun retainedNavigationTasks(request: JSONArray, result: JSONObject, kee
         }
 }
 
+/** Route constraints must come from current tasks; preserve a stop only for a compatible generic task. */
+internal fun refreshedNavigationTasks(original: JSONArray, selected: JSONArray, current: List<Errand>): List<JSONObject> {
+    val originalById = (0 until original.length()).associate { index ->
+        original.getJSONObject(index).let { it.getString("id") to it }
+    }
+    val currentById = current.associateBy { it.id }
+    return (0 until selected.length()).map { index ->
+        val planned = selected.getJSONObject(index)
+        val id = planned.getString("id")
+        val task = checkNotNull(currentById[id]) { "待办已经变化，请重新提出调整。" }
+        val updated = task.json()
+        val previous = originalById[id]
+        val selectedPlace = planned.optJSONObject("place")
+        if (task.placeJson.isBlank() && previous?.isNull("place") == true &&
+            previous.optString("place_type") == task.placeType && selectedPlace != null) {
+            updated.put("place", JSONObject(selectedPlace.toString())).put("place_type", JSONObject.NULL)
+        }
+        updated
+    }
+}
 
-class AppViewModel internal constructor(application: Application, private val database: TaskDatabase) : AndroidViewModel(application) {
+
+class AppViewModel internal constructor(application: Application, private val database: TaskDatabase,
+    private val navigationDelivery: NavigationRequestDelivery = NavigationRequestDelivery(application),
+    private val navigationTools: NavigationRouteTools? = null,
+) : AndroidViewModel(application) {
     constructor(application: Application) : this(application, TaskDatabase.get(application))
     private val dao = database.tasks()
     private val trips = database.trips()
@@ -53,14 +79,43 @@ class AppViewModel internal constructor(application: Application, private val da
     val planNeedsRefresh: Boolean get() = savedTrip?.needsReplan == true
     private val navigationMemory = NavigationConversationState()
     private var navigationMemoryTrip: SavedTrip? = null
+    private val navigationWriteMutex = Mutex()
+    private var navigationPersistenceRevision = 0L
+    private var navigationSnapshot: JSONObject? = null
+    internal var pendingNavigationRequest by mutableStateOf<PendingAssistantRequest?>(null)
+        private set
+    internal var navigationRecoveryMessage by mutableStateOf("")
+        private set
+    private fun navigationSnapshotNow(): JSONObject? = navigationMemoryTrip?.let { navigationMemory.snapshot(it) }
     private val navigationContextPrefs = application.getSharedPreferences("navigation_context", 0)
     private fun persistNavigationMemory() {
-        val trip = navigationMemoryTrip
-        if (trip == null || navigationMemory.history.isEmpty() && navigationMemory.proposedBody == null) {
-            navigationContextPrefs.edit { remove("snapshot") }
-        } else {
-            navigationContextPrefs.edit { putString("snapshot", navigationMemory.snapshot(trip).toString()) }
+        val snapshot = navigationSnapshotNow()
+        val revision = ++navigationPersistenceRevision
+        navigationSnapshot = snapshot
+        viewModelScope.launch {
+            try { navigationWriteMutex.withLock {
+                if (revision == navigationPersistenceRevision) navigationDelivery.saveContext(snapshot)
+            } }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) { message = "导航对话保存失败，请稍后重试。" }
         }
+    }
+    internal suspend fun persistNavigationMemoryNow() {
+        val snapshot = navigationSnapshotNow()
+        ++navigationPersistenceRevision
+        navigationWriteMutex.withLock { navigationDelivery.saveContext(snapshot) }
+        navigationSnapshot = snapshot
+    }
+    private suspend fun clearNavigationRecovery() {
+        ++navigationAttempt
+        ++navigationPersistenceRevision
+        navigationMemory.persist = null; navigationMemory.clear(); navigationMemoryTrip = null
+        navigationSnapshot = null
+        navigationWriteMutex.withLock {
+            navigationDelivery.pending()?.let { navigationDelivery.finish(it.requestId) }
+            navigationDelivery.saveContext(null)
+        }
+        pendingNavigationRequest = null; navigationRecoveryMessage = ""
     }
     internal val navigationConversation: NavigationConversationState get() {
         val currentTrip = savedTrip
@@ -78,10 +133,10 @@ class AppViewModel internal constructor(application: Application, private val da
             navigationMemory.clear()
             navigationMemoryTrip = savedTrip
             val stored = savedTrip
-            val snapshot = navigationContextPrefs.getString("snapshot", null)
+            val snapshot = navigationSnapshot
             if (stored != null && snapshot != null) {
-                val restored = runCatching { navigationMemory.restore(JSONObject(snapshot), stored) }.getOrDefault(false)
-                if (!restored) navigationContextPrefs.edit { remove("snapshot") }
+                val restored = runCatching { navigationMemory.restore(snapshot, stored) }.getOrDefault(false)
+                if (!restored) navigationSnapshot = null
             }
             navigationMemory.persist = ::persistNavigationMemory
         }
@@ -289,10 +344,21 @@ class AppViewModel internal constructor(application: Application, private val da
     } ?: task
 
     init {
+        viewModelScope.coroutineContext[Job]?.invokeOnCompletion { navigationDelivery.close() }
         viewModelScope.launch {
             try {
+                navigationSnapshot = navigationDelivery.loadContext()
+                pendingNavigationRequest = navigationDelivery.pending()
+                if (navigationSnapshot == null) {
+                    navigationContextPrefs.getString("snapshot", null)?.let { old ->
+                        navigationSnapshot = runCatching { JSONObject(old) }.getOrNull()
+                        navigationDelivery.saveContext(navigationSnapshot)
+                    }
+                }
+                navigationContextPrefs.edit { remove("snapshot") }
                 tripMutex.withLock {
                     val stored = trips.load()
+                    if (stored == null) clearNavigationRecovery()
                     if (stored != null && stored.started && revision == 0 && !NavigationRuntime.owns(stored.sessionId)) {
                         database.withTransaction {
                             trips.record(RouteHistory(sessionId = stored.sessionId, planId = stored.planId, state = NavigationState.CANCELLED.name,
@@ -300,7 +366,7 @@ class AppViewModel internal constructor(application: Application, private val da
                             trips.clear()
                         }
                         terminalState = NavigationState.CANCELLED
-                        navigationContextPrefs.edit { remove("snapshot") }
+                        clearNavigationRecovery()
                         message = "上次导航已结束，方案保存在行程记录；再次出发请重新规划。"
                         return@withLock
                     }
@@ -313,6 +379,7 @@ class AppViewModel internal constructor(application: Application, private val da
                             task.isNull("place") && requiresFixedPlace(task.optString("place_type"))
                         }) {
                             trips.clear()
+                            clearNavigationRecovery()
                             message = "旧方案含未指定领取地点的任务，请补全地点后重新规划。"
                             return@withLock
                         }
@@ -398,11 +465,12 @@ class AppViewModel internal constructor(application: Application, private val da
                     revision++; savedTrip = null; result = null; tripStarted = false
                     origin = null; destination = null; selected = emptySet(); extra = ""; arriveBy = ""; partial = false
                     editingPlan = false; draftBackup = null; tripPlaces = emptyMap(); terminalState = state
-                    navigationMemory.persist = null; navigationMemory.clear(); navigationMemoryTrip = null
-                    navigationContextPrefs.edit { remove("snapshot") }
                     message = if (arrived) "已到达，行程保存在记录中；未办事项仍保留。"
                         else "导航已结束，方案保存在行程记录；再次出发请重新规划。"
                     finished = true
+                    try { clearNavigationRecovery() }
+                    catch (e: CancellationException) { throw e }
+                    catch (_: Exception) { message += " 上次调整记录清理失败，旧方案不会再应用。" }
                 }
             } catch (_: Exception) { message = "行程结束失败，请重试" }
             finally { updatingTrip = false }
@@ -445,9 +513,24 @@ class AppViewModel internal constructor(application: Application, private val da
             } catch (e: Exception) { message = "任务保存失败，请重试。" }
         }
     }
-    suspend fun saveAssistantTask(task: Errand) {
-        require(!requiresFixedPlace(task.placeType) || task.place() != null) { "请指定实际领取地点" }
-        persistTask(task, source = "ASSISTANT")
+    suspend fun saveAssistantTask(task: Errand, expectedDraftId: String): Boolean = tripMutex.withLock {
+        val store = AssistantStore(database, getApplication<Application>().getSharedPreferences("assistant_conversation", 0))
+        val successText = if (routeSession == null)
+            "已记下：${task.title}。准备出发时告诉我目的地，我会重新规划。" else "已记下：${task.title}"
+        val created = store.confirmTask(expectedDraftId, task, successText) { saved ->
+            trace("ACTION_CREATED", "ASSISTANT", actionId = saved.id, correlationId = expectedDraftId)
+        }
+        if (created) revision++
+        created
+    }
+    suspend fun saveAssistantTasks(expectedDraftId: String, selections: Map<String, Int>): Boolean = tripMutex.withLock {
+        val store = AssistantStore(database, getApplication<Application>().getSharedPreferences("assistant_conversation", 0))
+        val created = store.confirmTasks(expectedDraftId, selections,
+            "已保存所选 ${selections.size} 件事；未选草稿继续保留。") { saved ->
+            trace("ACTION_CREATED", "ASSISTANT", actionId = saved.id, correlationId = expectedDraftId)
+        }
+        if (created) revision++
+        created
     }
     fun delete(task: Errand) {
         viewModelScope.launch {
@@ -528,8 +611,102 @@ class AppViewModel internal constructor(application: Application, private val da
         }
     }
     suspend fun search(keyword: String, searchCity: String) = Api(server).search(keyword, searchCity)
+    private var navigationAttempt = 0L
+    private var adjustingNavigation = false
+    private suspend fun <T> navigationAdjustment(block: suspend () -> T): T {
+        check(!adjustingNavigation && !updatingTrip) { "正在处理上次调整，请稍后重试。" }
+        adjustingNavigation = true
+        return try { block() } finally { adjustingNavigation = false }
+    }
+    private suspend fun navigationOrigin() = navigationTools?.origin() ?: assistantOrigin()
+    private suspend fun navigationPlan(body: JSONObject) = navigationTools?.plan(server, body) ?: Api(server).plan(body)
+    private suspend fun navigationSearch(keyword: String, searchCity: String) =
+        navigationTools?.search(server, keyword, searchCity) ?: search(keyword, searchCity)
+    private suspend fun navigationRequestContext(previous: SavedTrip): String {
+        val ids = JSONObject(previous.requestJson).getJSONArray("tasks")
+        val rows = (0 until ids.length()).map { dao.get(ids.getJSONObject(it).getString("id")) }
+        val memory = navigationConversation
+        val content = JSONObject().put("trip", assistantTripContext(previous))
+            .put("tasks", rows.toString()).put("proposed", memory.proposedBody ?: JSONObject.NULL)
+            .put("new_task", memory.pendingNewTask?.json() ?: JSONObject.NULL).toString()
+        return java.security.MessageDigest.getInstance("SHA-256").digest(content.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+    }
+    internal suspend fun editNavigationRequest() = navigationAdjustment { withContext(NonCancellable) {
+        val request = pendingNavigationRequest ?: return@withContext
+        navigationAttempt++
+        navigationDelivery.finish(request.requestId)
+        pendingNavigationRequest = null; navigationRecoveryMessage = ""
+        navigationConversation.input = request.userText
+    } }
+    internal suspend fun cancelNavigationAdjustment() = navigationAdjustment { withContext(NonCancellable) {
+        navigationAttempt++
+        pendingNavigationRequest?.let { navigationDelivery.finish(it.requestId) }
+        pendingNavigationRequest = null; navigationRecoveryMessage = ""
+        navigationConversation.clear()
+        persistNavigationMemoryNow()
+    } }
+    internal suspend fun recoverNavigationRequest(onProgress: (String) -> Unit = {}): NavigationChange? =
+        navigationAdjustment { recoverNavigationRequestOnce(onProgress) }
+
+    private suspend fun recoverNavigationRequestOnce(onProgress: (String) -> Unit): NavigationChange? {
+        check(!busy && !updatingTrip && !editingPlan && !restoringTrip) { "行程正在更新，请稍后重试。" }
+        val request = pendingNavigationRequest ?: return null
+        val previous = savedTrip
+        if (previous == null || trips.load() != previous || Api.validateBase(server) != request.server ||
+            navigationRequestContext(previous) != request.contextKey) {
+            navigationRecoveryMessage = "行程、待办或服务地址已变化，旧指令不会应用。请重新编辑。"
+            return null
+        }
+        onProgress("正在取回上次调整结果")
+        return when (val delivered = navigationDelivery.obtain(request)) {
+            is NavigationDeliveryResult.Ready -> buildNavigationChange(request.userText, null, onProgress, request, delivered.result)
+            is NavigationDeliveryResult.Waiting -> {
+                navigationRecoveryMessage = when (delivered.state) {
+                    "running" -> "仍在理解上次指令，请稍后继续获取，不会重复发送。"
+                    "failed" -> "上次指令处理失败，可重新编辑后发送。"
+                    "superseded" -> "请求已取消或替换，请重新打开调整页面。"
+                    else -> "暂时无法确定结果，可稍后查询或重新编辑。"
+                }
+                null
+            }
+        }
+    }
+    private suspend fun commitNavigationOutcome(previous: SavedTrip, request: PendingAssistantRequest?,
+        validate: suspend () -> Unit = {}, update: () -> Unit) = withContext(NonCancellable) { tripMutex.withLock {
+        check(savedTrip == previous && trips.load() == previous) { "行程已变化，请重新提出调整。" }
+        validate()
+        request?.let { check(navigationRequestContext(previous) == it.contextKey && Api.validateBase(server) == it.server) {
+            "行程、待办或服务地址已变化，旧回复未应用。"
+        } }
+        val memory = navigationConversation
+        val before = memory.snapshot(previous)
+        memory.persist = null
+        try {
+            ++navigationPersistenceRevision
+            update()
+            val snapshot = memory.snapshot(previous)
+            navigationWriteMutex.withLock {
+                if (request == null) navigationDelivery.saveContext(snapshot)
+                else check(navigationDelivery.consume(request.requestId, snapshot)) { "请求已取消或替换。" }
+            }
+            navigationSnapshot = snapshot
+            if (pendingNavigationRequest?.requestId == request?.requestId) pendingNavigationRequest = null
+            navigationRecoveryMessage = ""
+        } catch (e: Exception) {
+            memory.restore(before, previous)
+            throw e
+        } finally { memory.persist = ::persistNavigationMemory }
+    }
+    }
     internal suspend fun previewNavigationChange(text: String, chosenDestination: Place? = null, onProgress: (String) -> Unit = {}): NavigationChange {
-        check(!busy && !updatingTrip && !editingPlan) { "行程正在更新，请稍后重试。" }
+        check(pendingNavigationRequest == null) { "上次调整尚未取回，请先继续获取结果或重新编辑。" }
+        return navigationAdjustment { buildNavigationChange(text, chosenDestination, onProgress) }
+    }
+    private suspend fun buildNavigationChange(text: String, chosenDestination: Place?, onProgress: (String) -> Unit,
+        recoveredRequest: PendingAssistantRequest? = null, recoveredAnswer: JSONObject? = null): NavigationChange {
+        check(!busy && !updatingTrip && !editingPlan && !restoringTrip) { "行程正在更新，请稍后重试。" }
+        val attempt = ++navigationAttempt
         val previous = savedTrip ?: error("没有正在进行的行程。")
         val old = JSONObject(previous.requestJson)
         val oldTasks = old.getJSONArray("tasks")
@@ -551,15 +728,47 @@ class AppViewModel internal constructor(application: Application, private val da
         var keep = if (target != null) pendingIds else navigationSelection(text, selectedTasks)
         var requestedNewTask: Errand? = if (target != null) pendingChoiceNewTask else null
         val history = JSONArray(memory.history.map { (role, content) -> JSONObject().put("role", role).put("content", content) })
-        memory.record("user", if (target == null) text else "选择地点：${target.name}")
-        if (keep == null) {
-            onProgress("正在理解调整指令")
-            val answer = Api(server).navigation(text, old.getJSONObject("destination").getString("name"), active, history, proposed)
-            memory.record("assistant", answer.optString("reply").ifBlank { "已理解调整意图，尚未执行。" })
-            val action = answer.optString("action")
-            check(action == "adjust" || action == "add_stop") {
-                answer.optString("reply").ifBlank { "请说明要保留的事项和终点。" }
+        if (recoveredRequest != null) {
+            check(Api.validateBase(server) == recoveredRequest.server && navigationRequestContext(previous) == recoveredRequest.contextKey) {
+                "当前上下文已变化，旧请求不会应用。"
             }
+            val originalHistory = JSONObject(recoveredRequest.bodyJson).getJSONArray("history")
+            memory.history = (0 until originalHistory.length()).map { originalHistory.getJSONObject(it).let { turn ->
+                turn.getString("role") to turn.getString("content")
+            } }
+        }
+        memory.record("user", if (target == null) text else "选择地点：${target.name}")
+        var deliveryRequest = recoveredRequest
+        if (keep == null || recoveredAnswer != null) {
+            onProgress("正在理解调整指令")
+            val answer = recoveredAnswer ?: run {
+                val requestId = java.util.UUID.randomUUID().toString()
+                val body = JSONObject().put("request_id", requestId).put("text", text)
+                    .put("destination", old.getJSONObject("destination").getString("name"))
+                    .put("tasks", JSONArray(active.map { JSONObject().put("id", it.id).put("title", it.title).put("place_type", it.placeType) }))
+                    .put("history", history).put("proposed_destination", proposed?.getJSONObject("destination")?.getString("name") ?: "")
+                    .put("proposed_task_ids", if (proposed == null) JSONObject.NULL else JSONArray(proposedIds.toList()))
+                val request = PendingAssistantRequest(requestId, Api.validateBase(server), body.toString(), text,
+                    "navigation-user-$requestId", System.currentTimeMillis(), navigationRequestContext(previous))
+                deliveryRequest = request
+                try {
+                    persistNavigationMemoryNow()
+                    val delivered = navigationDelivery.submit(request)
+                    check(delivered is NavigationDeliveryResult.Ready) { "请求仍待处理，请继续获取结果。" }
+                    delivered.result
+                } finally { withContext(NonCancellable) { pendingNavigationRequest = navigationDelivery.pending() } }
+            }
+            check(attempt == navigationAttempt && savedTrip == previous &&
+                navigationRequestContext(previous) == deliveryRequest?.contextKey && Api.validateBase(server) == deliveryRequest?.server) {
+                "行程、待办或服务地址已变化，旧回复未应用。"
+            }
+            val action = answer.optString("action")
+            if (action == "clarify") {
+                val reply = answer.optString("reply").ifBlank { "请说明要保留的事项和终点。" }
+                commitNavigationOutcome(previous, deliveryRequest) { memory.record("assistant", reply) }
+                error(reply)
+            }
+            check(action == "adjust" || action == "add_stop") { "无法识别导航调整结果。" }
             val ids = answer.getJSONArray("keep_task_ids")
             keep = (0 until ids.length()).map { ids.getString(it) }.toSet()
             check(keep.all { id -> active.any { it.id == id } }) { "返回的任务不在当前行程中，请重试。" }
@@ -570,27 +779,33 @@ class AppViewModel internal constructor(application: Application, private val da
                 check(type in listOf("SUPERMARKET", "PRINT_SHOP", "PHARMACY") && title.isNotBlank()) {
                     "新增事项类型不受支持，请换一种说法。"
                 }
-                requestedNewTask = Errand(title = title, placeType = type)
+                requestedNewTask = Errand(id = java.util.UUID.nameUUIDFromBytes(("navigation-stop-" + deliveryRequest!!.requestId)
+                    .toByteArray(Charsets.UTF_8)).toString(), title = title, placeType = type)
             }
             val keyword = answer.optString("destination")
             if (target == null && keyword.isNotBlank()) target = familiarPlace(keyword)
             if (target == null && keyword.isNotBlank()) {
                 val searchCity = city.ifBlank {
                     onProgress("正在定位以确定搜索城市")
-                    val current = assistantOrigin()
+                    val current = navigationOrigin()
                     Regex("(?:省)?([^省]+?市)").find(current.address)?.groupValues?.get(1).orEmpty()
                 }
                 check(searchCity.isNotBlank()) { "无法确定搜索城市，请在设置中填写城市。" }
                 onProgress("正在搜索新的目的地")
-                val places = search(keyword, searchCity)
+                val places = navigationSearch(keyword, searchCity)
                 check(places.isNotEmpty()) { "没有找到该地点，请补充城市或完整名称。" }
-                memory.record("assistant", "请选目的地：" + places.mapIndexed { index, place -> "${index + 1}. ${place.name}" }.joinToString("；"))
+                check(attempt == navigationAttempt && savedTrip == previous) { "行程已变化，请重新提出调整。" }
+                commitNavigationOutcome(previous, deliveryRequest) {
+                    memory.setChoices(places, checkNotNull(keep), text, requestedNewTask)
+                    memory.record("assistant", "请选目的地：" + places.mapIndexed { index, place -> "${index + 1}. ${place.name}" }.joinToString("；"))
+                }
                 throw NavigationDestinationChoice(places, checkNotNull(keep), requestedNewTask)
             }
         }
         val keptIds = checkNotNull(keep)
         val tentativeNewTask = requestedNewTask ?: previousNewTask?.takeIf { it.id in keptIds }
-        val retainedOld = retainedNavigationTasks(oldTasks, JSONObject(previous.resultJson), keptIds)
+        val selectedOld = retainedNavigationTasks(oldTasks, JSONObject(previous.resultJson), keptIds)
+        val retainedOld = refreshedNavigationTasks(oldTasks, JSONArray(selectedOld), existing)
         check(retainedOld.size + (if (tentativeNewTask == null) 0 else 1) <= 6) {
             "一趟路线最多 6 件事，请先移除一件。"
         }
@@ -602,12 +817,13 @@ class AppViewModel internal constructor(application: Application, private val da
         onProgress("正在获取当前位置")
         val body = JSONObject(previous.requestJson)
             .put("destination", effectiveDestination)
-            .put("origin", assistantOrigin().json())
+            .put("origin", navigationOrigin().json())
             .put("departure", OffsetDateTime.now().toString()).put("allow_partial", false)
             .put("tasks", JSONArray(retainedOld + listOfNotNull(tentativeNewTask?.json())))
         onProgress("正在计算调整后的路线")
-        val route = Api(server).plan(body)
-        check(savedTrip == previous) { "行程已变化，请重新提出调整。" }
+        val route = navigationPlan(body)
+        check(attempt == navigationAttempt && savedTrip == previous && existing.all { dao.get(it.id) == it }) { "行程或待办已变化，请重新提出调整。" }
+        deliveryRequest?.let { check(navigationRequestContext(previous) == it.contextKey && Api.validateBase(server) == it.server) { "当前调整已变化，请重新编辑。" } }
         val newTask = tentativeNewTask?.let { task ->
             val stops = route.getJSONArray("stops")
             val stop = (0 until stops.length()).map { stops.getJSONObject(it) }.firstOrNull { stop ->
@@ -623,70 +839,127 @@ class AppViewModel internal constructor(application: Application, private val da
                     tasksInBody.put(index, newTask.json())
             }
         }
-        memory.setProposal(body, newTask)
-        memory.record("assistant", "待确认方案：终点${effectiveDestination.getString("name")}；停靠点：" +
+        commitNavigationOutcome(previous, deliveryRequest) {
+            memory.setProposal(body, newTask)
+            memory.record("assistant", "待确认方案：终点${effectiveDestination.getString("name")}；停靠点：" +
             (0 until route.getJSONArray("stops").length()).joinToString("、") {
                 route.getJSONArray("stops").getJSONObject(it).getJSONObject("place").getString("name")
             })
-        return NavigationChange(previous, body, route, existing, newTask)
+        }
+        return NavigationChange(previous, body, route, existing, newTask).also { memory.draft = it }
     }
 
-    internal suspend fun recalculateNavigationProposal(): NavigationChange {
-        check(!busy && !updatingTrip && !editingPlan) { "行程正在更新，请稍后重试。" }
+    internal suspend fun recalculateNavigationProposal(): NavigationChange = navigationAdjustment {
+        check(pendingNavigationRequest == null) { "上次调整尚未取回，请先继续获取结果或重新编辑。" }
+        recalculateNavigationProposalOnce()
+    }
+
+    private suspend fun recalculateNavigationProposalOnce(): NavigationChange {
+        check(!busy && !updatingTrip && !editingPlan && !restoringTrip) { "行程正在更新，请稍后重试。" }
         val previous = savedTrip ?: error("没有正在进行的行程。")
         val memory = navigationConversation
-        val proposed = memory.proposedBody ?: error("没有待恢复的方案。")
-        val ids = proposed.getJSONArray("tasks")
+        val proposedJson = memory.proposedBody?.toString() ?: error("没有待恢复的方案。")
+        val proposed = JSONObject(proposedJson)
+        val requested = proposed.getJSONArray("tasks")
+        val ids = (0 until requested.length()).map { requested.getJSONObject(it).getString("id") }
         val pending = memory.pendingNewTask
-        val existing = (0 until ids.length()).mapNotNull { index ->
-            val id = ids.getJSONObject(index).getString("id")
-            if (id == pending?.id) null else dao.get(id)
-        }
-        check(existing.all { it.status == "pending" } && existing.size + (if (pending == null) 0 else 1) == ids.length()) {
+        memory.invalidatePreview()
+        check(ids.size == ids.toSet().size && (pending == null || pending.id in ids)) {
             "待办已经变化，请重新提出调整。"
         }
-        val body = JSONObject(proposed.toString()).put("origin", assistantOrigin().json())
-            .put("departure", OffsetDateTime.now().toString())
-        val route = Api(server).plan(body)
-        check(savedTrip == previous) { "行程已变化，请重新提出调整。" }
-        memory.setProposal(body, pending)
-        memory.record("assistant", "已重新计算待确认方案，请检查路线后再确认。")
-        return NavigationChange(previous, body, route, existing, pending)
+        val existing = ids.filter { it != pending?.id }.map { id ->
+            val task = dao.get(id)
+            check(task != null && task.status == "pending") { "待办已经变化，请重新提出调整。" }
+            task
+        }
+        check(pending == null || dao.get(pending.id) == null) { "新增事项已经存在，请重新提出调整。" }
+        val originalTasks = JSONObject(previous.requestJson).getJSONArray("tasks")
+        val existingRequests = JSONArray((0 until requested.length()).map { requested.getJSONObject(it) }
+            .filter { it.getString("id") != pending?.id })
+        val refreshed = refreshedNavigationTasks(originalTasks, existingRequests, existing)
+            .associateBy { it.getString("id") }
+        val recalculatedTasks = ids.map { id ->
+            if (id == pending?.id) checkNotNull(pending).json() else checkNotNull(refreshed[id])
+        }
+        val body = JSONObject(proposedJson).put("tasks", JSONArray(recalculatedTasks))
+            .put("origin", navigationOrigin().json()).put("departure", OffsetDateTime.now().toString())
+        val route = navigationPlan(body)
+        check(savedTrip == previous && trips.load() == previous) { "行程已变化，请重新提出调整。" }
+        check(memory.proposedBody?.toString() == proposedJson && memory.pendingNewTask == pending) {
+            "调整方案已经变化，请重新提出调整。"
+        }
+        check(existing.all { dao.get(it.id) == it } && (pending == null || dao.get(pending.id) == null)) {
+            "待办已经变化，请重新提出调整。"
+        }
+        commitNavigationOutcome(previous, null, validate = {
+            check(memory.proposedBody?.toString() == proposedJson && memory.pendingNewTask == pending &&
+                existing.all { dao.get(it.id) == it } && (pending == null || dao.get(pending.id) == null)) {
+                "调整方案或待办已经变化，请重新提出调整。"
+            }
+        }) {
+            memory.setProposal(body, pending)
+            memory.record("assistant", "已重新计算待确认方案，请检查路线后再确认。")
+        }
+        return NavigationChange(previous, body, route, existing, pending).also { memory.draft = it }
     }
 
     internal suspend fun confirmNavigationChange(change: NavigationChange) {
-        check(!busy && !updatingTrip && !editingPlan) { "行程正在更新，请稍后重试。" }
-        check(System.currentTimeMillis() - change.createdAt < 60_000) { "方案已过期，请重新计算。" }
-        fun validate() {
-            check(savedTrip == change.previous) { "行程已变化，请重新计算。" }
-            check(change.tasks.all { old -> tasks.value.any { it == old } }) { "待办已变化，请重新计算。" }
+        check(!adjustingNavigation && pendingNavigationRequest == null) { "调整尚未完成，请先获取完整方案。" }
+        check(!busy && !updatingTrip && !editingPlan && !restoringTrip) { "行程正在更新，请稍后重试。" }
+        val memory = navigationConversation
+        fun validatePreview() {
+            check(memory.draft?.versionId == change.versionId && memory.draft == change) {
+                "待确认方案已变化，请重新核对。"
+            }
+            val now = System.currentTimeMillis()
+            check(change.createdAt > 0 && now >= change.createdAt && now - change.createdAt <= 60_000L) {
+                "方案已过期，请重新计算。"
+            }
         }
-        validate()
+        validatePreview()
         updatingTrip = true
         try {
-            tripMutex.withLock {
-                validate()
-                val stored = change.previous.copy(requestJson = change.body.toString(), resultJson = change.route.toString(), plannedAt = System.currentTimeMillis(), needsReplan = false)
+            withContext(NonCancellable) { tripMutex.withLock {
+                validatePreview()
+                val body = JSONObject(change.bodyJson)
+                val route = JSONObject(change.routeJson)
+                val stored = change.previous.copy(requestJson = change.bodyJson, resultJson = change.routeJson,
+                    plannedAt = System.currentTimeMillis(), needsReplan = false)
                 database.withTransaction {
-                    trips.record(RouteHistory(sessionId = stored.sessionId, planId = stored.planId, state = NavigationState.REPLANNING.name,
-                        timestamp = System.currentTimeMillis(), requestJson = change.previous.requestJson, resultJson = change.previous.resultJson))
+                    validatePreview()
+                    check(trips.historyById(change.versionId) == null) { "此方案已经确认，请勿重复提交。" }
+                    validateRouteConfirmation(change.createdAt, System.currentTimeMillis(),
+                        trips.load() == change.previous && savedTrip == change.previous,
+                        change.tasks.all { dao.get(it.id) == it })
+                    check(change.addedTask == null || dao.get(change.addedTask.id) == null) {
+                        "新增事项已经存在，请重新计算。"
+                    }
+                    trips.record(RouteHistory(id = "${change.versionId}:replanning", sessionId = stored.sessionId,
+                        planId = stored.planId, state = NavigationState.REPLANNING.name,
+                        timestamp = stored.plannedAt, requestJson = change.previous.requestJson,
+                        resultJson = change.previous.resultJson))
                     change.addedTask?.let { dao.save(it) }
                     trips.save(stored)
-                    trips.record(RouteHistory(sessionId = stored.sessionId, planId = stored.planId,
+                    trips.record(RouteHistory(id = change.versionId, sessionId = stored.sessionId, planId = stored.planId,
                         state = NavigationState.NAVIGATION_OPENED.name, timestamp = stored.plannedAt,
                         requestJson = stored.requestJson, resultJson = stored.resultJson))
+                    validatePreview()
                 }
-                savedTrip = stored; result = change.route
+                savedTrip = stored; result = route
                 navigationMemoryTrip = stored
-                navigationMemory.invalidatePreview()
-                navigationMemory.setProposal(null, null)
-                navigationMemory.record("assistant", "用户已确认，路线已更新。终点：${change.body.getJSONObject("destination").getString("name")}")
-                origin = Place.from(change.body.getJSONObject("origin"))
-                destination = Place.from(change.body.getJSONObject("destination"))
-                val chosen = change.body.getJSONArray("tasks")
+                memory.clear()
+                memory.record("assistant", "用户已确认，路线已更新。终点：${body.getJSONObject("destination").getString("name")}")
+                origin = Place.from(body.getJSONObject("origin"))
+                destination = Place.from(body.getJSONObject("destination"))
+                val chosen = body.getJSONArray("tasks")
                 selected = (0 until chosen.length()).map { chosen.getJSONObject(it).getString("id") }.toSet()
                 revision++
-            }
+                // Room already committed the route. A separate context checkpoint failure must not
+                // make a successful confirmation look retryable or leave screen fields half updated.
+                try { persistNavigationMemoryNow() }
+                catch (e: CancellationException) { throw e }
+                catch (_: Exception) { message = "路线已更新，调整记录暂未保存；旧方案不会再次应用。" }
+            } }
         } finally { updatingTrip = false }
     }
     internal fun planningBase(): SavedTrip? = savedTrip

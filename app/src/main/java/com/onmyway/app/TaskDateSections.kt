@@ -8,7 +8,7 @@ import java.time.format.DateTimeFormatter
 
 internal data class TaskDateSection(val key: String, val title: String, val tasks: List<Errand>)
 
-/** Pending tasks use their deadline; completed tasks use completion time. No deadline stays visible. */
+/** Plan dates organize work; legacy deadlines remain a fallback, without inventing a plan date. */
 internal fun taskDateSections(
     tasks: List<Errand>,
     status: String,
@@ -16,7 +16,9 @@ internal fun taskDateSections(
     zone: ZoneId = ZoneId.systemDefault(),
 ): List<TaskDateSection> {
     fun taskDay(task: Errand): LocalDate? = when (status) {
-        "pending" -> task.deadline.takeIf(String::isNotBlank)?.let {
+        "pending" -> task.plannedDate.takeIf(String::isNotBlank)?.let {
+            runCatching { LocalDate.parse(it) }.getOrNull()
+        } ?: task.deadline.takeIf(String::isNotBlank)?.let {
             runCatching { OffsetDateTime.parse(it).atZoneSameInstant(zone).toLocalDate() }.getOrNull()
         }
         "done" -> Instant.ofEpochMilli((task.completedAt.takeIf { it > 0 } ?: task.updatedAt.takeIf { it > 0 } ?: task.createdAt))
@@ -29,8 +31,8 @@ internal fun taskDateSections(
     val dated = grouped.keys.filterNotNull().sortedWith(if (status == "pending") compareBy { it } else compareByDescending { it })
     return (dated + if (null in grouped) listOf(null) else emptyList()).map { day ->
         val title = when {
-            day == null -> "未设截止时间"
-            status == "pending" && day.isBefore(today) -> "已逾期 · ${day.format(dayFormat)}"
+            day == null -> "未安排日期"
+            status == "pending" && day.isBefore(today) -> "此前待办 · ${day.format(dayFormat)}"
             day == today -> "今天 · ${day.format(dayFormat)}"
             day == today.plusDays(1) -> "明天 · ${day.format(dayFormat)}"
             else -> day.format(fullFormat)

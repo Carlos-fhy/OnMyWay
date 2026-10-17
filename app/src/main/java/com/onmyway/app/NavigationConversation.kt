@@ -68,6 +68,7 @@ internal class NavigationConversationState {
     }
     fun snapshot(trip: SavedTrip): JSONObject = JSONObject()
         .put("session_id", trip.sessionId).put("request_json", trip.requestJson)
+        .put("base_fingerprint", assistantTripContext(trip))
         .put("saved_at", System.currentTimeMillis())
         .put("history", JSONArray(history.map { (role, content) ->
             JSONObject().put("role", role).put("content", content)
@@ -88,9 +89,12 @@ internal class NavigationConversationState {
         } ?: JSONObject.NULL)
 
     fun restore(snapshot: JSONObject, trip: SavedTrip): Boolean {
-        if (snapshot.optString("session_id") != trip.sessionId ||
+        val savedAt = snapshot.optLong("saved_at")
+        val now = System.currentTimeMillis()
+        if (snapshot.optString("base_fingerprint") != assistantTripContext(trip) ||
+            snapshot.optString("session_id") != trip.sessionId ||
             snapshot.optString("request_json") != trip.requestJson ||
-            System.currentTimeMillis() - snapshot.optLong("saved_at") !in 0..1_800_000L) return false
+            savedAt <= 0 || now < savedAt || now - savedAt > 1_800_000L) return false
         val entries = snapshot.optJSONArray("history") ?: JSONArray()
         history = (0 until entries.length()).mapNotNull { index ->
             val item = entries.optJSONObject(index) ?: return@mapNotNull null
@@ -137,8 +141,30 @@ internal fun NavigationConversation(vm: AppViewModel, dismiss: () -> Unit) {
     var draft by state::draft
     var places by state::places
     var pendingInstruction by state::pendingInstruction
-    fun recalculatePending() {
+    val pendingRequest = vm.pendingNavigationRequest
+    fun cancelAdjustment() {
         if (busy) return
+        busy = true; error = ""
+        scope.launch {
+            try { vm.cancelNavigationAdjustment(); dismiss() }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { error = networkMessage(e) }
+            finally { busy = false }
+        }
+    }
+    fun recoverRequest() {
+        if (busy) return
+        busy = true; error = ""; progress = "正在取回上次调整结果"
+        scope.launch {
+            try { vm.recoverNavigationRequest { progress = it }?.let { draft = it } }
+            catch (_: NavigationDestinationChoice) { /* Choices were committed with the delivered result. */ }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { error = networkMessage(e) }
+            finally { busy = false }
+        }
+    }
+    fun recalculatePending() {
+        if (busy || vm.pendingNavigationRequest != null) return
         busy = true; error = ""; progress = "正在重新定位并计算方案"
         scope.launch {
             try { draft = vm.recalculateNavigationProposal() }
@@ -148,7 +174,7 @@ internal fun NavigationConversation(vm: AppViewModel, dismiss: () -> Unit) {
         }
     }
     fun confirm(change: NavigationChange) {
-        if (busy) return
+        if (busy || vm.pendingNavigationRequest != null) return
         busy = true; error = ""; progress = "正在保存并更新导航"
         scope.launch {
             try { vm.confirmNavigationChange(change); dismiss() }
@@ -160,7 +186,12 @@ internal fun NavigationConversation(vm: AppViewModel, dismiss: () -> Unit) {
     fun send(text: String, place: Place? = null) {
         if (busy || text.isBlank()) return
         val clean = text.trim().trimEnd('。', '！', '!')
-        if (clean in listOf("取消", "保留原路线", "不改了")) { state.clear(); dismiss(); return }
+        if (clean in listOf("取消", "保留原路线", "不改了")) { cancelAdjustment(); return }
+        if (vm.pendingNavigationRequest != null) {
+            if (clean in listOf("继续", "重试", "继续获取结果")) recoverRequest()
+            else error = "请先取回上次结果，或重新编辑上次指令。"
+            return
+        }
         if (clean in listOf("确认", "确认修改", "确认并更新导航")) {
             val current = draft
             if (current != null) confirm(current) else error = "还没有待确认的新方案，请先告诉我怎么调整。"
@@ -185,7 +216,28 @@ internal fun NavigationConversation(vm: AppViewModel, dismiss: () -> Unit) {
         Column(Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("调整这趟路线", style = MaterialTheme.typography.titleLarge)
             Text("按住说话，松开自动处理。可说“附近顺路买瓶水”“不取快递了”，看到方案后说“确认”或“取消”。")
-            OutlinedTextField(input, { input = it }, enabled = !busy,
+            if (pendingRequest != null) {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("上次调整尚未完成", style = MaterialTheme.typography.titleMedium)
+                        Text(pendingRequest.userText)
+                        Text(vm.navigationRecoveryMessage.ifBlank { "可以继续获取结果；当前路线会保持到你确认新方案。" })
+                        Button(onClick = ::recoverRequest, enabled = !busy) { Text("继续获取结果") }
+                        TextButton(onClick = {
+                            if (!busy) {
+                                busy = true; error = ""
+                                scope.launch {
+                                    try { vm.editNavigationRequest() }
+                                    catch (e: CancellationException) { throw e }
+                                    catch (e: Exception) { error = networkMessage(e) }
+                                    finally { busy = false }
+                                }
+                            }
+                        }, enabled = !busy) { Text("重新编辑") }
+                    }
+                }
+            }
+            OutlinedTextField(input, { input = it }, enabled = !busy && pendingRequest == null,
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { send(input) }),
@@ -194,23 +246,23 @@ internal fun NavigationConversation(vm: AppViewModel, dismiss: () -> Unit) {
                 Box(Modifier.weight(1f)) {
                 CloudVoiceButton(vm.server, !busy, { send(it) }, { error = it })
                 }
-                Button({ send(input) }, modifier = Modifier.heightIn(min = 56.dp), enabled = !busy && input.isNotBlank()) { Text("发送") }
+                Button({ send(input) }, modifier = Modifier.heightIn(min = 56.dp), enabled = !busy && pendingRequest == null && input.isNotBlank()) { Text("发送") }
             }
             if (busy) {
                 LinearProgressIndicator(Modifier.fillMaxWidth())
                 Text(progress, style = MaterialTheme.typography.bodySmall)
             }
-            if (draft == null && state.proposedBody != null) {
+            if (pendingRequest == null && draft == null && state.proposedBody != null) {
                 Text("有一份未确认的调整方案。请重新计算当前位置和路线，检查后再确认。")
                 OutlinedButton(onClick = ::recalculatePending, enabled = !busy) { Text("重新计算上次方案") }
             }
-            if (places.isNotEmpty()) Text("请选择新的目的地，可以说“第一个”")
-            places.forEachIndexed { index, place ->
+            if (pendingRequest == null && places.isNotEmpty()) Text("请选择新的目的地，可以说“第一个”")
+            (if (pendingRequest == null) places else emptyList()).forEachIndexed { index, place ->
                 OutlinedButton({ send(input, place) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
                     Column { Text("${index + 1}. ${place.name}"); Text(place.address, style = MaterialTheme.typography.bodySmall) }
                 }
             }
-            draft?.let { change ->
+            draft?.takeIf { pendingRequest == null }?.let { change ->
                 val route = change.route
                 Text("调整后约 ${formatDuration(route.getInt("total_seconds"))} · ${formatDistance(route.optInt("total_meters"))}")
                 Text("比直达多 ${formatDuration(route.optInt("extra_seconds"))} · ${formatDistance(route.optInt("extra_meters"))}")
@@ -232,13 +284,28 @@ internal fun NavigationConversation(vm: AppViewModel, dismiss: () -> Unit) {
                 Button(onClick = { confirm(change) }, enabled = !busy) { Text("确认并更新导航") }
             }
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
-            TextButton({ state.clear(); dismiss() }, enabled = !busy) { Text("保留原路线") }
+            TextButton(onClick = ::cancelAdjustment, enabled = !busy) { Text("保留原路线") }
         }
     }
 }
 
-internal data class NavigationChange(val previous: SavedTrip, val body: JSONObject,
-    val route: JSONObject, val tasks: List<Errand>, val addedTask: Errand? = null,
-    val createdAt: Long = System.currentTimeMillis())
+/** A confirmation always commits the immutable route and request that were previewed. */
+internal data class NavigationChange(
+    val previous: SavedTrip,
+    val bodyJson: String,
+    val routeJson: String,
+    val tasks: List<Errand>,
+    val addedTask: Errand?,
+    val createdAt: Long,
+    val versionId: String,
+) {
+    constructor(previous: SavedTrip, body: JSONObject, route: JSONObject, tasks: List<Errand>,
+        addedTask: Errand? = null, createdAt: Long = System.currentTimeMillis(),
+        versionId: String = java.util.UUID.randomUUID().toString()) :
+        this(previous, body.toString(), route.toString(), tasks.toList(), addedTask, createdAt, versionId)
+
+    val body: JSONObject get() = JSONObject(bodyJson)
+    val route: JSONObject get() = JSONObject(routeJson)
+}
 
 internal class NavigationDestinationChoice(val places: List<Place>, val keepIds: Set<String>, val newTask: Errand? = null) : Exception()

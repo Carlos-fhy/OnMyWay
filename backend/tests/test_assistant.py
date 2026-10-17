@@ -69,3 +69,23 @@ def test_chat_receives_current_navigation_status(monkeypatch):
         return json.dumps({'action': 'reply', 'reply': '请告诉我本次目的地。'})
     monkeypatch.setattr(assistant, 'completion', complete)
     assert assistant.chat(request()).action == 'reply'
+
+
+def test_chat_forwards_current_draft_fields_before_follow_up(monkeypatch):
+    fields = {'title': '取快递', 'place_type': 'PARCEL', 'deadline': ''}
+    body = request()
+    body.messages = [
+        assistant.Message(role='user', content='之前说过明天下午截止'),
+        assistant.Message(role='assistant', content='当前有未确认的待办草稿，任务尚未保存。\n'
+                          + json.dumps(fields, ensure_ascii=False)),
+        assistant.Message(role='user', content='名称改成取两件快递'),
+    ]
+
+    def complete(messages, *args):
+        assert messages[1:] == [message.model_dump() for message in body.messages]
+        assert '其他字段原样保留' in messages[0]['content']
+        assert 'deadline 为空表示未设截止时间，不得从旧对话补回' in messages[0]['content']
+        return json.dumps({'action': 'reply', 'reply': '请核对草稿。'})
+
+    monkeypatch.setattr(assistant, 'completion', complete)
+    assert assistant.chat(body).action == 'reply'

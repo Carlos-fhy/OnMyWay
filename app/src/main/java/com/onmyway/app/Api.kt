@@ -90,16 +90,10 @@ class Api(private val base: String) {
         return JSONObject(request("/sync", body, "PUT", token))
     }
     suspend fun health() = JSONObject(request("/health"))
-    suspend fun navigation(text: String, destination: String, tasks: List<Errand>, history: JSONArray = JSONArray(), proposed: JSONObject? = null) = JSONObject(request("/assistant/navigation",
-        JSONObject().put("request_id", java.util.UUID.randomUUID().toString()).put("text", text).put("destination", destination).put("tasks", JSONArray(tasks.map {
-            JSONObject().put("id", it.id).put("title", it.title).put("place_type", it.placeType)
-        })).put("history", history).put("proposed_destination", proposed?.getJSONObject("destination")?.getString("name") ?: "")
-            .put("proposed_task_ids", proposed?.getJSONArray("tasks")?.let { tasks ->
-                JSONArray((0 until tasks.length()).map { tasks.getJSONObject(it).getString("id") })
-            } ?: JSONObject.NULL)))
-    suspend fun assistant(messages: JSONArray, routeActive: Boolean = false) = JSONObject(request("/assistant/chat",
-        JSONObject().put("request_id", java.util.UUID.randomUUID().toString()).put("messages", messages).put("route_active", routeActive)
-            .put("now", java.time.OffsetDateTime.now().toString())))
+    suspend fun navigationRequest(body: JSONObject) = JSONObject(request("/assistant/navigation", body))
+    suspend fun navigationStatus(body: JSONObject) = JSONObject(request("/assistant/navigation/status", body))
+    suspend fun assistant(body: JSONObject) = JSONObject(request("/assistant/chat", body))
+    suspend fun assistantStatus(body: JSONObject) = JSONObject(request("/assistant/chat/status", body))
     suspend fun transcribe(audio: ByteArray) = JSONObject(request("/assistant/transcribe",
         JSONObject().put("audio", android.util.Base64.encodeToString(audio, android.util.Base64.NO_WRAP)))).getString("text")
     suspend fun currentPlace(longitude: Double, latitude: Double): Place = Place.from(JSONObject(request(
