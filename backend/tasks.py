@@ -13,7 +13,7 @@ from datetime import date, datetime
 from fastapi import APIRouter, Header, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
-from .backup import MAX_BYTES, PREFERENCE_KEYS, ROOM_VERSION, TABLE_COLUMNS, _authorize, _columns_for, _read_snapshot, _stored_value, _validate, _write_snapshot
+from .backup import MAX_BYTES, PREFERENCE_KEYS, ROOM_VERSION, TABLE_COLUMNS, _authorize, _column_definition, _columns_for, _read_snapshot, _stored_value, _validate, _write_snapshot
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 COLUMNS = tuple(name for name, _ in TABLE_COLUMNS["tasks"])
@@ -29,11 +29,13 @@ def _digest(value):
 
 def _ensure_schema(db):
     """Called inside sync's IMMEDIATE initialization transaction, exactly once."""
-    fields = ", ".join(f'"{name}" {kind}' + (" PRIMARY KEY" if name == "id" else "")
+    fields = ", ".join(_column_definition(name, kind) + (" PRIMARY KEY" if name == "id" else "")
                        for name, kind in TABLE_COLUMNS["tasks"])
     db.execute(f"CREATE TABLE IF NOT EXISTS task_records ({fields}, version INTEGER NOT NULL, deleted INTEGER NOT NULL CHECK(deleted IN (0, 1)))")
     if "plannedDate" not in {row[1] for row in db.execute("PRAGMA table_info(task_records)")}:
         db.execute("ALTER TABLE task_records ADD COLUMN plannedDate TEXT NOT NULL DEFAULT ''")
+    if "reminderAt" not in {row[1] for row in db.execute("PRAGMA table_info(task_records)")}:
+        db.execute("ALTER TABLE task_records ADD COLUMN reminderAt INTEGER NOT NULL DEFAULT 0")
     db.execute("CREATE TABLE IF NOT EXISTS task_schema (id INTEGER PRIMARY KEY CHECK(id=1), protocol INTEGER NOT NULL)")
     db.execute("CREATE TABLE IF NOT EXISTS task_command_receipts (command_id TEXT PRIMARY KEY, digest TEXT NOT NULL, task_id TEXT NOT NULL, version INTEGER NOT NULL, deleted INTEGER NOT NULL)")
     db.execute("CREATE TABLE IF NOT EXISTS task_batch_receipts (request_id TEXT PRIMARY KEY, digest TEXT NOT NULL, response TEXT NOT NULL)")
@@ -56,9 +58,9 @@ def _active_tasks(db):
 
 def _require_snapshot_tasks(db, rows):
     # Snapshot order is not a business change (Room and old backups differ).
-    # Older phones omit plannedDate. The default is only equivalent to an empty
-    # date; an old snapshot must never erase a newly scheduled task.
-    normalized = [{"plannedDate": "", **row} for row in rows]
+    # Omitted additive fields only equal their defaults. An old snapshot must
+    # never silently erase a scheduled date or an explicit reminder.
+    normalized = [{"plannedDate": "", "reminderAt": 0, **row} for row in rows]
     if {row["id"]: row for row in normalized} != {row["id"]: row for row in _active_tasks(db)}:
         raise HTTPException(409, "待办记录与已确认的任务命令不一致；请升级 App 或重新同步，手机修改已保留")
 
@@ -121,6 +123,9 @@ def _validate_task(task, task_id, previous):
     if previous is None or any(previous[key] != task[key] for key in ("status", "reminderPending")):
         if task["status"] != "pending" and task["reminderPending"]:
             _invalid("只有待办任务可以处于待提醒状态")
+    if previous is None or any(previous[key] != task[key] for key in ("status", "reminderAt")):
+        if task["status"] != "pending" and task["reminderAt"]:
+            _invalid("Only pending tasks can have a scheduled reminder")
 
 
 def _validate_place(value):
@@ -181,8 +186,11 @@ def _apply_commands(db, commands):
             task = command.get("task")
             if isinstance(task, dict):
                 # Hash the original wire command above, then fill only the new
-                # optional column. Existing durable receipts remain replayable.
-                task = {"plannedDate": previous["plannedDate"] if previous else "", **task}
+                # optional columns. Existing durable receipts remain replayable.
+                # An old client completing/deferring a task cancels its reminder,
+                # while an unrelated edit of a pending task preserves it.
+                reminder = previous["reminderAt"] if previous and task.get("status") == "pending" else 0
+                task = {"plannedDate": previous["plannedDate"] if previous else "", "reminderAt": reminder, **task}
             _validate_task(task, task_id, previous)
             version += 1
             markers = ", ".join("?" for _ in COLUMNS)
@@ -241,15 +249,16 @@ def _commit_commands(body):
             snapshot = _read_snapshot(db) or {"format": 1, "room_version": ROOM_VERSION,
                 "tables": {name: [] for name in TABLE_COLUMNS}, "preferences": {name: {} for name in PREFERENCE_KEYS}}
             active = _active_tasks(db)
-            if snapshot["room_version"] < ROOM_VERSION and any(row["plannedDate"] for row in active):
-                # Scheduling a task upgrades the current mirror, while archived
+            required_version = 13 if any(row["reminderAt"] for row in active) else 12 if any(row["plannedDate"] for row in active) else 7
+            if snapshot["room_version"] < required_version:
+                # Upgrade only to the version needed by the new fields. Archived
                 # snapshots keep their original shape and Room version.
                 snapshot["tables"] = {
                     name: [{column: _stored_value(row, column) for column, _ in columns}
                            for row in snapshot["tables"].get(name, [])]
-                    for name, columns in TABLE_COLUMNS.items()
+                    for name, columns in _columns_for(required_version).items()
                 }
-                snapshot["room_version"] = ROOM_VERSION
+                snapshot["room_version"] = required_version
             task_columns = _columns_for(snapshot["room_version"])["tasks"]
             snapshot["tables"]["tasks"] = [{column: row[column] for column, _ in task_columns} for row in active]
             _validate(snapshot)

@@ -11,6 +11,7 @@ from .models import LocationRequest, Place, PlanRequest, PlanResult
 from .planner import PlanningError, plan, recommend
 from .assistant import router as assistant_router
 from .backup import router as backup_router
+from .candidates import router as candidates_router
 from .sync import router as sync_router
 from .tasks import router as tasks_router
 
@@ -18,6 +19,7 @@ load_dotenv(Path(__file__).with_name(".env"))
 app = FastAPI(title="OnMyWay local planner", version="0.1.0")
 app.include_router(assistant_router)
 app.include_router(backup_router)
+app.include_router(candidates_router)
 app.include_router(sync_router)
 app.include_router(tasks_router)
 app.state.provider = from_environment()

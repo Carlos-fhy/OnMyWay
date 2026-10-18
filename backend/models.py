@@ -32,7 +32,7 @@ class Task(Model):
     service_minutes: int = Field(default=5, ge=1, le=240)
     deadline: datetime | None = None
     place: Place | None = None
-    place_type: Literal["PRINT_SHOP", "SUPERMARKET", "PHARMACY", "PARCEL", "TAKEOUT"] | None = None
+    place_type: Literal["PRINT_SHOP", "SUPERMARKET", "PHARMACY", "PARCEL", "TAKEOUT", "INDOOR"] | None = None
 
     @field_validator("deadline")
     @classmethod
@@ -74,6 +74,8 @@ class PlanRequest(Model):
             raise ValueError("任务 ID 不能重复")
         if self.arrive_by is not None and self.arrive_by < self.departure:
             raise ValueError("最晚到达时间不能早于出发时间")
+        if any(task.place_type == "INDOOR" for task in self.tasks):
+            raise ValueError("不用出门的待办不参与路线规划")
         return self
 
 

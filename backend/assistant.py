@@ -133,7 +133,7 @@ class Message(BaseModel):
     content: str = Field(max_length=4000)
 
 
-PlaceType = Literal['PRINT_SHOP', 'SUPERMARKET', 'PHARMACY', 'PARCEL', 'TAKEOUT']
+PlaceType = Literal['PRINT_SHOP', 'SUPERMARKET', 'PHARMACY', 'PARCEL', 'TAKEOUT', 'INDOOR']
 
 
 def _planned_date(value):
@@ -302,9 +302,9 @@ def _chat(body: ChatRequest):
 结构化当前草稿 draft_items={json.dumps([item.model_dump(mode='json') for item in body.draft_items], ensure_ascii=False)}。这些是手机尚未保存的实际条目，以此为准，不得从旧对话恢复其他条目。每条 item_id/version 由手机生成，绝对不可生成或更换。
 有 draft_items 时，只能使用 update_task_drafts 精确修改明确指向的条目或 reply 澄清，不能 create_task/create_tasks/plan_route 覆盖未确认草稿；用户要求出行或新增时，先提示确认或取消剩余草稿。update_task_drafts 的 updates 每条必须携带现有 item_id 和 expected_version=当前 version，只提交本次明确修改的字段，未提及字段不要输出（包括不要输出 null）；空字符串 deadline/planned_date 表示清除该日期。多条指代不明确时 reply 追问。修改不是确认保存。
 多个新任务在同一 tasks 数组给出，不能合成一条；不清楚的信息先 reply 追问。不要将否定、取消、假设表达当成创建或导航指令。
-仅支持打印、购物、买药、取快递、取外卖；其他类型先解释限制。取快递/外卖的地点必须由用户随后指定，不能猜测。
+出门办理的任务只能使用 PRINT_SHOP、SUPERMARKET、PHARMACY、PARCEL、TAKEOUT；写作业、复习、线上缴费、整理资料等不需要出门的任务使用 place_type=INDOOR，不要询问地点，也不要生成地点或坐标。出门任务的地点必须由用户随后在手机确认，不能猜测或编造；取快递/外卖尤其要先确认实际领取地点。
 deadline 仅在用户明确表达截止时间且可确定时填含时区 ISO8601，否则留空并在需要时追问；不要把期望办理时间当截止时间。
-planned_date 是计划办理日期，只有明确表达时才按当前 now 推算严格 YYYY-MM-DD（例如“今天取快递”），否则空字符串；它不改变 deadline。priority 只能为 1、2、3，1=普通，2=较重要，3=重要（最高），默认 2；未明确调整时保留原值。
+planned_date 是计划办理日期，只有明确表达时才按当前 now 推算严格 YYYY-MM-DD（例如“今天取快递”），否则空字符串；它不改变 deadline。priority 字段已停用，仅为旧版兼容，始终输出 2；不要询问优先级，也不要根据优先级决定路线。
 list_tasks 用于查看待办，实际列表由手机读取。plan_route 必须有用户表达的目的地名称，不能生成坐标、路线或耗时。
 家、宿舍、学校、公司及用户自定义常用地点（例如快递站、外卖点、东门驿站）都是合法目的地名称，原样放入 destination，手机会匹配常用地点或请用户搜索。
 用户只说一个明确地点名称（例如“示例大学东校区图书馆”）也按 plan_route 处理，保留完整名称。不要要求用户先手动定位或勾选待办，手机会自动定位并计算顺路建议。

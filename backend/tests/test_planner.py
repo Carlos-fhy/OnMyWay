@@ -77,6 +77,12 @@ def test_hard_time_constraints(options):
         solve(request(**options), [[A]], Maps())
 
 
+def test_indoor_task_cannot_enter_route_planning():
+    indoor = Task(id="homework", title="写作业", place_type="INDOOR", service_minutes=1)
+    with pytest.raises(ValidationError, match="不用出门"):
+        request([indoor])
+
+
 def test_no_destination_deadline_does_not_invent_one():
     result = solve(request(), [[C]], Maps())
     assert result.total_seconds > result.baseline_seconds

@@ -25,7 +25,7 @@ def task(task_id="first", **changes):
     return {"id": task_id, "title": "打印论文", "priority": 2, "serviceMinutes": 5,
             "deadline": "", "placeJson": "", "placeType": "PRINT_SHOP", "status": "pending",
             "createdAt": 100, "updatedAt": 100, "completedAt": 0, "lastRemindedAt": 0,
-            "reminderCount": 0, "reminderPending": 0, "plannedDate": "", **changes}
+            "reminderCount": 0, "reminderPending": 0, "plannedDate": "", "reminderAt": 0, **changes}
 
 
 def snapshot(*tasks, room_version=ROOM_VERSION):
@@ -279,7 +279,7 @@ def test_legacy_mirror_accepts_missing_empty_date_but_never_erases_scheduled_dat
     scheduled = task(plannedDate="2026-10-16")
     assert commit(client, head, command(scheduled, version=1)).status_code == 200
     current = client.get("/sync", headers=TOKEN).json()
-    assert current["snapshot"] == snapshot(scheduled)
+    assert current["snapshot"] == snapshot(scheduled, room_version=12)
     assert sync(client, current, legacy).status_code == 409
     old = client.get("/sync/versions/1", headers=TOKEN).json()
     assert old["snapshot"] == legacy

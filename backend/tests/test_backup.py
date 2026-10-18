@@ -18,7 +18,7 @@ EMPTY = {
 }
 
 
-@pytest.mark.parametrize("version", [7, 8, 9, 10, 11, 12])
+@pytest.mark.parametrize("version", [7, 8, 9, 10, 11, 12, 13])
 def test_backup_contract_matches_exported_android_schema(version):
     from backend.backup import _columns_for
 

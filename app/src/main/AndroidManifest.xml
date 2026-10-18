@@ -12,7 +12,7 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <application android:name=".OnMyWayApplication" android:label="OnMyWay" android:icon="@drawable/ic_launcher" android:theme="@style/Theme.OnMyWay" android:allowBackup="false" android:fullBackupContent="false" android:dataExtractionRules="@xml/data_extraction_rules" android:supportsRtl="true" android:usesCleartextTraffic="false">
-        <service android:name=".NavigationService" android:exported="false" android:foregroundServiceType="location" android:stopWithTask="false" />
+        <service android:name=".feature.navigation.NavigationService" android:exported="false" android:foregroundServiceType="location" android:stopWithTask="false" />
         <meta-data android:name="com.amap.api.v2.apikey" android:value="${amapAndroidKey}" />
         <activity android:name=".MainActivity" android:exported="true" android:windowSoftInputMode="adjustResize">
             <intent-filter>

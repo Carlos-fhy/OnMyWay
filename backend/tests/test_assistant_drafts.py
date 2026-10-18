@@ -106,6 +106,15 @@ def test_clear_date_is_explicit_and_does_not_reinsert_other_fields(client, monke
     assert response.json()["updates"] == [patch]
 
 
+def test_indoor_task_is_a_valid_draft_without_a_place(client, monkeypatch):
+    output(monkeypatch, {"action": "create_tasks", "reply": "请确认", "tasks": [
+        {"title": "写作业", "place_type": "INDOOR", "deadline": "", "planned_date": "2026-10-15"}]})
+    response = client.post("/assistant/chat", json=body())
+    assert response.status_code == 200
+    assert response.json()["tasks"][0]["place_type"] == "INDOOR"
+    assert response.json()["tasks"][0]["priority"] == 2
+
+
 @pytest.mark.parametrize("proposal", [
     {"action": "create_task", "title": "打印论文"},
     {"action": "create_tasks", "tasks": [task()]},
@@ -137,7 +146,7 @@ def test_prompt_carries_current_id_version_and_actual_empty_dates(client, monkey
         assert '"item_id": "print"' in prompt and '"version": 8' in prompt
         assert '"planned_date": ""' in prompt and '"deadline": ""' in prompt
         assert "不得从旧对话恢复其他条目" in prompt
-        assert "1=普通，2=较重要，3=重要（最高）" in prompt
+        assert "priority 字段已停用" in prompt and "place_type=INDOOR" in prompt
         return json.dumps({"action": "reply", "reply": "请说明修改哪一项。"})
     monkeypatch.setattr(assistant, "completion", complete)
     assert client.post("/assistant/chat", json=current).status_code == 200

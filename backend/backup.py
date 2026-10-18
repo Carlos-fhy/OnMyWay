@@ -12,9 +12,9 @@ from fastapi import APIRouter, Header, HTTPException, Request
 
 router = APIRouter(prefix="/backup", tags=["backup"])
 MAX_BYTES = 8 * 1024 * 1024
-ROOM_VERSION = 12
+ROOM_VERSION = 13
 LEGACY_ROOM_VERSION = 7
-# Keep this in lockstep with the Room v12 schema. Names are fixed, never user SQL.
+# Keep this in lockstep with the Room v13 schema. Names are fixed, never user SQL.
 TABLE_COLUMNS = {
     "tasks": (
         ("id", "TEXT"), ("title", "TEXT"), ("priority", "INTEGER"),
@@ -24,6 +24,7 @@ TABLE_COLUMNS = {
         ("completedAt", "INTEGER"), ("lastRemindedAt", "INTEGER"),
         ("reminderCount", "INTEGER"), ("reminderPending", "INTEGER"),
         ("plannedDate", "TEXT"),
+        ("reminderAt", "INTEGER"),
     ),
     "saved_trip": (
         ("id", "INTEGER"), ("requestJson", "TEXT"), ("resultJson", "TEXT"),
@@ -87,7 +88,7 @@ LEGACY_TABLE_NAMES = tuple(TABLE_COLUMNS)[:5]
 
 
 def _columns_for(version: int) -> dict:
-    if version not in (LEGACY_ROOM_VERSION, 8, 9, 10, 11, ROOM_VERSION):
+    if version not in (LEGACY_ROOM_VERSION, 8, 9, 10, 11, 12, ROOM_VERSION):
         raise HTTPException(409, "Backup was written by an unsupported app version")
     return {
         name: tuple(
@@ -95,6 +96,7 @@ def _columns_for(version: int) -> dict:
             if not (column[0] == "draftId" and version < 10)
             and not (column[0] == "planId" and version < 11)
             and not (column[0] == "plannedDate" and version < 12)
+            and not (column[0] == "reminderAt" and version < 13)
         )
         for name, columns in TABLE_COLUMNS.items()
         if not (version == 7 and name not in LEGACY_TABLE_NAMES)
@@ -113,18 +115,24 @@ def _ensure_added_columns(db: sqlite3.Connection, table: str, columns: tuple) ->
     """Upgrade known additive columns without rewriting or dropping stored versions."""
     existing = {row[1] for row in db.execute(f'PRAGMA table_info("{table}")')}
     for column, _ in columns:
-        if column not in existing and column in ("draftId", "planId", "plannedDate"):
+        if column not in existing and column == "reminderAt":
+            db.execute(f'ALTER TABLE "{table}" ADD COLUMN "{column}" INTEGER NOT NULL DEFAULT 0')
+        elif column not in existing and column in ("draftId", "planId", "plannedDate"):
             default = "legacy-draft" if column == "draftId" else ""
             db.execute(f'ALTER TABLE "{table}" ADD COLUMN "{column}" TEXT NOT NULL DEFAULT \'{default}\'')
 
 
 def _column_definition(column: str, affinity: str) -> str:
+    if column == "reminderAt":
+        return f'"{column}" {affinity} NOT NULL DEFAULT 0'
     if column in ("planId", "plannedDate"):
         return f'"{column}" {affinity} NOT NULL DEFAULT \'\''
     return f'"{column}" {affinity}'
 
 
 def _stored_value(row: dict, column: str):
+    if column == "reminderAt":
+        return row.get(column, 0)
     if column == "draftId":
         return row.get(column, "legacy-draft")
     if column in ("planId", "plannedDate"):
@@ -149,7 +157,7 @@ def _authorize(token: str | None) -> None:
 
 
 def _validate(snapshot: object) -> dict:
-    if not isinstance(snapshot, dict) or snapshot.get("format") != 1 or snapshot.get("room_version") not in (LEGACY_ROOM_VERSION, 8, 9, 10, 11, ROOM_VERSION):
+    if not isinstance(snapshot, dict) or snapshot.get("format") != 1 or snapshot.get("room_version") not in (LEGACY_ROOM_VERSION, 8, 9, 10, 11, 12, ROOM_VERSION):
         raise HTTPException(422, "Unsupported backup format")
     tables = snapshot.get("tables")
     columns_by_table = _columns_for(snapshot["room_version"])
@@ -174,6 +182,8 @@ def _validate(snapshot: object) -> dict:
                     continue
                 if affinity == "INTEGER" and (not isinstance(value, int) or isinstance(value, bool)):
                     raise HTTPException(422, "Invalid backup integer")
+                if column == "reminderAt" and not 0 <= value <= 2**63 - 1:
+                    raise HTTPException(422, "Invalid backup reminder time")
                 if affinity == "REAL" and (not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value)):
                     raise HTTPException(422, "Invalid backup real")
                 if affinity == "TEXT" and not isinstance(value, str):
