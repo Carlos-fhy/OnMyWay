@@ -101,3 +101,20 @@ val MIGRATION_12_13 = object : Migration(12, 13) {
         db.execSQL("ALTER TABLE tasks ADD COLUMN reminderAt INTEGER NOT NULL DEFAULT 0")
     }
 }
+
+val MIGRATION_13_14 = object : Migration(13, 14) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // Assistant drafts can carry an explicit reminder proposed by the model.
+        db.execSQL("ALTER TABLE assistant_draft ADD COLUMN reminderAt INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE assistant_task_drafts ADD COLUMN reminderAt INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
+val MIGRATION_14_15 = object : Migration(14, 15) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // Local-only outbound events. Old actions did not produce business events,
+        // so the table starts empty rather than inventing historical observations.
+        db.execSQL("CREATE TABLE IF NOT EXISTS `business_event_outbox` (`eventId` TEXT NOT NULL, `correlationId` TEXT NOT NULL, `kind` TEXT NOT NULL, `source` TEXT NOT NULL, `schemaVersion` INTEGER NOT NULL, `occurredAt` INTEGER NOT NULL, `validUntil` INTEGER, `evidenceJson` TEXT NOT NULL, `payloadJson` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `deliveredAt` INTEGER, `terminalAt` INTEGER, `attempts` INTEGER NOT NULL, `lastAttemptAt` INTEGER NOT NULL, `lastError` TEXT NOT NULL, PRIMARY KEY(`eventId`))")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_business_event_outbox_deliveredAt_terminalAt_occurredAt` ON `business_event_outbox` (`deliveredAt`, `terminalAt`, `occurredAt`)")
+    }
+}

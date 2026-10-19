@@ -277,7 +277,7 @@ class PcSyncTest {
             assertEquals(trip.copy(needsReplan = true), b.db.trips().load())
             assertEquals(event, b.db.trips().history().single())
             val remote = api.readSync(credential.token)
-            assertEquals(13, remote.getJSONObject("snapshot").getInt("room_version"))
+            assertEquals(14, remote.getJSONObject("snapshot").getInt("room_version"))
             assertEquals(1, remote.getInt("revision"))
             assertEquals(1, remote.getInt("task_protocol"))
             assertEquals(1, remote.getJSONObject("task_versions").getInt("http-task"))

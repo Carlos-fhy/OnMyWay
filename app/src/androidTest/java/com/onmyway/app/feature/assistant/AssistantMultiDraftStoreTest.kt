@@ -111,6 +111,20 @@ class AssistantMultiDraftStoreTest {
         assertEquals(1, db.agentEvents().recent().size)
     }
 
+    @Test fun reminderSurvivesDraftStorageReopenAndPartialConfirmation() = runBlocking {
+        val reminder = System.currentTimeMillis() + 3_600_000
+        val value = JSONObject(draft().toString())
+        value.getJSONArray("tasks").getJSONObject(1).put("reminder_at", reminderAtIso(reminder))
+        store.setDraft(value)
+        assertEquals(reminder, db.assistant().draftItems().single { it.id == "print" }.reminderAt)
+        assertEquals(reminder, reminderAtMillis(store.load().second!!.getJSONArray("tasks")
+            .getJSONObject(1).getString("reminder_at")))
+        db.close()
+        open()
+        assertTrue(confirm("draft-initial", mapOf("print" to 1)))
+        assertEquals(reminder, db.tasks().observe().first().single().reminderAt)
+    }
+
     @Test fun editingIncompleteParcelChangesOnlyItsVersionAndNeverCreatesTasks() = runBlocking {
         store.setDraft(draft())
         val print = db.assistant().draftItems().single { it.id == "print" }

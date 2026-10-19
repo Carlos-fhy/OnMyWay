@@ -1,5 +1,7 @@
 package com.onmyway.app.feature.assistant
 
+import com.onmyway.app.core.model.TripMetrics
+import com.onmyway.app.core.model.formatTripMetrics
 import com.onmyway.app.core.model.isIndoor
 import com.onmyway.app.data.local.entity.Errand
 
@@ -15,6 +17,7 @@ internal data class TripCompletionPrompt(
     val arrived: Boolean,
     val destination: String,
     val tasks: List<TripCompletionTask>,
+    val metrics: TripMetrics? = null,
 )
 
 internal fun tripCompletionSummary(
@@ -23,12 +26,14 @@ internal fun tripCompletionSummary(
     completed: List<String>,
     pending: List<String>,
     confirmed: Boolean = true,
+    metrics: TripMetrics? = null,
 ): String {
     val place = destination.ifBlank { "终点" }
     val opening = if (arrived) "已到达「$place」附近。" else "已结束本次导航。"
     val record = "本次路线已存入行程记录。"
+    val measured = metrics?.let { formatTripMetrics(it) + "。" }.orEmpty()
     if (completed.isEmpty() && pending.isEmpty()) {
-        return opening + record + "本次没有顺路待办。接下来想做什么？"
+        return opening + record + measured + "本次没有顺路待办。接下来想做什么？"
     }
     val done = if (completed.isEmpty()) {
         "没有已完成事项"
@@ -46,7 +51,7 @@ internal fun tripCompletionSummary(
     } else {
         "未完成项继续留在待办中。"
     }
-    return "$opening$record$status$done；$left。$tail"
+    return "$opening$record$measured$status$done；$left。$tail"
 }
 
 internal fun tripCompletionPlaceLabel(task: Errand): String = when {

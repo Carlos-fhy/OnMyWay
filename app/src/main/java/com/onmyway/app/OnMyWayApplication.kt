@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.SharedPreferences
 import androidx.room.InvalidationTracker
 import androidx.work.*
+import com.onmyway.app.data.event.EventOutboxSync
 import com.onmyway.app.data.local.TaskDatabase
 import com.onmyway.app.data.sync.BackupCredentials
 import com.onmyway.app.data.sync.PcBackupSync
@@ -17,6 +18,9 @@ class OnMyWayApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         startObserving()
+        // Retry events persisted before the process was last killed. This is a
+        // no-op until a PC connection credential exists.
+        EventOutboxSync.schedule(this)
     }
 
     fun startObserving() {

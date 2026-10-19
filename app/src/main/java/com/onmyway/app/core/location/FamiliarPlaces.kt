@@ -66,9 +66,15 @@ internal fun FamiliarPlacesSettings(vm: AppViewModel) {
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
-            "给地图点位起一个你会说的称呼，例如「东门快递站」。以后新建待办时，会先按用途推荐这些地点；取件、取餐时仍由你确认实际领取点。",
+            "小助手只在同类型常用地点位于当前位置 3 公里内时自动填入；手动新建待办默认使用你设为默认的地点。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            vm.defaultFamiliarPlaceAlias.takeIf { it.isNotBlank() }?.let { "默认地点：$it" }
+                ?: "尚未设置默认地点",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary,
         )
         if (savedNames.isEmpty()) Text(
             "还没有保存地点。可以先选下方常用称呼，或自己添加。",
@@ -99,11 +105,21 @@ internal fun FamiliarPlacesSettings(vm: AppViewModel) {
                             container = MaterialTheme.colorScheme.tertiaryContainer,
                         )
                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(
-                                alias,
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.SemiBold,
-                            )
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    alias,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                if (alias == vm.defaultFamiliarPlaceAlias) Text(
+                                    "默认",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
                             Text(
                                 place.name,
                                 style = MaterialTheme.typography.bodySmall,
@@ -119,7 +135,7 @@ internal fun FamiliarPlacesSettings(vm: AppViewModel) {
                             )
                             val tags = vm.familiarPlacePurposes[alias].orEmpty()
                             Text(
-                                if (tags.isEmpty()) "未标注用途 · 所有出门事项可选"
+                                if (tags.isEmpty()) "未标注用途 · 没有已标注用途的同类地点时，按名称匹配"
                                 else "用途 · ${tags.sorted().joinToString("、") { placeTypeLabel(it) }}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.primary,
@@ -138,6 +154,15 @@ internal fun FamiliarPlacesSettings(vm: AppViewModel) {
                         }
                         TextButton({ removing = alias }, contentPadding = PaddingValues(horizontal = 8.dp)) {
                             Text("清除")
+                        }
+                    }
+                    Row(Modifier.padding(bottom = 2.dp)) {
+                        val isDefault = alias == vm.defaultFamiliarPlaceAlias
+                        TextButton(
+                            { vm.setDefaultFamiliarPlace(if (isDefault) null else alias) },
+                            contentPadding = PaddingValues(horizontal = 8.dp),
+                        ) {
+                            Text(if (isDefault) "取消默认地点" else "设为默认地点")
                         }
                     }
                 }
@@ -231,7 +256,7 @@ internal fun FamiliarPlacesSettings(vm: AppViewModel) {
         AppDialogCard(
             "「$alias」可以用来做什么？",
             onClose = { tagging = null },
-            subtitle = "可多选。未标注的常用地点会在所有出门事项里显示。",
+            subtitle = "可多选。小助手只自动填入同类型且距离当前位置不远的地点。",
         ) {
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),

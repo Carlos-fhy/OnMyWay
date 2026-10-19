@@ -87,7 +87,9 @@ class S2StorageTest {
         } finally { helper.close() }
         val database = open(context, name)
         try {
-            assertEquals(13, database.openHelper.writableDatabase.version)
+            assertEquals(15, database.openHelper.writableDatabase.version)
+            // The local-only outbox table exists after upgrade and starts empty.
+            assertEquals(0, database.businessEvents().pendingCount())
             val parcel = database.tasks().get("parcel")!!
             assertEquals("取快递", parcel.title)
             assertEquals("2026-10-18", parcel.plannedDate)
@@ -118,7 +120,7 @@ class S2StorageTest {
             source.openHelper.writableDatabase.execSQL(
                 "UPDATE tasks SET reminderAt = ? WHERE id = 'parcel'", arrayOf(reminderAt))
             val snapshot = BackupRepository(sourceContext, source).snapshot()
-            assertEquals(13, snapshot.getInt("room_version"))
+            assertEquals(14, snapshot.getInt("room_version"))
             assertEquals(reminderAt, taskRows(snapshot).getValue("parcel").getLong("reminderAt"))
             assertEquals(0L, taskRows(snapshot).getValue("print").getLong("reminderAt"))
             BackupRepository(targetContext, target).restore(snapshot)
@@ -156,7 +158,7 @@ class S2StorageTest {
                 legacy.getJSONObject("preferences").getJSONObject("navigation_context")
                     .put("snapshot", "local runtime")
                 val normalized = repository.normalizedSchema(legacy)
-                assertEquals(13, normalized.getInt("room_version"))
+                assertEquals(14, normalized.getInt("room_version"))
                 assertEquals(0L, taskRows(normalized).getValue("parcel").getLong("reminderAt"))
                 assertEquals("local runtime", normalized.getJSONObject("preferences")
                     .getJSONObject("navigation_context").getString("snapshot"))

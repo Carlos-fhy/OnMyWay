@@ -18,12 +18,12 @@ EMPTY = {
 }
 
 
-@pytest.mark.parametrize("version", [7, 8, 9, 10, 11, 12, 13])
+@pytest.mark.parametrize("version", [7, 8, 9, 10, 11, 12, 13, 14])
 def test_backup_contract_matches_exported_android_schema(version):
     from backend.backup import _columns_for
 
     schema = (Path(__file__).resolve().parents[2] / "app" / "schemas"
-              / "com.onmyway.app.TaskDatabase" / f"{version}.json")
+              / "com.onmyway.app.data.local.TaskDatabase" / f"{version}.json")
     exported = json.loads(schema.read_text(encoding="utf-8"))["database"]
     expected = {
         entity["tableName"]: {
@@ -308,3 +308,34 @@ def test_v12_pending_items_dates_and_internal_receipts_survive_old_database_upgr
     with sqlite3.connect(path) as db:
         assert db.execute("SELECT position, _snapshot_position, version FROM backup_assistant_task_drafts").fetchall() == [(7, 0, 3)]
         assert db.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+
+
+def test_v14_assistant_reminders_roundtrip_and_reject_negative_values(monkeypatch, tmp_path):
+    import copy
+    from backend.backup import _columns_for
+    path = tmp_path / "v14.sqlite3"
+    monkeypatch.setenv("ONMYWAY_BACKUP_DB", str(path))
+    monkeypatch.setenv("ONMYWAY_BACKUP_TOKEN", "a" * 32)
+    headers = {"X-Backup-Token": "a" * 32}
+    snapshot = {**EMPTY, "room_version": 14, "tables": {name: [] for name in _columns_for(14)}}
+    snapshot["tables"]["assistant_draft"] = [{
+        "id": 1, "action": "create_task", "title": "取快递", "placeType": "PARCEL",
+        "deadline": "", "reminderAt": 1760488200000, "destination": "", "mode": "",
+        "knownPlaceId": "", "knownPlaceName": "", "knownLongitude": None,
+        "knownLatitude": None, "knownAddress": "", "savedAt": 1, "expiresAt": 2,
+        "draftId": "draft-reminder", "conversationId": "primary", "planId": "plan-reminder",
+    }]
+    snapshot["tables"]["assistant_task_drafts"] = [{
+        "id": "parcel", "planId": "plan-reminder", "position": 0, "version": 1,
+        "title": "取快递", "placeType": "PARCEL", "deadline": "", "plannedDate": "",
+        "priority": 2, "serviceMinutes": 5, "placeJson": "", "reminderAt": 1760488200000,
+    }]
+    with TestClient(app) as client:
+        negative = copy.deepcopy(snapshot)
+        negative["tables"]["assistant_task_drafts"][0]["reminderAt"] = -1
+        assert client.put("/backup", headers=headers, json=negative).status_code == 422
+        assert client.put("/backup", headers=headers, json=snapshot).status_code == 200
+        assert client.get("/backup", headers=headers).json() == snapshot
+    with sqlite3.connect(path) as db:
+        assert db.execute("SELECT reminderAt FROM backup_assistant_draft").fetchone() == (1760488200000,)
+        assert db.execute("SELECT reminderAt FROM backup_assistant_task_drafts").fetchone() == (1760488200000,)

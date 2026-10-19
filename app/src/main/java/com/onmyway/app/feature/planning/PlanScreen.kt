@@ -549,7 +549,10 @@ private fun TripOverview(result: JSONObject, tasks: List<Errand>, vm: AppViewMod
                 remaining.map { Place.from(it.getJSONObject("place")) }.distinctBy { it.id }
                     .filterNot { it.latitude == destination.latitude && it.longitude == destination.longitude },
                 onStarted = vm::embeddedNavigationStarted,
+                onArrived = vm::embeddedNavigationArrived,
+                onFailed = vm::embeddedNavigationFailed,
                 onAdjustRoute = { conversation = true },
+                autoStart = !vm.explicitNavigationStartRequired,
             ) { arrived ->
                 vm.finishTrip(arrived) { onNavigationChanged(false) }
             }

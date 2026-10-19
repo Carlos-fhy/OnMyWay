@@ -72,6 +72,15 @@ class AssistantTaskConfirmationTest {
         .put("action", "create_task").put("title", title).put("place_type", "PRINT_SHOP")
         .put("_draft_id", draftId).put("_plan_id", draftId)
 
+    private fun batchProposal(draftId: String, reminderAt: Long) = JSONObject()
+        .put("action", "create_tasks").put("_draft_id", draftId).put("_plan_id", "plan-$draftId")
+        .put("tasks", org.json.JSONArray().put(JSONObject().put("item_id", "print").put("version", 1)
+            .put("title", "Print thesis").put("place_type", "PRINT_SHOP")
+            .put("planned_date", "").put("deadline", "")
+            .put("reminder_at", reminderAtIso(reminderAt))
+            .put("priority", 2).put("service_minutes", 5)
+            .put("place", Place("print-shop", "Print shop", 120.0, 31.0).json())))
+
     private suspend fun confirm(draftId: String, task: Errand = Errand(title = "Print thesis")): Boolean =
         store.confirmTask(draftId, task, "Task saved") { saved ->
             db.agentEvents().append(AgentEvent(type = "ACTION_CREATED", source = "ASSISTANT",
@@ -222,9 +231,15 @@ class AssistantTaskConfirmationTest {
         assertConsumed()
     }
 
-    private suspend fun withModels(block: suspend (AppViewModel, AssistantViewModel) -> Unit) {
+    private suspend fun withModels(
+        scheduler: ((Errand) -> Unit)? = null,
+        block: suspend (AppViewModel, AssistantViewModel) -> Unit,
+    ) {
         val delivery = NavigationRequestDelivery(app, "$databaseName-navigation-journal")
-        val vm = withContext(Dispatchers.Main) { AppViewModel(isolatedApp, db, delivery) }
+        val vm = withContext(Dispatchers.Main) {
+            if (scheduler == null) AppViewModel(isolatedApp, db, delivery)
+            else AppViewModel(isolatedApp, db, delivery, reminderScheduler = scheduler)
+        }
         val chat = withContext(Dispatchers.Main) {
             AssistantViewModel(isolatedApp, prefs, db, requestJournalName = "$databaseName-chat-journal")
         }
@@ -323,5 +338,28 @@ class AssistantTaskConfirmationTest {
             assertEquals(2, db.assistant().recentMessages().size)
             assertConsumed()
         }
+    }
+
+    @Test fun modelRemindersArePersistedAndScheduledAfterSingleAndBatchConfirmation() = runBlocking {
+        val reminderAt = System.currentTimeMillis() + 3_600_000
+        val scheduled = mutableListOf<Errand>()
+        withModels(scheduler = { scheduled += it }) { vm, _ ->
+            store.setDraft(proposal("single-reminder", "Single reminder"))
+            withContext(Dispatchers.Main) {
+                assertTrue(vm.saveAssistantTask(Errand(title = "Single reminder", placeType = "PRINT_SHOP",
+                    placeJson = Place("print-shop", "Print shop", 120.0, 31.0).json().toString(),
+                    reminderAt = reminderAt), "single-reminder"))
+            }
+            assertEquals(reminderAt, db.tasks().observe().first().single().reminderAt)
+
+            store.setDraft(batchProposal("batch-reminder", reminderAt))
+            withContext(Dispatchers.Main) {
+                assertTrue(vm.saveAssistantTasks("batch-reminder", mapOf("print" to 1)))
+            }
+            assertEquals(reminderAt,
+                db.tasks().observe().first().single { it.title == "Print thesis" }.reminderAt)
+        }
+        assertEquals(2, scheduled.size)
+        assertTrue(scheduled.all { it.reminderAt == reminderAt })
     }
 }

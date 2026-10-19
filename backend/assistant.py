@@ -148,12 +148,19 @@ def _deadline(value):
     return value
 
 
+def _reminder(value):
+    if value and datetime.fromisoformat(value).utcoffset() is None:
+        raise ValueError('timezone required')
+    return value
+
+
 class DraftTask(BaseModel):
     model_config = ConfigDict(extra='forbid')
     title: str = Field(min_length=1, max_length=100)
     place_type: PlaceType = 'SUPERMARKET'
     deadline: str = Field(default='', max_length=50)
     planned_date: str = Field(default='', max_length=10)
+    reminder_at: str = Field(default='', max_length=50)
     priority: int = Field(default=2, strict=True, ge=1, le=3)
 
     @field_validator('title')
@@ -165,6 +172,7 @@ class DraftTask(BaseModel):
 
     _check_planned_date = field_validator('planned_date')(_planned_date)
     _check_deadline = field_validator('deadline')(_deadline)
+    _check_reminder = field_validator('reminder_at')(_reminder)
 
 
 class DraftItem(DraftTask):
@@ -187,6 +195,7 @@ class DraftUpdate(BaseModel):
     place_type: PlaceType | None = None
     deadline: str | None = Field(default=None, max_length=50)
     planned_date: str | None = Field(default=None, max_length=10)
+    reminder_at: str | None = Field(default=None, max_length=50)
     priority: int | None = Field(default=None, strict=True, ge=1, le=3)
 
     @model_validator(mode='before')
@@ -202,6 +211,7 @@ class DraftUpdate(BaseModel):
 
     _check_planned_date = field_validator('planned_date')(_planned_date)
     _check_deadline = field_validator('deadline')(_deadline)
+    _check_reminder = field_validator('reminder_at')(_reminder)
 
     @model_serializer(mode='wrap')
     def supplied_fields_only(self, handler):
@@ -236,6 +246,7 @@ class Proposal(BaseModel):
     place_type: PlaceType = 'SUPERMARKET'
     deadline: str = Field(default='', max_length=50)
     planned_date: str = Field(default='', max_length=10)
+    reminder_at: str = Field(default='', max_length=50)
     priority: int = Field(default=2, strict=True, ge=1, le=3)
     tasks: list[DraftTask] = Field(default_factory=list, max_length=10)
     updates: list[DraftUpdate] = Field(default_factory=list, max_length=10)
@@ -244,6 +255,7 @@ class Proposal(BaseModel):
 
     _check_planned_date = field_validator('planned_date')(_planned_date)
     _check_deadline = field_validator('deadline')(_deadline)
+    _check_reminder = field_validator('reminder_at')(_reminder)
 
 
 def _chat_payload(body):
@@ -251,6 +263,11 @@ def _chat_payload(body):
     # Existing durable requests were fingerprinted before draft_items existed.
     if not body.draft_items:
         payload.pop('draft_items', None)
+    else:
+        # Keep receipts written before reminder_at was added to the draft contract verifiable.
+        for item in payload['draft_items']:
+            if not item.get('reminder_at'):
+                item.pop('reminder_at', None)
     return payload
 
 
@@ -298,13 +315,14 @@ def _chat(body: ChatRequest):
     schema = json.dumps(Proposal.model_json_schema(), ensure_ascii=False)
     prompt = f'''你是顺路生活助手。现在是{body.now.isoformat()}。当前正在导航={body.route_active}。历史对话中的旧路线不代表仍在导航；当前未导航时，新的出行请求必须重新规划，不能沿用旧路线或旧耗时。只创建待办而没有目的地时，保存后可请用户提供本次目的地。用简短中文回复，只输出符合以下 schema 的 JSON：{schema}。
 你只能提出建议，不能声称已保存、完成或启动。新建待办使用 create_tasks，tasks 为 1 至 10 条草稿，单条也使用 create_tasks；用户逐项确认后手机才保存。create_task 仅用于兼容旧版单任务草稿。
-手机可能在 messages 中提供“当前有未确认的待办草稿”及其 title/place_type/deadline JSON。这是尚未保存的当前字段，不是执行结果。用户修改这条草稿时，只修改本次明确指定的字段，其他字段原样保留；deadline 为空表示未设截止时间，不得从旧对话补回。信息不明确时先 reply 追问；修改草稿不代表确认保存。
+手机可能在 messages 中提供“当前有未确认的待办草稿”及其 title/place_type/deadline/reminder_at JSON。这是尚未保存的当前字段，不是执行结果。用户修改这条草稿时，只修改本次明确指定的字段，其他字段原样保留；deadline 或 reminder_at 为空表示未设对应时间，不得从旧对话补回。信息不明确时先 reply 追问；修改草稿不代表确认保存。
 结构化当前草稿 draft_items={json.dumps([item.model_dump(mode='json') for item in body.draft_items], ensure_ascii=False)}。这些是手机尚未保存的实际条目，以此为准，不得从旧对话恢复其他条目。每条 item_id/version 由手机生成，绝对不可生成或更换。
-有 draft_items 时，只能使用 update_task_drafts 精确修改明确指向的条目或 reply 澄清，不能 create_task/create_tasks/plan_route 覆盖未确认草稿；用户要求出行或新增时，先提示确认或取消剩余草稿。update_task_drafts 的 updates 每条必须携带现有 item_id 和 expected_version=当前 version，只提交本次明确修改的字段，未提及字段不要输出（包括不要输出 null）；空字符串 deadline/planned_date 表示清除该日期。多条指代不明确时 reply 追问。修改不是确认保存。
+有 draft_items 时，只能使用 update_task_drafts 精确修改明确指向的条目或 reply 澄清，不能 create_task/create_tasks/plan_route 覆盖未确认草稿；用户要求出行或新增时，先提示确认或取消剩余草稿。update_task_drafts 的 updates 每条必须携带现有 item_id 和 expected_version=当前 version，只提交本次明确修改的字段，未提及字段不要输出（包括不要输出 null）；空字符串 deadline/planned_date/reminder_at 表示清除该时间。多条指代不明确时 reply 追问。修改不是确认保存。
 多个新任务在同一 tasks 数组给出，不能合成一条；不清楚的信息先 reply 追问。不要将否定、取消、假设表达当成创建或导航指令。
 出门办理的任务只能使用 PRINT_SHOP、SUPERMARKET、PHARMACY、PARCEL、TAKEOUT；写作业、复习、线上缴费、整理资料等不需要出门的任务使用 place_type=INDOOR，不要询问地点，也不要生成地点或坐标。出门任务的地点必须由用户随后在手机确认，不能猜测或编造；取快递/外卖尤其要先确认实际领取地点。
 deadline 仅在用户明确表达截止时间且可确定时填含时区 ISO8601，否则留空并在需要时追问；不要把期望办理时间当截止时间。
 planned_date 是计划办理日期，只有明确表达时才按当前 now 推算严格 YYYY-MM-DD（例如“今天取快递”），否则空字符串；它不改变 deadline。priority 字段已停用，仅为旧版兼容，始终输出 2；不要询问优先级，也不要根据优先级决定路线。
+reminder_at 仅在用户明确要求到点提醒时填写含时区 ISO8601，并按当前 now 推算为未来时间；未要求提醒时留空。用户说“提醒我取快递”但没有给时间时，先 reply 追问具体时间，不要创建没有提醒时间的任务；不要把 deadline 或 planned_date 当成提醒时间。“10 分钟后提醒我取快递”应创建任务并填 reminder_at=now+10 分钟。reply 中要说明提醒时间；update_task_drafts 用空字符串 reminder_at 取消提醒。
 list_tasks 用于查看待办，实际列表由手机读取。plan_route 必须有用户表达的目的地名称，不能生成坐标、路线或耗时。
 家、宿舍、学校、公司及用户自定义常用地点（例如快递站、外卖点、东门驿站）都是合法目的地名称，原样放入 destination，手机会匹配常用地点或请用户搜索。
 用户只说一个明确地点名称（例如“示例大学东校区图书馆”）也按 plan_route 处理，保留完整名称。不要要求用户先手动定位或勾选待办，手机会自动定位并计算顺路建议。
@@ -339,6 +357,24 @@ def _validate_proposal(value, body: ChatRequest | None = None):
                 raise ValueError('unknown or stale draft update')
         if proposal.action == 'plan_route' and not proposal.destination.strip():
             raise ValueError('missing destination')
+        if proposal.action == 'create_tasks' and proposal.reminder_at:
+            # Tolerate one item with the reminder at the top level, but never drop a reminder.
+            if len(proposal.tasks) == 1 and not proposal.tasks[0].reminder_at:
+                proposal.tasks[0].reminder_at = proposal.reminder_at
+                proposal.reminder_at = ''
+            else:
+                raise ValueError('reminder must belong to a task')
+        if body and body.now.tzinfo is not None:
+            reminders = []
+            if proposal.action == 'create_task' and proposal.reminder_at:
+                reminders.append(proposal.reminder_at)
+            if proposal.action == 'create_tasks':
+                reminders.extend(task.reminder_at for task in proposal.tasks if task.reminder_at)
+            if proposal.action == 'update_task_drafts':
+                reminders.extend(update.reminder_at for update in proposal.updates
+                                 if 'reminder_at' in update.model_fields_set and update.reminder_at)
+            if any(datetime.fromisoformat(value) <= body.now for value in reminders):
+                raise ValueError('reminder must be in the future')
         return proposal
     except (ValidationError, ValueError):
         raise HTTPException(502, '助手返回的操作未通过校验，请换一种说法。') from None

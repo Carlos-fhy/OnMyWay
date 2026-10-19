@@ -12,11 +12,13 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.onmyway.app.R
 import com.onmyway.app.core.format.displayTime
+import com.onmyway.app.core.model.Place
 import com.onmyway.app.core.model.isIndoor
 import com.onmyway.app.core.ui.AppCard
 import com.onmyway.app.core.ui.AppIconBadge
 import com.onmyway.app.core.ui.AppPrimaryButton
 import com.onmyway.app.data.local.entity.Errand
+import com.onmyway.app.feature.task.displayReminderTime
 import org.json.JSONObject
 
 internal data class TaskDraftEdit(val task: Errand, val draftId: String, val itemId: String, val version: Int)
@@ -25,6 +27,7 @@ internal data class TaskDraftEdit(val task: Errand, val draftId: String, val ite
 internal fun AssistantTaskDraftCard(
     proposal: JSONObject, enabled: Boolean,
     edit: (TaskDraftEdit) -> Unit, confirm: (Map<String, Int>) -> Unit, cancel: () -> Unit,
+    familiarPlaces: Map<String, Place> = emptyMap(),
 ) {
     val issue = assistantCardIssue(proposal)
         ?: if (proposal.optString("action") != "create_tasks") "建议类型暂不支持，请重新输入需求。" else null
@@ -34,6 +37,7 @@ internal fun AssistantTaskDraftCard(
     }
     val draftId = proposal.getString("_draft_id")
     val items = taskDraftItems(proposal)
+    val allIndoor = items.all { isIndoor(taskDraftErrand(it).placeType) }
     var selected by rememberSaveable(draftId) { mutableStateOf(emptyList<String>()) }
     AppCard(contentPadding = PaddingValues(16.dp)) {
         Row(
@@ -48,12 +52,20 @@ internal fun AssistantTaskDraftCard(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                Text(
+                    if (allIndoor) "这些事项都不用出门，只记录，不参与路线规划。"
+                    else "地点只在 3 公里内匹配常用地点时自动填入；请核对。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
         Spacer(Modifier.height(10.dp))
         items.forEachIndexed { index, item ->
             val id = item.getString("item_id")
             val task = taskDraftErrand(item)
+            val place = task.place()
+            val familiarAlias = familiarAliasFor(place, familiarPlaces)
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainerLow,
                 shape = RoundedCornerShape(16.dp),
@@ -78,7 +90,8 @@ internal fun AssistantTaskDraftCard(
                         Text(
                             when {
                                 isIndoor(task.placeType) -> "不用出门"
-                                task.place() != null -> task.place()!!.name
+                                place != null && familiarAlias != null -> "${place.name} · 常用地点「$familiarAlias」"
+                                place != null -> place.name
                                 else -> "待补办理地点"
                             },
                             style = MaterialTheme.typography.bodySmall,
@@ -86,6 +99,11 @@ internal fun AssistantTaskDraftCard(
                         )
                         if (task.deadline.isNotBlank()) Text(
                             "截止 ${displayTime(task.deadline)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        if (task.reminderAt > 0) Text(
+                            "提醒 ${displayReminderTime(task.reminderAt)}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

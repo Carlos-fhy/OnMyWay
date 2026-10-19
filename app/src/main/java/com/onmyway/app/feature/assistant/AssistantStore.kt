@@ -5,6 +5,7 @@ import androidx.room.*
 import androidx.room.withTransaction
 import com.onmyway.app.core.model.Place
 import com.onmyway.app.core.model.isIndoor
+import com.onmyway.app.core.model.requiresFixedPlace
 import com.onmyway.app.data.local.TaskDatabase
 import com.onmyway.app.data.local.entity.Errand
 import com.onmyway.app.data.remote.assistantTripContext
@@ -43,6 +44,7 @@ data class AssistantDraft(
     val title: String = "",
     val placeType: String = "",
     val deadline: String = "",
+    @ColumnInfo(defaultValue = "0") val reminderAt: Long = 0,
     val destination: String = "",
     val mode: String = "",
     val knownPlaceId: String = "",
@@ -58,18 +60,24 @@ data class AssistantDraft(
         draftId.isNotBlank() && planId.isNotBlank() && ((action == "create_task" && title.isNotBlank()) ||
             action == "create_tasks" ||
             (action == "plan_route" && destination.isNotBlank() && savedAt > 0))
+    private fun knownPlace(): Place? =
+        if (knownPlaceId.isNotBlank() && knownLongitude != null && knownLatitude != null)
+            Place(knownPlaceId, knownPlaceName, knownLongitude, knownLatitude, knownAddress)
+        else null
+
     fun proposal(): JSONObject {
         val result = JSONObject().put("action", action).put("_draft_id", draftId).put("_plan_id", planId)
             .put("_card_version", 1)
         if (action == "create_task") {
             result.put("title", title).put("place_type", placeType).put("deadline", deadline)
+                .put("reminder_at", reminderAtIso(reminderAt))
+            knownPlace()?.let { place ->
+                result.put("place", place.json()).put("known_destination", place.json())
+            }
         } else if (action == "plan_route") {
             result.put("destination", destination).put("mode", mode)
                 .put("_expires_at", expiresAt.takeIf { it > 0 } ?: (savedAt + ROUTE_DRAFT_LIFETIME))
-            if (knownPlaceId.isNotBlank() && knownLongitude != null && knownLatitude != null) {
-                result.put("known_destination", Place(knownPlaceId, knownPlaceName,
-                    knownLongitude, knownLatitude, knownAddress).json())
-            }
+            knownPlace()?.let { result.put("known_destination", it.json()) }
         }
         return result
     }
@@ -80,14 +88,20 @@ data class AssistantDraft(
             val action = value.optString("action")
             if (action !in listOf("create_task", "create_tasks", "plan_route")) return null
             val known = value.optJSONObject("known_destination")
+                ?: value.optJSONObject("place").takeIf { action == "create_task" }
             val place = runCatching { known?.let(Place::from) }.getOrNull()
-            if (value.has("known_destination") && !value.isNull("known_destination") &&
+            val placePresent = (value.has("known_destination") && !value.isNull("known_destination")) ||
+                (action == "create_task" && value.has("place") && !value.isNull("place"))
+            if (placePresent &&
                 (place == null || place.id.isBlank() || place.name.isBlank() ||
                     !place.longitude.isFinite() || !place.latitude.isFinite() ||
                     place.longitude !in -180.0..180.0 || place.latitude !in -90.0..90.0)) return null
             val draftId = value.optString("_draft_id").ifBlank { UUID.randomUUID().toString() }
+            val reminderAt = runCatching { reminderAtMillis(value.optString("reminder_at")) }
+                .getOrElse { return null }
             val draft = AssistantDraft(action = action, draftId = draftId, planId = value.optString("_plan_id").ifBlank { draftId }, title = value.optString("title"),
                 placeType = value.optString("place_type"), deadline = value.optString("deadline"),
+                reminderAt = reminderAt,
                 destination = value.optString("destination"), mode = value.optString("mode"),
                 knownPlaceId = place?.id.orEmpty(), knownPlaceName = place?.name.orEmpty(),
                 knownLongitude = place?.longitude, knownLatitude = place?.latitude,
@@ -278,6 +292,7 @@ internal class AssistantStore(private val database: TaskDatabase, private val le
                 "待确认任务已变化，请关闭旧编辑页并重新确认。"
             }
             require(task.title.isNotBlank()) { "请填写任务名称。" }
+            require(!requiresFixedPlace(task.placeType) || task.place() != null) { "请指定实际领取地点" }
             check(database.tasks().get(taskId) == null) { "任务确认记录不完整，请重新打开助手。" }
             val now = System.currentTimeMillis()
             val created = task.copy(id = taskId, status = "pending", createdAt = now, updatedAt = now,
@@ -312,6 +327,9 @@ internal class AssistantStore(private val database: TaskDatabase, private val le
                 val item = items.singleOrNull { it.id == id }
                 check(item != null && item.version == version) { "任务条目已变化，请重新选择后确认。" }
                 AssistantDraftItem.fromTask(item.id, item.planId, item.position, item.version, item.task())
+                require(!requiresFixedPlace(item.placeType) || item.task().place() != null) {
+                    "请先为“${item.title}”指定实际领取地点"
+                }
                 val identity = taskItemIdentity(item)
                 check(!dao.hasMessage("assistant-task-item-confirmed-$identity")) { "这项待办已确认，请刷新草稿。" }
                 check(database.tasks().get(identity) == null) { "任务确认记录不完整，请重新打开助手。" }

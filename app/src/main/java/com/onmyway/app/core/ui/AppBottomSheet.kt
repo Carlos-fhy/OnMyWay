@@ -60,12 +60,12 @@ internal fun AppBottomSheet(
 @Composable
 internal fun BottomSheetTitle(
     title: String,
-    onClose: () -> Unit,
+    onClose: (() -> Unit)?,
     modifier: Modifier = Modifier,
     subtitle: String? = null,
 ) {
     Row(
-        modifier.fillMaxWidth().padding(start = 22.dp, end = 12.dp, top = 2.dp, bottom = 6.dp),
+        modifier.fillMaxWidth().padding(start = 22.dp, end = if (onClose == null) 22.dp else 12.dp, top = 2.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -79,12 +79,14 @@ internal fun BottomSheetTitle(
                 )
             }
         }
-        Spacer(Modifier.width(8.dp))
-        IconButton(
-            onClose,
-            Modifier.size(36.dp).background(MaterialTheme.colorScheme.surfaceContainerHigh, CircleShape),
-        ) {
-            Icon(painterResource(R.drawable.ic_close), contentDescription = "关闭", Modifier.size(18.dp))
+        if (onClose != null) {
+            Spacer(Modifier.width(8.dp))
+            IconButton(
+                onClose,
+                Modifier.size(36.dp).background(MaterialTheme.colorScheme.surfaceContainerHigh, CircleShape),
+            ) {
+                Icon(painterResource(R.drawable.ic_close), contentDescription = "关闭", Modifier.size(18.dp))
+            }
         }
     }
 }

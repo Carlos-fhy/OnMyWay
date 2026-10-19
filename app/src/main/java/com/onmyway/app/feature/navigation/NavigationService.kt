@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -16,6 +17,8 @@ import androidx.core.app.NotificationCompat
 import com.onmyway.app.MainActivity
 import com.onmyway.app.R
 import com.onmyway.app.core.model.Place
+import com.onmyway.app.core.model.TripMetrics
+import java.util.concurrent.ConcurrentHashMap
 
 /** Only live, user-started navigation is retained. Never restarts a route after process death. */
 class NavigationService : Service() {
@@ -64,16 +67,47 @@ internal object NavigationRuntime {
     var current: NavigationController? by mutableStateOf(null)
         private set
 
-    fun obtain(context: Context, sessionId: String, mode: String, destination: Place, via: List<Place>): NavigationController {
+    /**
+     * AMapNavi is a process singleton and only calls onInitNaviSuccess once.
+     * A replacement controller created while the old map view is still alive
+     * must not wait for a callback that will never arrive again.
+     */
+    @Volatile var naviInitialized = false
+
+    /**
+     * One trip can outlive several controllers (confirmed route adjustments).
+     * Keep the meter by session so measured time/distance are not lost when the
+     * navigation page replaces the controller.
+     */
+    private val meters = ConcurrentHashMap<String, NavigationMeter>()
+
+    fun obtain(
+        context: Context,
+        sessionId: String,
+        mode: String,
+        destination: Place,
+        via: List<Place>,
+        requireExplicitStart: Boolean = false,
+    ): NavigationController {
         current?.takeIf { it.matches(sessionId, mode, destination, via) }?.let { return it }
         current?.destroy()
-        return NavigationController(context.applicationContext, sessionId, mode, destination, via).also { current = it }
+        return NavigationController(
+            context.applicationContext, sessionId, mode, destination, via,
+            requireExplicitStart = requireExplicitStart,
+            meter = meters.getOrPut(sessionId) { NavigationMeter() },
+        ).also { current = it }
     }
     fun owns(sessionId: String) = current?.sessionId == sessionId
+
+    fun metricsSnapshot(sessionId: String, predictedSeconds: Int?, predictedMeters: Int?): TripMetrics? =
+        meters[sessionId]?.snapshot(System.currentTimeMillis(), SystemClock.elapsedRealtime(),
+            predictedSeconds, predictedMeters)
+
     fun finish(sessionId: String) {
         current?.takeIf { it.sessionId == sessionId }?.let {
             it.destroy()
             current = null
         }
+        meters.remove(sessionId)
     }
 }

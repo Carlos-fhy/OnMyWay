@@ -24,24 +24,25 @@ class Api(private val base: String) {
             return value.trim().trimEnd('/')
         }
     }
-    private suspend fun request(path: String, body: JSONObject? = null, method: String = if (body == null) "GET" else "POST", backupToken: String? = null): String {
+    private suspend fun request(path: String, body: JSONObject? = null, method: String = if (body == null) "GET" else "POST", backupToken: String? = null, timeoutMillis: Int? = null): String {
         try {
-            return requestOnce(path, body, method, backupToken)
+            return requestOnce(path, body, method, backupToken, timeoutMillis)
         } catch (error: java.io.IOException) {
             // Retry only durable proposal requests, preserving the exact body and request ID.
             // Explicit HTTP failures (including in-progress 409) require user action.
             if (error is ApiHttpException || path !in setOf("/assistant/chat", "/assistant/navigation") ||
                 body?.optString("request_id").isNullOrBlank()) throw error
             kotlinx.coroutines.delay(500)
-            return requestOnce(path, body, method, backupToken)
+            return requestOnce(path, body, method, backupToken, timeoutMillis)
         }
     }
-    private suspend fun requestOnce(path: String, body: JSONObject?, method: String, backupToken: String?): String = withContext(Dispatchers.IO) {
+    private suspend fun requestOnce(path: String, body: JSONObject?, method: String, backupToken: String?, timeoutMillis: Int?): String = withContext(Dispatchers.IO) {
         val startedAt = android.os.SystemClock.elapsedRealtime()
         val connection = URI(validateBase(base) + path).toURL().openConnection() as HttpURLConnection
         try {
-            connection.connectTimeout = 10_000
-            connection.readTimeout = when {
+            // HttpURLConnection blocks its thread; a coroutine timeout cannot interrupt a socket read.
+            connection.connectTimeout = timeoutMillis?.coerceAtLeast(1_000) ?: 10_000
+            connection.readTimeout = timeoutMillis?.coerceAtLeast(1_000) ?: when {
                 path.startsWith("/assistant/") -> 60_000
                 path == "/location" -> 45_000
                 body == null -> 30_000
@@ -92,6 +93,11 @@ class Api(private val base: String) {
         requirePrivateBackupTransport()
         return JSONObject(request("/sync", body, "PUT", token))
     }
+    suspend fun sendEvent(token: String, event: JSONObject): JSONObject {
+        requirePrivateBackupTransport()
+        // One event is small; a long route/backup timeout would stall the queue.
+        return JSONObject(request("/events", event, "POST", token, timeoutMillis = 15_000))
+    }
     suspend fun health() = JSONObject(request("/health"))
     suspend fun navigationRequest(body: JSONObject) = JSONObject(request("/assistant/navigation", body))
     suspend fun navigationStatus(body: JSONObject) = JSONObject(request("/assistant/navigation/status", body))
@@ -99,8 +105,9 @@ class Api(private val base: String) {
     suspend fun assistantStatus(body: JSONObject) = JSONObject(request("/assistant/chat/status", body))
     suspend fun transcribe(audio: ByteArray) = JSONObject(request("/assistant/transcribe",
         JSONObject().put("audio", android.util.Base64.encodeToString(audio, android.util.Base64.NO_WRAP)))).getString("text")
-    suspend fun currentPlace(longitude: Double, latitude: Double): Place = Place.from(JSONObject(request(
-        "/location", JSONObject().put("longitude", longitude).put("latitude", latitude)
+    suspend fun currentPlace(longitude: Double, latitude: Double, timeoutMillis: Int? = null): Place = Place.from(JSONObject(request(
+        "/location", JSONObject().put("longitude", longitude).put("latitude", latitude),
+        timeoutMillis = timeoutMillis,
     )))
     suspend fun search(keyword: String, city: String): List<Place> {
         val result = JSONArray(request("/places?q=${URLEncoder.encode(keyword, "UTF-8")}&city=${URLEncoder.encode(city, "UTF-8")}"))

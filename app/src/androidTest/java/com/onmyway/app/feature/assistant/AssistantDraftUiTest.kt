@@ -29,6 +29,7 @@ import com.onmyway.app.data.local.entity.Errand
 import com.onmyway.app.data.remote.AssistantRequestTransport
 import com.onmyway.app.feature.navigation.NavigationRequestDelivery
 import com.onmyway.app.feature.task.TaskEditor
+import com.onmyway.app.feature.task.TaskEditorMode
 import java.io.File
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
@@ -155,7 +156,7 @@ class AssistantDraftUiTest {
                     }
                     editing?.let { edit -> key(edit.draftId, edit.itemId, edit.version) {
                         TaskEditor(vm, edit.task, { editing = null }, allowIncompleteDraft = true,
-                            saveLabel = "保留草稿修改") { updated ->
+                            saveLabel = "保留草稿修改", mode = TaskEditorMode.Assistant) { updated ->
                             if (chat!!.editTaskDraft(vm, edit, updated)) editing = null
                         }
                     } }
@@ -168,12 +169,21 @@ class AssistantDraftUiTest {
     private fun clickButton(text: String) = compose.onNodeWithText(text).performClick()
     private fun clickDescription(text: String) = compose.onNodeWithContentDescription(text).performScrollTo().performClick()
 
+    /** 地点芯片在横向 ChoiceRow 中，performScrollTo 不会滚动外层纵向弹层。 */
+    private fun scrollEditorToPlaceSection() {
+        compose.onNodeWithText("这是助手草稿：可以先保留修改，地点也可以稍后再补。").performScrollTo()
+    }
+
     @Test fun selectPickupSaveParcelThenEditPrintDateAndConfirm() {
         openChat(seed = true)
         val printBefore = draft().single { it.title == "打印论文" }
         showDrafts()
         compose.onNodeWithText("保存所选 0 项").assertIsNotEnabled()
         clickDescription("修改第 1 项：取快递")
+        scrollEditorToPlaceSection()
+        compose.onNodeWithText("要出门").assertDoesNotExist()
+        compose.onNodeWithText("最近用过").assertDoesNotExist()
+        clickText("选择地点")
         clickText("测试快递站 · 验收领取点")
         clickButton("保留草稿修改")
         settle()
@@ -199,12 +209,12 @@ class AssistantDraftUiTest {
         // The dialog opens on the draft's existing October 2026 plan date; pick the 19th.
         compose.onNodeWithText("19", substring = true).performClick()
         compose.onNodeWithText("确定").performClick()
-        clickText("重要")
         clickButton("保留草稿修改")
         settle()
         assertEquals(listOf(parcel), tasks())
         assertEquals("2026-10-19", draft().single().plannedDate)
-        assertEquals(3, draft().single().priority)
+        // 编辑器不再提供优先级入口，保存时保留原值。
+        assertEquals(printBefore.priority, draft().single().priority)
         assertEquals("", draft().single().deadline)
         screenshot("print-edited-after-reopen")
         clickDescription("选择第 1 项：打印论文")
@@ -222,7 +232,6 @@ class AssistantDraftUiTest {
         showDrafts(fontScale = 2f)
         clickDescription("修改第 2 项：打印论文")
         compose.onNodeWithText("要办什么").performTextReplacement("取消的修改")
-        clickText("重要")
         clickButton("取消")
         settle()
         assertEquals(original, draft())
@@ -240,7 +249,7 @@ class AssistantDraftUiTest {
         assertEquals("打印论文", tasks().single().title)
     }
 
-    @Test fun editorSavedStateRetainsNewPlaceAlongsideTitleDateAndPriority() {
+    @Test fun editorSavedStateRetainsNewPlaceAlongsideTitleAndDate() {
         val restoration = StateRestorationTester(compose)
         val original = Errand(title = "取快递", placeType = "PARCEL", plannedDate = "2026-10-17")
         var saved: Errand? = null
@@ -248,17 +257,20 @@ class AssistantDraftUiTest {
             MaterialTheme { TaskEditor(vm, original, {}, allowIncompleteDraft = true) { saved = it } }
         }
         compose.onNodeWithText("要办什么").performTextReplacement("取两件快递")
-        clickText("重要")
+        scrollEditorToPlaceSection()
+        compose.onNodeWithText("常用地点").assertDoesNotExist()
+        compose.onNodeWithText("最近用过").assertDoesNotExist()
+        clickText("搜索并选择地点")
         clickText("测试快递站 · 验收领取点")
         restoration.emulateSavedInstanceStateRestore()
-        compose.onNodeWithText("验收领取点").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("已选 · 验收领取点").performScrollTo().assertIsDisplayed()
         screenshot("editor-restored-pickup")
         clickButton("保存任务")
         assertEquals("取两件快递", saved!!.title)
         assertEquals(pickup, saved!!.place())
         assertEquals("2026-10-17", saved!!.plannedDate)
         assertEquals("", saved!!.deadline)
-        assertEquals(3, saved!!.priority)
+        assertEquals(original.priority, saved!!.priority)
         assertTrue(tasks().isEmpty()) // This editor callback alone never creates a task.
     }
 }

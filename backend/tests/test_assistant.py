@@ -84,7 +84,7 @@ def test_chat_forwards_current_draft_fields_before_follow_up(monkeypatch):
     def complete(messages, *args):
         assert messages[1:] == [message.model_dump() for message in body.messages]
         assert '其他字段原样保留' in messages[0]['content']
-        assert 'deadline 为空表示未设截止时间，不得从旧对话补回' in messages[0]['content']
+        assert 'deadline 或 reminder_at 为空表示未设对应时间，不得从旧对话补回' in messages[0]['content']
         return json.dumps({'action': 'reply', 'reply': '请核对草稿。'})
 
     monkeypatch.setattr(assistant, 'completion', complete)

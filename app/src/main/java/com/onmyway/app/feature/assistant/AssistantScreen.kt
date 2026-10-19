@@ -43,6 +43,8 @@ import com.onmyway.app.feature.navigation.RouteArchiveSheet
 import com.onmyway.app.feature.planning.AutomaticRouteCard
 import com.onmyway.app.feature.planning.PrepareTrip
 import com.onmyway.app.feature.task.TaskEditor
+import com.onmyway.app.feature.task.TaskEditorMode
+import com.onmyway.app.feature.task.displayReminderTime
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -54,8 +56,10 @@ import kotlinx.coroutines.launch
 @Composable
 internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: () -> Unit, openPlan: () -> Unit, openNavigation: () -> Unit,
     chat: AssistantViewModel = viewModel()) {
-    var draft by remember { mutableStateOf<Pair<Errand, String>?>(null) }
-    var taskDraftEdit by remember { mutableStateOf<TaskDraftEdit?>(null) }
+    var editor by rememberSaveable(stateSaver = AssistantEditorHostSaver) {
+        mutableStateOf<AssistantEditorHost>(AssistantEditorHost.Closed)
+    }
+    var editorFeedback by remember { mutableStateOf("") }
     var search by remember { mutableStateOf<String?>(null) }
     var showVoice by rememberSaveable { mutableStateOf(false) }
     var showArchive by remember { mutableStateOf(false) }
@@ -165,7 +169,12 @@ internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: ()
     }
     LaunchedEffect(displayedDay, itemCount, listHeight, scrollRequest, visibleLines.lastOrNull()?.id,
         chat.proposal, chat.busy, chat.error, chat.routeResult, chat.tripCompletion?.eventId) {
-        if (followLatest && itemCount > 0) scroll.scrollToItem(itemCount - 1)
+        if (followLatest && itemCount > 0) {
+            // 首帧可能仍处在 Scaffold 子组合的测量过程中，滚到末项会强制再测量一次；
+            // 先等待下一帧，避免 "performMeasureAndLayout called during measure layout"。
+            withFrameNanos { }
+            scroll.scrollToItem(itemCount - 1)
+        }
     }
     fun sendMessage() {
         followLatest = true
@@ -281,57 +290,78 @@ internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: ()
                                 enabled = !auto.busy && !vm.busy && !vm.updatingTrip && !vm.restoringTrip) { Text("取消") }
                         } else if (proposal.optString("action") == "create_tasks") {
                             AssistantTaskDraftCard(proposal,
+                                familiarPlaces = vm.familiarPlaces,
                                 enabled = chat.ready && !chat.busy && !vm.busy && !vm.updatingTrip && !vm.restoringTrip,
-                                edit = { taskDraftEdit = it },
+                                edit = {
+                                    editorFeedback = ""
+                                    editor = AssistantEditorHost.DraftItem(
+                                        it.draftId, it.itemId, it.version, it.task.assistantSnapshot(),
+                                    )
+                                },
                                 confirm = { chat.saveTasks(vm, proposal.getString("_draft_id"), it) },
                                 cancel = { chat.dismissDraft(proposal.getString("_draft_id"), proposal.getString("_plan_id"), vm) })
                         } else if (proposal.optString("action") == "create_task") {
-                            val task = proposal.getString("action") == "create_task"
-                            val indoor = task && isIndoor(proposal.optString("place_type"))
-                            val locationRequired = task && !indoor
+                            val indoor = isIndoor(proposal.optString("place_type"))
+                            val suggestedPlace = proposal.optJSONObject("place")
+                                ?.takeUnless { indoor }
+                                ?.let { runCatching { Place.from(it) }.getOrNull() }
+                            val locationRequired = !indoor && suggestedPlace == null
+                            val suggestedTask = Errand(
+                                title = proposal.getString("title"),
+                                placeType = proposal.getString("place_type"),
+                                deadline = proposal.optString("deadline"),
+                                plannedDate = proposal.optString("planned_date"),
+                                reminderAt = reminderAtMillis(proposal.optString("reminder_at")),
+                                placeJson = suggestedPlace?.json()?.toString().orEmpty(),
+                            )
                             AppCard(contentPadding = PaddingValues(18.dp)) {
                                 Row(
                                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    AppIconBadge(
-                                        if (task) placeTypeIcon(proposal.optString("place_type")) else R.drawable.ic_tasks,
-                                        size = 36.dp,
-                                    )
+                                    AppIconBadge(placeTypeIcon(proposal.optString("place_type")), size = 36.dp)
                                     Text(
-                                        if (task) "待确认任务" else "待确认目的地",
+                                        "待确认任务",
                                         style = MaterialTheme.typography.labelMedium,
                                         color = MaterialTheme.colorScheme.primary,
                                     )
                                 }
                                 Spacer(Modifier.height(10.dp))
-                                Text(
-                                    if (task) proposal.getString("title") else proposal.getString("destination"),
-                                    style = MaterialTheme.typography.titleLarge,
-                                )
-                                if (task && proposal.optString("planned_date").isNotBlank()) {
+                                Text(proposal.getString("title"), style = MaterialTheme.typography.titleLarge)
+                                if (proposal.optString("planned_date").isNotBlank()) {
                                     Text(
                                         "计划 ${proposal.getString("planned_date")}",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
-                                if (task && proposal.optString("deadline").isNotBlank()) {
+                                if (proposal.optString("deadline").isNotBlank()) {
                                     Text(
                                         "截止 ${displayTime(proposal.getString("deadline"))}",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
-                                if (locationRequired) {
+                                if (proposal.optString("reminder_at").isNotBlank()) {
                                     Text(
-                                        "请选择实际办理地点；常用地点会优先显示，不会自动替你选店。",
+                                        "提醒 ${displayReminderTime(reminderAtMillis(proposal.getString("reminder_at")))}",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
-                                } else if (indoor) {
-                                    Text(
+                                }
+                                when {
+                                    indoor -> Text(
                                         "这类待办只记录，不参与路线规划。",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    locationRequired -> Text(
+                                        "没有 3 公里内匹配的常用地点，或未获取当前位置；请选择实际办理地点。",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    else -> Text(
+                                        "已按常用地点填入「${suggestedPlace!!.name}」，请核对。",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -343,35 +373,32 @@ internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: ()
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
                                     AppPrimaryButton(
-                                        if (locationRequired) "选择办理地点" else if (task) "快速保存" else "选择目的地",
+                                        when {
+                                            locationRequired -> "选择办理地点"
+                                            indoor -> "快速保存"
+                                            else -> "保存任务"
+                                        },
                                         onClick = {
-                                            if (task) {
-                                                val suggestedTask = Errand(
-                                                    title = proposal.getString("title"),
-                                                    placeType = proposal.getString("place_type"),
-                                                    deadline = proposal.optString("deadline"),
-                                                    plannedDate = proposal.optString("planned_date"),
+                                            val draftId = proposal.getString("_draft_id")
+                                            if (locationRequired) {
+                                                editorFeedback = ""
+                                                editor = AssistantEditorHost.SingleTask(
+                                                    draftId, suggestedTask.assistantSnapshot(),
                                                 )
-                                                val draftId = proposal.getString("_draft_id")
-                                                if (locationRequired) draft = suggestedTask to draftId else chat.saveTask(vm, suggestedTask, draftId)
-                                            } else {
-                                                val keyword = proposal.getString("destination")
-                                                val familiar = vm.familiarPlace(keyword)
-                                                if (familiar != null) chooseDestination(familiar, proposal.getString("_draft_id")) else search = keyword
-                                            }
+                                            } else chat.saveTask(vm, suggestedTask, draftId)
                                         },
                                         modifier = Modifier.weight(1f),
                                         enabled = chat.ready && !chat.busy && !vm.busy && !vm.updatingTrip && !vm.restoringTrip,
                                     )
-                                    if (task && indoor) {
+                                    if (!locationRequired) {
                                         TextButton(onClick = {
-                                            draft = Errand(
-                                                title = proposal.getString("title"),
-                                                placeType = proposal.getString("place_type"),
-                                                deadline = proposal.optString("deadline"),
-                                                plannedDate = proposal.optString("planned_date"),
-                                            ) to proposal.getString("_draft_id")
-                                        }, enabled = chat.ready && !chat.busy && !vm.busy) { Text("微调") }
+                                            editorFeedback = ""
+                                            editor = AssistantEditorHost.SingleTask(
+                                                proposal.getString("_draft_id"), suggestedTask.assistantSnapshot(),
+                                            )
+                                        }, enabled = chat.ready && !chat.busy && !vm.busy) {
+                                            Text(if (indoor) "微调" else "更换地点")
+                                        }
                                     }
                                     TextButton(
                                         { chat.dismissDraft(proposal.getString("_draft_id"), proposal.getString("_plan_id"), vm) },
@@ -543,14 +570,71 @@ internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: ()
     }
     if (showArchive) RouteArchiveSheet(vm, initialEventId = archiveEventId, dismiss = { showArchive = false },
         repeatRoute = { event -> chat.repeatRoute(event, vm) }, openCurrent = openPlan)
-    draft?.let { (initial, draftId) -> TaskEditor(vm, initial, { draft = null }) { updated ->
-        if (chat.saveTask(vm, updated, draftId)) draft = null
-    } }
-    taskDraftEdit?.let { edit -> key(edit.draftId, edit.itemId, edit.version) {
-        TaskEditor(vm, edit.task, { taskDraftEdit = null }, allowIncompleteDraft = true, saveLabel = "保留草稿修改") { updated ->
-            if (chat.editTaskDraft(vm, edit, updated)) taskDraftEdit = null
+    val editorHost = editor
+    if (editorHost !is AssistantEditorHost.Closed) key(editorHost.stableKey) {
+        val initial = when (editorHost) {
+            AssistantEditorHost.Closed -> null
+            is AssistantEditorHost.SingleTask -> errandFromAssistantSnapshot(editorHost.snapshot)
+            is AssistantEditorHost.DraftItem -> errandFromAssistantSnapshot(editorHost.snapshot)
         }
-    } }
+        LaunchedEffect(chat.ready, chat.proposal, editorHost) {
+            if (!chat.ready) return@LaunchedEffect
+            val issue = when (editorHost) {
+                is AssistantEditorHost.SingleTask ->
+                    if (chat.proposal?.optString("action") == "create_task" &&
+                        chat.proposal?.optString("_draft_id") == editorHost.draftId) null
+                    else "待确认任务已变化，请使用当前卡片重新打开。"
+                is AssistantEditorHost.DraftItem -> {
+                    val proposal = chat.proposal
+                    val item = taskDraftItems(proposal)
+                        .firstOrNull { it.optString("item_id") == editorHost.itemId }
+                    when {
+                        proposal?.optString("_draft_id") != editorHost.draftId ->
+                            "待确认草稿已变化，请使用当前卡片重新打开。"
+                        item == null -> "这条草稿已不存在，编辑已关闭。"
+                        item.optInt("version") != editorHost.version ->
+                            "这条草稿已被修改，请重新打开后再编辑。"
+                        else -> null
+                    }
+                }
+                AssistantEditorHost.Closed -> null
+            }
+            if (issue != null) {
+                editor = AssistantEditorHost.Closed
+                chat.error = issue
+            }
+        }
+        if (initial == null) {
+            LaunchedEffect(editorHost) {
+                editor = AssistantEditorHost.Closed
+                chat.error = "编辑内容无法恢复，请重新打开。"
+            }
+        } else when (editorHost) {
+            is AssistantEditorHost.SingleTask -> TaskEditor(
+                vm, initial, { editor = AssistantEditorHost.Closed },
+                feedback = editorFeedback, mode = TaskEditorMode.Assistant,
+            ) { updated ->
+                if (chat.saveTask(vm, updated, editorHost.draftId)) {
+                    editor = AssistantEditorHost.Closed
+                    editorFeedback = ""
+                } else editorFeedback = chat.error
+            }
+            is AssistantEditorHost.DraftItem -> {
+                val edit = TaskDraftEdit(initial, editorHost.draftId, editorHost.itemId, editorHost.version)
+                TaskEditor(
+                    vm, initial, { editor = AssistantEditorHost.Closed },
+                    allowIncompleteDraft = true, saveLabel = "保留草稿修改",
+                    feedback = editorFeedback, mode = TaskEditorMode.Assistant,
+                ) { updated ->
+                    if (chat.editTaskDraft(vm, edit, updated)) {
+                        editor = AssistantEditorHost.Closed
+                        editorFeedback = ""
+                    } else editorFeedback = chat.error
+                }
+            }
+            AssistantEditorHost.Closed -> {}
+        }
+    }
     search?.let { keyword ->
         val capturedDraftId = remember(keyword) { chat.proposal?.optString("_draft_id").orEmpty() }
         PlacePicker(vm, { search = null }, initialKeyword = keyword) { place ->

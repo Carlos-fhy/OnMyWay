@@ -70,7 +70,7 @@ class BackupRepositoryTest {
                 mode = "cycling", savedAt = System.currentTimeMillis(),
                 expiresAt = System.currentTimeMillis() + 30 * 60_000L))
             val snapshot = BackupRepository(sourceContext, first).snapshot()
-            assertEquals(13, snapshot.getInt("room_version"))
+            assertEquals(14, snapshot.getInt("room_version"))
             val target = BackupRepository(targetContext, second)
             assertFalse(hasUserRecords(target.snapshot()))
             target.restore(snapshot)

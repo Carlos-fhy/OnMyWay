@@ -16,7 +16,8 @@ internal class BackupRepository(private val context: Context, private val databa
     private val v11Tables = v10Tables + listOf("assistant_clarification", "assistant_place_choices")
     private val tables = v11Tables + "assistant_task_drafts"
     private val preferenceKeys = mapOf(
-        "settings" to listOf("city", "familiar_places", "preferred_detour_minutes",
+        "settings" to listOf("city", "familiar_places", "familiar_place_purposes",
+            "default_familiar_place", "preferred_detour_minutes",
             "walking_detour_minutes", "cycling_detour_minutes", "learning_enabled"),
         "assistant_conversation" to listOf("lines", "proposal", "proposal_saved_at"),
         "navigation_context" to listOf("snapshot"),
@@ -44,12 +45,12 @@ internal class BackupRepository(private val context: Context, private val databa
             }
             preferences.put(name, values)
         }
-        JSONObject().put("format", 1).put("room_version", 13)
+        JSONObject().put("format", 1).put("room_version", 14)
             .put("tables", data).put("preferences", preferences)
     }
 
     fun validate(snapshot: JSONObject) {
-        require(snapshot.optInt("format") == 1 && snapshot.optInt("room_version") in 7..13) {
+        require(snapshot.optInt("format") == 1 && snapshot.optInt("room_version") in 7..14) {
             "电脑备份格式与当前版本不兼容"
         }
         val data = snapshot.getJSONObject("tables")
@@ -62,6 +63,12 @@ internal class BackupRepository(private val context: Context, private val databa
                 val row = array.optJSONObject(i)
                 require(row != null) { "备份数据无效" }
                 if (table == "tasks" && snapshot.getInt("room_version") >= 13) {
+                    val reminderAt = row.opt("reminderAt")
+                    require((reminderAt is Int || reminderAt is Long) && (reminderAt as Number).toLong() >= 0) {
+                        "备份提醒时间无效"
+                    }
+                }
+                if (table in listOf("assistant_draft", "assistant_task_drafts") && snapshot.getInt("room_version") >= 14) {
                     val reminderAt = row.opt("reminderAt")
                     require((reminderAt is Int || reminderAt is Long) && (reminderAt as Number).toLong() >= 0) {
                         "备份提醒时间无效"
@@ -91,7 +98,7 @@ internal class BackupRepository(private val context: Context, private val databa
     /** Schema-only upgrades must not masquerade as user edits or stop an active local trip. */
     fun normalizedSchema(snapshot: JSONObject): JSONObject {
         validate(snapshot)
-        val result = JSONObject(snapshot.toString()).put("room_version", 13)
+        val result = JSONObject(snapshot.toString()).put("room_version", 14)
         val data = result.getJSONObject("tables")
         for (table in tables) {
             val rows = data.optJSONArray(table) ?: JSONArray()
@@ -108,6 +115,8 @@ internal class BackupRepository(private val context: Context, private val databa
             if (snapshot.getInt("room_version") < 12 && table == "tasks")
                 sorted.forEach { it.put("plannedDate", "") }
             if (snapshot.getInt("room_version") < 13 && table == "tasks")
+                sorted.forEach { it.put("reminderAt", 0L) }
+            if (snapshot.getInt("room_version") < 14 && table in listOf("assistant_draft", "assistant_task_drafts"))
                 sorted.forEach { it.put("reminderAt", 0L) }
             data.put(table, JSONArray(sorted))
         }

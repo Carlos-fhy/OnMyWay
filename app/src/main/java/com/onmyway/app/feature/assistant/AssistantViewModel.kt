@@ -11,6 +11,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.onmyway.app.core.location.FamiliarPlaceLookup
+import com.onmyway.app.core.location.FamiliarPlaceResolver
 import com.onmyway.app.core.model.Place
 import com.onmyway.app.core.model.isIndoor
 import com.onmyway.app.core.state.AppViewModel
@@ -48,8 +50,13 @@ internal class AssistantViewModel internal constructor(
     database: TaskDatabase = TaskDatabase.get(application),
     private val requestTransport: AssistantRequestTransport = HttpAssistantRequestTransport,
     private val requestJournalName: String = "onmyway-assistant-requests.db",
+    private val originProvider: (suspend () -> Place?)? = null,
 ) : AndroidViewModel(application) {
     constructor(application: Application) : this(application, application.getSharedPreferences("assistant_conversation", 0))
+    constructor(application: Application, vm: AppViewModel) : this(
+        application, application.getSharedPreferences("assistant_conversation", 0),
+        originProvider = { vm.assistantOriginOrNull() },
+    )
     private val store = AssistantStore(database, conversationPrefs)
     private val writeMutex = Mutex()
     private val welcome = ChatLine("assistant", "今天想做什么？可以让我记待办，或告诉我准备去哪儿。")
@@ -246,7 +253,8 @@ internal class AssistantViewModel internal constructor(
             // Nothing to confirm; end the trip with a summary immediately.
             if (storedLines.none { it.id == lineId }) {
                 record(tripCompletionSummary(event.arrived, event.destination,
-                    tripTasks.filter { it.status == "done" }.map { it.title }, emptyList()), lineId)
+                    tripTasks.filter { it.status == "done" }.map { it.title }, emptyList(),
+                    metrics = event.metrics), lineId)
             }
             tripCompletion = null
         } else {
@@ -258,6 +266,7 @@ internal class AssistantViewModel internal constructor(
                 tasks = tripTasks.map { task ->
                     TripCompletionTask(task.id, task.title, tripCompletionPlaceLabel(task), task.status == "done")
                 },
+                metrics = event.metrics,
             )
         }
     }
@@ -270,7 +279,8 @@ internal class AssistantViewModel internal constructor(
             pendingIds = pending.map { it.id }.toSet(),
         ) {
             record(tripCompletionSummary(prompt.arrived, prompt.destination,
-                completed.map { it.title }, pending.map { it.title }), "route-end:${prompt.eventId}")
+                completed.map { it.title }, pending.map { it.title },
+                metrics = prompt.metrics), "route-end:${prompt.eventId}")
             if (tripCompletion?.eventId == prompt.eventId) tripCompletion = null
         }
     }
@@ -279,7 +289,7 @@ internal class AssistantViewModel internal constructor(
         val completed = prompt.tasks.filter { it.done }.map { it.title }
         val pending = prompt.tasks.filterNot { it.done }.map { it.title }
         record(tripCompletionSummary(prompt.arrived, prompt.destination, completed, pending,
-            confirmed = false), "route-end:${prompt.eventId}")
+            confirmed = false, metrics = prompt.metrics), "route-end:${prompt.eventId}")
         tripCompletion = null
     }
     fun completeRoute(draftId: String?, result: JSONObject, historyId: String?, message: String) {
@@ -464,6 +474,12 @@ internal class AssistantViewModel internal constructor(
                 vm.planningBase()?.let { it.planId.ifBlank { it.sessionId } }.orEmpty() else ""
             put("_plan_id", previousPlan.ifBlank { activePlan }.ifBlank { request.requestId })
         } else null
+        val fill = when {
+            replacement == null -> PlaceFillSummary()
+            batch -> fillDraftPlaces(replacement, vm)
+            action == "create_task" -> fillLegacyPlace(replacement, vm)
+            else -> PlaceFillSummary()
+        }
         val reply = when (action) {
             "create_tasks" -> "已整理为多项草稿，请逐项核对，可以只保存其中几项。"
             "update_task_drafts" -> "已修改指定草稿，其他条目保留；核对后再保存。"
@@ -471,6 +487,9 @@ internal class AssistantViewModel internal constructor(
             "plan_route" -> if (answer.optString("mode").isBlank()) "这次步行还是骑行？" else "我来定位并查看有哪些事可以顺路办。"
             "list_tasks" -> taskListReply(request)
             else -> answer.getString("reply")
+        }.let { text ->
+            listOf(text, placeFillNote(fill), reminderNote(replacement))
+                .filter { it.isNotBlank() }.joinToString(" ")
         }
         val expectedDraft = JSONObject(request.contextKey).optString("draft_id").takeIf { it.isNotBlank() && it != "null" }
         val applied = writeMutex.withLock {
@@ -487,6 +506,61 @@ internal class AssistantViewModel internal constructor(
         // the next launch only removes the journal entry; it never recreates the draft.
         refreshConversation(vm)
         finishRequest(request)
+    }
+
+    /**
+     * Deterministic client-side fill. It never asks for a location when no candidate exists,
+     * and a missing provider means tests/previews keep the old manual-selection behavior.
+     */
+    private suspend fun fillDraftPlaces(proposal: JSONObject, vm: AppViewModel): PlaceFillSummary {
+        val requests = placeFillRequests(proposal)
+        if (requests.isEmpty()) return PlaceFillSummary()
+        if (requests.none { FamiliarPlaceResolver.hasCandidates(it.placeType, vm.familiarPlaces, vm.familiarPlacePurposes) })
+            return PlaceFillSummary()
+        val provider = originProvider ?: return PlaceFillSummary()
+        val origin = try {
+            provider()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+        return applyFamiliarPlaceFills(proposal, requests, origin, vm.familiarPlaces, vm.familiarPlacePurposes)
+    }
+
+    private suspend fun fillLegacyPlace(proposal: JSONObject, vm: AppViewModel): PlaceFillSummary {
+        if (proposal.has("known_destination") && !proposal.isNull("known_destination")) return PlaceFillSummary()
+        if (proposal.has("place") && !proposal.isNull("place")) return PlaceFillSummary()
+        val type = proposal.optString("place_type")
+        if (!FamiliarPlaceResolver.hasCandidates(type, vm.familiarPlaces, vm.familiarPlacePurposes))
+            return PlaceFillSummary()
+        val provider = originProvider ?: return PlaceFillSummary()
+        val origin = try {
+            provider()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+        return try {
+            when (val lookup = FamiliarPlaceResolver.resolve(type, origin, vm.familiarPlaces, vm.familiarPlacePurposes)) {
+                is FamiliarPlaceLookup.Matched -> {
+                    proposal.put("known_destination", lookup.match.place.json())
+                    proposal.put("place", lookup.match.place.json())
+                    PlaceFillSummary(filled = listOf(lookup.match))
+                }
+                FamiliarPlaceLookup.NoOrigin ->
+                    PlaceFillSummary(missingCount = 1, locationUnavailable = true)
+                is FamiliarPlaceLookup.OutOfRange ->
+                    PlaceFillSummary(missingCount = 1, outOfRange = true)
+                FamiliarPlaceLookup.NoCandidate, FamiliarPlaceLookup.NotApplicable ->
+                    PlaceFillSummary(missingCount = 1)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            PlaceFillSummary()
+        }
     }
 
     private suspend fun refreshConversation(vm: AppViewModel) {
@@ -546,14 +620,20 @@ internal class AssistantViewModel internal constructor(
             return
         }
         if (pendingAtSend?.optString("action") == "create_task" && command in listOf("确认", "保存", "记下")) {
-            if (!isIndoor(pendingAtSend.optString("place_type"))) {
+            val indoor = isIndoor(pendingAtSend.optString("place_type"))
+            val place = pendingAtSend.optJSONObject("place")
+                ?.takeUnless { indoor }
+                ?.let { runCatching { Place.from(it) }.getOrNull() }
+            if (!indoor && place == null) {
                 error = "请先在卡片中选择办理地点。"; return
             }
             addLine("user", input.trim()); input = ""; error = ""
             saveTask(vm, Errand(title = pendingAtSend.getString("title"),
                 placeType = pendingAtSend.getString("place_type"),
                 deadline = pendingAtSend.optString("deadline"),
-                plannedDate = pendingAtSend.optString("planned_date")), pendingAtSend.getString("_draft_id"))
+                plannedDate = pendingAtSend.optString("planned_date"),
+                reminderAt = reminderAtMillis(pendingAtSend.optString("reminder_at")),
+                placeJson = place?.json()?.toString().orEmpty()), pendingAtSend.getString("_draft_id"))
             return
         }
         if (pendingAtSend?.optString("action") == "create_tasks") {

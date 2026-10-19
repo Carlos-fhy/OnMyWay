@@ -125,7 +125,7 @@ class AssistantDraftContextTest {
         assertTrue(content.contains("任务尚未保存"))
         assertTrue(content.contains("只修改明确指定的字段"))
         val fields = JSONObject(content.substringAfter('\n'))
-        assertEquals(setOf("title", "place_type", "deadline"), fields.keys().asSequence().toSet())
+        assertEquals(setOf("title", "place_type", "deadline", "reminder_at"), fields.keys().asSequence().toSet())
         return fields
     }
 
@@ -194,7 +194,7 @@ class AssistantDraftContextTest {
         val before = draft.toString()
         val context = assistantDraftContext(draft)!!
         val fields = JSONObject(context.substringAfter('\n'))
-        assertEquals(setOf("title", "place_type", "deadline"), fields.keys().asSequence().toSet())
+        assertEquals(setOf("title", "place_type", "deadline", "reminder_at"), fields.keys().asSequence().toSet())
         assertEquals(title, fields.getString("title"))
         assertEquals(before, draft.toString())
         assertNull(assistantDraftContext(JSONObject().put("action", "reply")))

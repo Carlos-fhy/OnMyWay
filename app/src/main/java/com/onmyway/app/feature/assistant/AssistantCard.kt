@@ -57,9 +57,14 @@ internal fun assistantCardIssue(value: JSONObject, now: Long = System.currentTim
             }
             "create_task" -> {
                 require(value.opt("title") is String && value.opt("place_type") is String)
+                val placeJson = if (value.has("place") && !value.isNull("place")) {
+                    require(value.opt("place") is JSONObject)
+                    value.getJSONObject("place").toString()
+                } else ""
                 AssistantDraftItem.fromTask(draftId, planId, 0, 1,
                     Errand(title = value.getString("title"), placeType = value.getString("place_type"),
-                        deadline = value.optString("deadline")))
+                        deadline = value.optString("deadline"),
+                        reminderAt = reminderAtMillis(value.optString("reminder_at")), placeJson = placeJson))
             }
             "plan_route" -> {
                 require((value.opt("destination") as? String)?.isNotBlank() == true)

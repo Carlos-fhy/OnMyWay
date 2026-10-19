@@ -82,6 +82,8 @@ def test_invalid_creation_never_becomes_executable(client, monkeypatch, tasks):
     [{"item_id": "parcel", "expected_version": 1, "deadline": None}],
     [{"item_id": "parcel", "expected_version": 1, "title": " "}],
     [{"item_id": "parcel", "expected_version": 1, "planned_date": "2026-02-30"}],
+    [{"item_id": "parcel", "expected_version": 1, "reminder_at": "2026-10-15T09:10:00"}],
+    [{"item_id": "parcel", "expected_version": 1, "reminder_at": "2026-10-15T08:00:00+08:00"}],
     [{"item_id": "parcel", "expected_version": 1, "priority": False}],
     [{"item_id": "parcel", "expected_version": True, "title": "改名"}],
     [{"item_id": "parcel", "expected_version": 1, "place_id": "guessed"}],
@@ -104,6 +106,63 @@ def test_clear_date_is_explicit_and_does_not_reinsert_other_fields(client, monke
     response = client.post("/assistant/chat", json=body(item(deadline="2026-10-15T18:00:00+08:00")))
     assert response.status_code == 200
     assert response.json()["updates"] == [patch]
+
+
+def test_create_tasks_carries_reasoned_reminder(client, monkeypatch):
+    reminder = "2026-10-15T09:10:00+08:00"
+    output(monkeypatch, {"action": "create_tasks", "reply": "十分钟后提醒你取快递。", "tasks": [
+        task(reminder_at=reminder, planned_date="")]})
+    response = client.post("/assistant/chat", json=body())
+    assert response.status_code == 200
+    assert response.json()["tasks"][0]["reminder_at"] == reminder
+
+
+def test_legacy_create_task_carries_reasoned_reminder(client, monkeypatch):
+    reminder = "2026-10-15T09:10:00+08:00"
+    output(monkeypatch, {"action": "create_task", "reply": "十分钟后提醒你取快递。",
+                         "title": "取快递", "place_type": "PARCEL", "reminder_at": reminder})
+    response = client.post("/assistant/chat", json=body())
+    assert response.status_code == 200
+    assert response.json()["reminder_at"] == reminder
+
+
+def test_single_task_top_level_reminder_moves_into_the_task(client, monkeypatch):
+    reminder = "2026-10-15T09:10:00+08:00"
+    output(monkeypatch, {"action": "create_tasks", "reply": "十分钟后提醒你取快递。",
+                         "reminder_at": reminder, "tasks": [task(planned_date="")]})
+    response = client.post("/assistant/chat", json=body())
+    assert response.status_code == 200
+    assert response.json()["tasks"][0]["reminder_at"] == reminder
+
+
+def test_top_level_reminder_with_multiple_tasks_is_not_silently_dropped(client, monkeypatch):
+    output(monkeypatch, {"action": "create_tasks", "reply": "提醒",
+                         "reminder_at": "2026-10-15T09:10:00+08:00",
+                         "tasks": [task(), task(title="打印论文", place_type="PRINT_SHOP")]})
+    assert client.post("/assistant/chat", json=body()).status_code == 502
+
+
+@pytest.mark.parametrize("reminder", ["2026-10-15T09:00:00+08:00",
+    "2026-10-15T08:59:59+08:00", "2026-10-15T09:10:00"])
+def test_past_naive_or_missing_timezone_reminder_is_rejected(client, monkeypatch, reminder):
+    output(monkeypatch, {"action": "create_tasks", "reply": "提醒",
+                         "tasks": [task(reminder_at=reminder, planned_date="")]})
+    assert client.post("/assistant/chat", json=body()).status_code == 502
+
+
+def test_draft_reminder_can_be_replaced_and_cleared(client, monkeypatch):
+    reminder = "2026-10-15T09:15:00+08:00"
+    patch = {"item_id": "parcel", "expected_version": 1, "reminder_at": reminder}
+    output(monkeypatch, {"action": "update_task_drafts", "reply": "已改提醒", "updates": [patch]})
+    changed = client.post("/assistant/chat", json=body(item(reminder_at="2026-10-15T09:10:00+08:00")))
+    assert changed.status_code == 200
+    assert changed.json()["updates"] == [patch]
+
+    clear = {"item_id": "parcel", "expected_version": 1, "reminder_at": ""}
+    output(monkeypatch, {"action": "update_task_drafts", "reply": "已取消提醒", "updates": [clear]})
+    cleared = client.post("/assistant/chat", json=body(item(reminder_at=reminder)))
+    assert cleared.status_code == 200
+    assert cleared.json()["updates"] == [clear]
 
 
 def test_indoor_task_is_a_valid_draft_without_a_place(client, monkeypatch):
@@ -145,6 +204,7 @@ def test_prompt_carries_current_id_version_and_actual_empty_dates(client, monkey
         prompt = messages[0]["content"]
         assert '"item_id": "print"' in prompt and '"version": 8' in prompt
         assert '"planned_date": ""' in prompt and '"deadline": ""' in prompt
+        assert '"reminder_at": ""' in prompt
         assert "不得从旧对话恢复其他条目" in prompt
         assert "priority 字段已停用" in prompt and "place_type=INDOOR" in prompt
         return json.dumps({"action": "reply", "reply": "请说明修改哪一项。"})

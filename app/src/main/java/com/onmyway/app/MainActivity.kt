@@ -46,8 +46,15 @@ import com.onmyway.app.feature.navigation.NavigationRuntime
 import com.onmyway.app.feature.navigation.NavigationState
 import com.onmyway.app.feature.planning.PlanScreen
 import com.onmyway.app.feature.settings.SettingsScreen
+import com.onmyway.app.feature.task.DeleteHost
+import com.onmyway.app.feature.task.DeleteHostSaver
 import com.onmyway.app.feature.task.TaskEditor
+import com.onmyway.app.feature.task.TaskEditorHost
+import com.onmyway.app.feature.task.TaskEditorHostSaver
 import com.onmyway.app.feature.task.TaskScreen
+import com.onmyway.app.feature.task.editorSnapshot
+import com.onmyway.app.feature.task.errandFromEditorSnapshot
+import com.onmyway.app.feature.task.stableKey
 
 class MainActivity : ComponentActivity() {
     override fun onResume() {
@@ -77,12 +84,14 @@ private val homeTabs = listOf(
 
 @Composable
 private fun OnMyWay(vm: AppViewModel = viewModel()) {
-    val chat: AssistantViewModel = viewModel()
+    val app = LocalContext.current.applicationContext as android.app.Application
+    val chat: AssistantViewModel = viewModel { AssistantViewModel(app, vm) }
     val tasks by vm.tasks.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableIntStateOf(1) }
-    var adding by rememberSaveable { mutableStateOf(false) }
-    var editing by remember { mutableStateOf<Errand?>(null) }
-    var deleting by remember { mutableStateOf<Errand?>(null) }
+    var editor by rememberSaveable(stateSaver = TaskEditorHostSaver) {
+        mutableStateOf<TaskEditorHost>(TaskEditorHost.Closed)
+    }
+    var deleting by rememberSaveable(stateSaver = DeleteHostSaver) { mutableStateOf<DeleteHost?>(null) }
     var navigationRequested by rememberSaveable { mutableStateOf(NavigationRuntime.current != null) }
     val navigationVisible = navigationRequested && vm.result != null && !vm.editingPlan && !vm.restoringTrip
     LaunchedEffect(vm.result, vm.navigationState, vm.navigationEndEvent?.id) {
@@ -135,7 +144,9 @@ private fun OnMyWay(vm: AppViewModel = viewModel()) {
                     label = "main-tab",
                 ) { current ->
                     when (current) {
-                        0 -> TaskScreen(tasks, { adding = true }, { editing = it }, { deleting = it }, vm::save, vm::snoozeReminder, vm::dismissReminder)
+                        0 -> TaskScreen(tasks, { editor = TaskEditorHost.New },
+                            { editor = TaskEditorHost.Edit(it.id, it.editorSnapshot()) },
+                            { deleting = DeleteHost(it.id, it.title) }, vm::save, vm::snoozeReminder, vm::dismissReminder)
                         1 -> AssistantScreen(vm, tasks, { tab = 3 }, { tab = 2 }, { navigationRequested = true }, chat)
                         2 -> PlanScreen(vm, tasks, navigationVisible) { navigationRequested = it }
                         else -> SettingsScreen(vm) { event ->
@@ -146,16 +157,40 @@ private fun OnMyWay(vm: AppViewModel = viewModel()) {
             }
         }
     }
-    if (adding || editing != null) TaskEditor(vm, editing, { adding = false; editing = null }) {
-        vm.save(it); adding = false; editing = null
+    val host = editor
+    if (host !is TaskEditorHost.Closed) key(host.stableKey) {
+        val initial = when (host) {
+            TaskEditorHost.New -> null
+            is TaskEditorHost.Edit -> errandFromEditorSnapshot(host.snapshot)
+            TaskEditorHost.Closed -> null
+        }
+        LaunchedEffect(host) {
+            if (host is TaskEditorHost.Edit && vm.taskOrNull(host.taskId) == null) {
+                editor = TaskEditorHost.Closed
+                vm.message = "这条待办已不存在，编辑已关闭。"
+            }
+        }
+        if (host is TaskEditorHost.Edit && initial == null) {
+            LaunchedEffect(Unit) {
+                editor = TaskEditorHost.Closed
+                vm.message = "编辑内容无法恢复，请重新打开任务。"
+            }
+        } else TaskEditor(vm, initial, { editor = TaskEditorHost.Closed }, autoSaveOnDismiss = true) { updated ->
+            if (host is TaskEditorHost.Edit) vm.saveExisting(updated) else vm.save(updated)
+            editor = TaskEditorHost.Closed
+        }
     }
-    deleting?.let { task ->
+    deleting?.let { host ->
         AppConfirmDialog(
             title = "删除这件事？",
-            message = task.title,
+            message = host.title,
             confirmLabel = "删除",
             destructive = true,
-            onConfirm = { vm.delete(task); deleting = null },
+            onConfirm = {
+                val task = tasks.firstOrNull { it.id == host.taskId }
+                if (task != null) vm.delete(task) else vm.message = "这条待办已不存在，无需删除。"
+                deleting = null
+            },
             onDismiss = { deleting = null },
         )
     }

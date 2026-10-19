@@ -60,7 +60,7 @@ Windows 下可运行 `tools/check-device-backend.ps1` 检查电脑后端、恢�
 
 ### 数据库存储格式
 
-手机正式记录、助手对话和待确认方案保存在 Room 管理的 SQLite 数据库 `onmyway.db`；旧安装的助手偏好记录会在首次打开时迁入。仓库中的 `app/schemas/com.onmyway.app.TaskDatabase/*.json` 是 Room 自动生成的**表结构与迁移校验文件**，不是用户记录；升级测试依赖它们，不能改成 `.sqlite` 或直接删除。电脑备份保存在 `backend/data/backups.sqlite3` 的独立 SQL 表（`backup_tasks`、`backup_route_history`、`backup_assistant_messages` 等），不再把整份备份存为单个 JSON 文档。手机与后端仍以 JSON 传输请求；已有路线快照与少量偏好设置仍含 JSON 文本字段，后续会按迁移计划拆为结构化表。
+手机正式记录、助手对话和待确认方案保存在 Room 管理的 SQLite 数据库 `onmyway.db`；旧安装的助手偏好记录会在首次打开时迁入。仓库中的 `app/schemas/com.onmyway.app.data.local.TaskDatabase/*.json` 是 Room 自动生成的**表结构与迁移校验文件**，不是用户记录；升级测试依赖它们，不能改成 `.sqlite` 或直接删除。电脑备份保存在 `backend/data/backups.sqlite3` 的独立 SQL 表（`backup_tasks`、`backup_route_history`、`backup_assistant_messages` 等），不再把整份备份存为单个 JSON 文档。手机与后端仍以 JSON 传输请求；已有路线快照与少量偏好设置仍含 JSON 文本字段，后续会按迁移计划拆为结构化表。
 
 后端另用 `backend/data/harness.db` 保存意图请求的编号、执行状态与建议结果，可用 `ONMYWAY_HARNESS_DB` 指定路径。“完成”只表示建议已经生成，不代表待办或导航已经执行。此库包含建议内容，不在 `/sync` 快照范围内，需要单独备份；仓库忽略该数据库及整个 `backend/data/` 目录。
 

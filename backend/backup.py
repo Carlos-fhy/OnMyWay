@@ -12,9 +12,10 @@ from fastapi import APIRouter, Header, HTTPException, Request
 
 router = APIRouter(prefix="/backup", tags=["backup"])
 MAX_BYTES = 8 * 1024 * 1024
-ROOM_VERSION = 13
+ROOM_VERSION = 14
 LEGACY_ROOM_VERSION = 7
-# Keep this in lockstep with the Room v13 schema. Names are fixed, never user SQL.
+SUPPORTED_ROOM_VERSIONS = (7, 8, 9, 10, 11, 12, 13, 14)
+# Keep this in lockstep with the Room v14 schema. Names are fixed, never user SQL.
 TABLE_COLUMNS = {
     "tasks": (
         ("id", "TEXT"), ("title", "TEXT"), ("priority", "INTEGER"),
@@ -58,7 +59,7 @@ TABLE_COLUMNS = {
         ("mode", "TEXT"), ("knownPlaceId", "TEXT"), ("knownPlaceName", "TEXT"),
         ("knownLongitude", "REAL"), ("knownLatitude", "REAL"),
         ("knownAddress", "TEXT"), ("savedAt", "INTEGER"), ("expiresAt", "INTEGER"), ("draftId", "TEXT"),
-        ("conversationId", "TEXT"), ("planId", "TEXT"),
+        ("conversationId", "TEXT"), ("planId", "TEXT"), ("reminderAt", "INTEGER"),
     ),
     "planning_draft": (
         ("id", "INTEGER"), ("destination", "TEXT"), ("mode", "TEXT"), ("budget", "INTEGER"),
@@ -80,7 +81,7 @@ TABLE_COLUMNS = {
         ("id", "TEXT"), ("planId", "TEXT"), ("position", "INTEGER"),
         ("version", "INTEGER"), ("title", "TEXT"), ("placeType", "TEXT"),
         ("deadline", "TEXT"), ("plannedDate", "TEXT"), ("priority", "INTEGER"),
-        ("serviceMinutes", "INTEGER"), ("placeJson", "TEXT"),
+        ("serviceMinutes", "INTEGER"), ("placeJson", "TEXT"), ("reminderAt", "INTEGER"),
     ),
 
 }
@@ -88,15 +89,19 @@ LEGACY_TABLE_NAMES = tuple(TABLE_COLUMNS)[:5]
 
 
 def _columns_for(version: int) -> dict:
-    if version not in (LEGACY_ROOM_VERSION, 8, 9, 10, 11, 12, ROOM_VERSION):
+    if version not in SUPPORTED_ROOM_VERSIONS:
         raise HTTPException(409, "Backup was written by an unsupported app version")
+    assistant_reminder_tables = ("assistant_draft", "assistant_task_drafts")
     return {
         name: tuple(
             column for column in columns
             if not (column[0] == "draftId" and version < 10)
             and not (column[0] == "planId" and version < 11)
             and not (column[0] == "plannedDate" and version < 12)
-            and not (column[0] == "reminderAt" and version < 13)
+            and not (column[0] == "reminderAt" and (
+                (name == "tasks" and version < 13)
+                or (name in assistant_reminder_tables and version < 14)
+            ))
         )
         for name, columns in TABLE_COLUMNS.items()
         if not (version == 7 and name not in LEGACY_TABLE_NAMES)
@@ -157,7 +162,7 @@ def _authorize(token: str | None) -> None:
 
 
 def _validate(snapshot: object) -> dict:
-    if not isinstance(snapshot, dict) or snapshot.get("format") != 1 or snapshot.get("room_version") not in (LEGACY_ROOM_VERSION, 8, 9, 10, 11, 12, ROOM_VERSION):
+    if not isinstance(snapshot, dict) or snapshot.get("format") != 1 or snapshot.get("room_version") not in SUPPORTED_ROOM_VERSIONS:
         raise HTTPException(422, "Unsupported backup format")
     tables = snapshot.get("tables")
     columns_by_table = _columns_for(snapshot["room_version"])

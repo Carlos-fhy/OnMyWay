@@ -22,6 +22,15 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class AssistantPendingInputTest {
+    /** send() silently ignores input while any planner is busy, so wait for a sendable state. */
+    private suspend fun waitUntilSendable(vm: AppViewModel, chat: AssistantViewModel) =
+        withTimeout(5_000) {
+            while (withContext(Dispatchers.Main) {
+                    !chat.ready || chat.busy || vm.busy || vm.updatingTrip ||
+                        vm.restoringTrip || chat.automatic.busy
+                }) delay(20)
+        }
+
     @Test fun spokenCancelAndConfirmHandlePendingDrafts() = runBlocking {
         val app = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as Application
         val prefs = app.getSharedPreferences("assistant_pending_input_test", 0)
@@ -30,7 +39,7 @@ class AssistantPendingInputTest {
         val vm = withContext(Dispatchers.Main) { AppViewModel(app, db) }
         val chat = withContext(Dispatchers.Main) { AssistantViewModel(app, prefs, db) }
         try {
-            withTimeout(5_000) { while (!withContext(Dispatchers.Main) { chat.ready }) delay(20) }
+            waitUntilSendable(vm, chat)
             withContext(Dispatchers.Main) {
                 chat.proposal = JSONObject().put("action", "plan_route")
                     .put("destination", "图书馆").put("mode", "")
@@ -42,15 +51,17 @@ class AssistantPendingInputTest {
             withTimeout(5_000) {
                 while (withContext(Dispatchers.Main) { chat.busy } || db.assistant().draft() != null) delay(20)
             }
+            waitUntilSendable(vm, chat)
             withContext(Dispatchers.Main) {
                 assertNull(chat.proposal)
+                // 户外任务必须先选实际地点；这句话快捷确认路径用「不用出门」验证确认本身。
                 chat.proposal = JSONObject().put("action", "create_task")
-                    .put("title", "打印论文").put("place_type", "PRINT_SHOP")
+                    .put("title", "写作业").put("place_type", "INDOOR")
                 chat.input = "确认"
                 chat.send(vm)
             }
             withTimeout(5_000) {
-                while (db.tasks().observe().first().none { it.title == "打印论文" }) delay(20)
+                while (db.tasks().observe().first().none { it.title == "写作业" }) delay(20)
             }
             // The Room transaction becomes visible before the confirming coroutine refreshes the card.
             withTimeout(5_000) {
@@ -58,7 +69,7 @@ class AssistantPendingInputTest {
             }
             assertEquals("", withContext(Dispatchers.Main) { chat.error })
             assertNull(withContext(Dispatchers.Main) { chat.proposal })
-            assertEquals("打印论文", db.tasks().observe().first().single().title)
+            assertEquals("写作业", db.tasks().observe().first().single().title)
         } finally {
             withContext(Dispatchers.Main) {
                 chat.viewModelScope.cancel()

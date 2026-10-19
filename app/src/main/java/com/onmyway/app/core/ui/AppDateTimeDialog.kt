@@ -11,8 +11,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -20,13 +22,17 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimeInput
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -68,15 +74,17 @@ private fun dateDescription(date: LocalDate): String =
     "${date.format(fullDateFormatter)} ${weekdays[date.dayOfWeek.value - 1]}"
 
 /**
- * 应用内统一的日期/时间选择浮层。日期用可横向滑动的快捷选项，
- * 超过 60 天时仍可打开完整日历，避免和系统旧式弹窗混用。
+ * 应用内统一的日期/时间选择浮层。默认用快捷选项；[compact] 为 true 时
+ * 只保留一个日期按钮和直接输入的时间，适合待办编辑器等需要简约操作的场景。
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun AppDateTimeDialog(
     initial: LocalDateTime,
     onDismiss: () -> Unit,
     withTime: Boolean = true,
     title: String = if (withTime) "选择日期和时间" else "选择日期",
+    compact: Boolean = false,
     onConfirm: (LocalDateTime) -> Unit,
 ) {
     val today = remember { LocalDate.now() }
@@ -86,8 +94,15 @@ internal fun AppDateTimeDialog(
     // 分钟按 5 分钟刻度展示，初始值先归整，避免打开时没有任何选项被选中。
     var minute by rememberSaveable { mutableIntStateOf(((initial.minute + 2) / 5 * 5).coerceAtMost(55)) }
     var calendar by remember { mutableStateOf(false) }
+    val timeState = rememberTimePickerState(
+        initialHour = initial.hour,
+        initialMinute = initial.minute,
+        is24Hour = true,
+    )
 
     val date = LocalDate.parse(selectedDate)
+    val shownHour = if (compact && withTime) timeState.hour else hour
+    val shownMinute = if (compact && withTime) timeState.minute else minute
     val days = remember(horizon, date) { if (date in horizon) horizon else listOf(date) + horizon }
     val dateIndex = days.indexOf(date).coerceAtLeast(0)
     val dateState = rememberLazyListState(initialFirstVisibleItemIndex = (dateIndex - 1).coerceAtLeast(0))
@@ -108,58 +123,77 @@ internal fun AppDateTimeDialog(
                     Text(title, style = MaterialTheme.typography.headlineSmall)
                     Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer) {
                         Text(
-                            if (withTime) "${dateDescription(date)}  ${"%02d:%02d".format(hour, minute)}" else dateDescription(date),
+                            if (withTime) "${dateDescription(date)}  ${"%02d:%02d".format(shownHour, shownMinute)}" else dateDescription(date),
                             Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.onPrimaryContainer,
                         )
                     }
                 }
-                SectionLabel("日期")
-                LazyRow(
-                    state = dateState,
-                    modifier = Modifier.testTag("date-row"),
-                    contentPadding = PaddingValues(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    itemsIndexed(days) { _, day ->
-                        AppPill(
-                            text = dayLabel(day, today),
-                            selected = day == date,
-                            onClick = { selectedDate = day.toString() },
-                        )
+                if (compact) {
+                    SectionLabel("日期")
+                    OutlinedButton(
+                        onClick = { calendar = true },
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).heightIn(min = 50.dp),
+                        shape = RoundedCornerShape(14.dp),
+                    ) {
+                        Icon(painterResource(R.drawable.ic_calendar), null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(dateDescription(date))
                     }
-                }
-                if (withTime) {
-                    SectionLabel("小时")
+                    if (withTime) {
+                        SectionLabel("时间")
+                        Box(Modifier.fillMaxWidth().padding(horizontal = 20.dp), contentAlignment = Alignment.Center) {
+                            TimeInput(state = timeState)
+                        }
+                    }
+                } else {
+                    SectionLabel("日期")
                     LazyRow(
-                        state = hourState,
-                        modifier = Modifier.testTag("hour-row"),
+                        state = dateState,
+                        modifier = Modifier.testTag("date-row"),
                         contentPadding = PaddingValues(horizontal = 20.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        items(24) { value ->
+                        itemsIndexed(days) { _, day ->
                             AppPill(
-                                text = "${value}时",
-                                selected = hour == value,
-                                onClick = { hour = value },
+                                text = dayLabel(day, today),
+                                selected = day == date,
+                                onClick = { selectedDate = day.toString() },
                             )
                         }
                     }
-                    SectionLabel("分钟")
-                    LazyRow(
-                        state = minuteState,
-                        modifier = Modifier.testTag("minute-row"),
-                        contentPadding = PaddingValues(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        items(12) { index ->
-                            val value = index * 5
-                            AppPill(
-                                text = "%02d分".format(value),
-                                selected = minute == value,
-                                onClick = { minute = value },
-                            )
+                    if (withTime) {
+                        SectionLabel("小时")
+                        LazyRow(
+                            state = hourState,
+                            modifier = Modifier.testTag("hour-row"),
+                            contentPadding = PaddingValues(horizontal = 20.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            items(24) { value ->
+                                AppPill(
+                                    text = "${value}时",
+                                    selected = hour == value,
+                                    onClick = { hour = value },
+                                )
+                            }
+                        }
+                        SectionLabel("分钟")
+                        LazyRow(
+                            state = minuteState,
+                            modifier = Modifier.testTag("minute-row"),
+                            contentPadding = PaddingValues(horizontal = 20.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            items(12) { index ->
+                                val value = index * 5
+                                AppPill(
+                                    text = "%02d分".format(value),
+                                    selected = minute == value,
+                                    onClick = { minute = value },
+                                )
+                            }
                         }
                     }
                 }
@@ -171,11 +205,11 @@ internal fun AppDateTimeDialog(
                     Modifier.fillMaxWidth().padding(horizontal = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    TextButton(onClick = { calendar = true }) { Text("更远日期…") }
+                    if (!compact) TextButton(onClick = { calendar = true }) { Text("更远日期…") }
                     Spacer(Modifier.weight(1f))
                     TextButton(onClick = onDismiss) { Text("取消") }
                     Button(
-                        onClick = { onConfirm(date.atTime(hour, minute)) },
+                        onClick = { onConfirm(date.atTime(shownHour, shownMinute)) },
                         shape = RoundedCornerShape(14.dp),
                     ) { Text("确定") }
                 }

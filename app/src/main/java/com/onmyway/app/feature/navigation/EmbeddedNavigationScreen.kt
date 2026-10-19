@@ -79,7 +79,10 @@ internal fun EmbeddedNavigationScreen(
     destination: Place,
     via: List<Place>,
     onStarted: () -> Unit,
+    onArrived: () -> Unit = {},
+    onFailed: (String) -> Unit = {},
     onAdjustRoute: () -> Unit = {},
+    autoStart: Boolean = true,
     onExit: (Boolean) -> Unit,
 ) {
     val context = LocalContext.current
@@ -88,8 +91,13 @@ internal fun EmbeddedNavigationScreen(
     val exit by rememberUpdatedState(onExit)
     var confirmExit by remember { mutableStateOf(false) }
     val started by rememberUpdatedState(onStarted)
+    val arrived by rememberUpdatedState(onArrived)
+    val failed by rememberUpdatedState(onFailed)
     val controller = remember(sessionId, mode, destination, via) {
-        NavigationRuntime.obtain(context, sessionId, mode, destination, via)
+        NavigationRuntime.obtain(
+            context, sessionId, mode, destination, via,
+            requireExplicitStart = !autoStart,
+        )
     }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         controller.permissionResult()
@@ -100,7 +108,11 @@ internal fun EmbeddedNavigationScreen(
     }
     BackHandler { confirmExit = true }
     DisposableEffect(controller, owner) {
-        controller.attach(context, { started() }, { confirmExit = true })
+        controller.attach(context,
+            started = { started() },
+            arrived = { arrived() },
+            failed = { failed(it) },
+            exit = { confirmExit = true })
         val previousKeepScreenOn = hostView.keepScreenOn
         hostView.keepScreenOn = true
         if (owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) controller.resume()
@@ -165,6 +177,8 @@ internal class NavigationController(
     private val mode: String,
     private val destination: Place,
     private val via: List<Place>,
+    requireExplicitStart: Boolean = false,
+    private val meter: NavigationMeter = NavigationMeter(),
 ) {
     val runId = java.util.UUID.randomUUID().toString()
     var serviceLease = 0L
@@ -175,6 +189,10 @@ internal class NavigationController(
     private var originRequest: Job? = null
     private var originMeasuredAt = 0L
     private var onStarted: () -> Unit = {}
+    private var onArrived: () -> Unit = {}
+    private var onFailed: (String) -> Unit = {}
+    private var failureReported = false
+    private var arrivalReported = false
     private var onExit: () -> Unit = {}
     private var viewContext: Context? = null
     var phase by mutableStateOf(NavigationPhase.PREPARING)
@@ -195,6 +213,8 @@ internal class NavigationController(
     private var hasPermission by mutableStateOf(false)
     private var initialized = false
     private var startRequested = true
+    // Set when a confirmed adjustment replaced a running route: reaching READY must not auto-start.
+    private var requireExplicitStart = requireExplicitStart
     private var instruction by mutableStateOf("正在准备路线")
     private var turnIcon by mutableStateOf<android.graphics.Bitmap?>(null)
     private var spokenInstruction = false
@@ -216,11 +236,15 @@ internal class NavigationController(
         if (calculating || phase == NavigationPhase.STARTING) serviceFailed("导航准备超时，请检查网络后重试")
     }
     private val listener = object : SimpleNaviListener() {
-        override fun onInitNaviSuccess() { if (!disposed) { initialized = true; handler.post { if (!disposed) calculate() } } }
+        override fun onInitNaviSuccess() {
+            NavigationRuntime.naviInitialized = true
+            if (!disposed) { initialized = true; handler.post { if (!disposed) calculate() } }
+        }
         override fun onInitNaviFailure() { if (!disposed) serviceFailed("导航初始化失败，请检查 Android Key") }
         override fun onStartNavi(type: Int) {
             if (disposed || phase != NavigationPhase.STARTING) return
             if (startCommit != null) return
+            meter.start(System.currentTimeMillis(), android.os.SystemClock.elapsedRealtime())
             startCommit = scope.launch {
                 try {
                     val database = TaskDatabase.get(context)
@@ -253,6 +277,7 @@ internal class NavigationController(
         override fun onCalculateRouteFailure(result: AMapCalcRouteResult?) { routeFailed(result?.errorCode ?: -1) }
         override fun onNaviInfoUpdate(info: NaviInfo?) {
             if (running && info != null) {
+                meter.sample(info.pathRetainDistance)
                 routeRetainDistance = info.pathRetainDistance
                 routeRetainTime = info.pathRetainTime
                 stepRetainDistance = info.curStepRetainDistance
@@ -292,10 +317,15 @@ internal class NavigationController(
             if (disposed || !running) return
             currentStopIndex = stops.lastIndex.coerceAtLeast(0)
             gpsWeak = false
+            meter.finish(System.currentTimeMillis(), android.os.SystemClock.elapsedRealtime())
             transition(NavigationEvent.ARRIVE)
             stopEngine()
             stopService()
             status = "已到达终点，请确认到达"
+            if (!arrivalReported) {
+                arrivalReported = true
+                onArrived()
+            }
         }
         override fun onArrivedWayPoint(wayID: Int) {
             if (disposed || !running) return
@@ -1019,7 +1049,7 @@ internal class NavigationController(
                 it.addAMapNaviListener(listener)
             }
             createView()
-            if (initialized) calculate()
+            if (initialized || NavigationRuntime.naviInitialized) calculate()
         } catch (_: Exception) { serviceFailed("导航初始化失败，请检查配置后返回重试") }
     }
 
@@ -1028,6 +1058,8 @@ internal class NavigationController(
         if (calculating) return
         if (needsService || disposed) return
         stopEngine()
+        failureReported = false
+        arrivalReported = false
         startRequested = true
         currentStopIndex = 0
         stepRetainDistance = 0
@@ -1080,8 +1112,13 @@ internal class NavigationController(
     private fun routeReady() {
         if (disposed || !calculating) return
         handler.removeCallbacks(timeout)
+        val calculatedRoute = engine?.naviPath
         transition(NavigationEvent.ROUTE_READY)
-        if (startRequested && foreground) startNavigation(checkFreshness = false)
+        // The initial baseline is captured before auto-start; later route
+        // replacements (yaw, pause/resume, confirmed adjustment) reset it.
+        if (meter.started) meter.rerouted(calculatedRoute?.allLength)
+        else meter.initialRoute(calculatedRoute?.allLength)
+        if (startRequested && foreground && !requireExplicitStart) startNavigation(checkFreshness = false)
         if (ready) {
             status = "路线已就绪" + if (via.isEmpty()) "" else " · 途经 ${via.size} 站"
             engine?.naviPath?.let {
@@ -1118,6 +1155,8 @@ internal class NavigationController(
 
     private fun startNavigation(checkFreshness: Boolean = true) {
         if (!ready || !foreground || disposed) return
+        failureReported = false
+        requireExplicitStart = false
         if (checkFreshness && requiresFreshNavigationRoute(phase,
                 android.os.SystemClock.elapsedRealtime() - originMeasuredAt)) {
             calculate()
@@ -1157,6 +1196,10 @@ internal class NavigationController(
         stopEngine()
         stopService()
         status = reason
+        if (!failureReported) {
+            failureReported = true
+            onFailed(reason)
+        }
     }
     private fun pauseNavigation() {
         transition(NavigationEvent.PAUSE)
@@ -1175,9 +1218,17 @@ internal class NavigationController(
     }
     private fun stopService() { serviceLease++; context.stopService(Intent(context, NavigationService::class.java)) }
 
-    fun attach(activityContext: Context, started: () -> Unit, exit: () -> Unit) {
+    fun attach(
+        activityContext: Context,
+        started: () -> Unit,
+        arrived: () -> Unit,
+        failed: (String) -> Unit,
+        exit: () -> Unit,
+    ) {
         viewContext = activityContext
         onStarted = started
+        onArrived = arrived
+        onFailed = failed
         onExit = exit
         if (engine != null) createView()
         if (running) onStarted()
@@ -1210,7 +1261,7 @@ internal class NavigationController(
             hasPermission = false
             serviceFailed("位置权限已关闭，导航已停止，请允许定位后重试")
         }
-        if (startRequested && ready) startNavigation()
+        if (startRequested && ready && !requireExplicitStart) startNavigation()
     }
     fun pause() { foreground = false; view?.onPause() }
     fun detach() {
@@ -1218,8 +1269,11 @@ internal class NavigationController(
         routeLine?.remove(); routeLine = null
         view?.onPause(); view?.onDestroy(); view = null
         viewContext = null
-        onStarted = {}; onExit = {}
-        if (disposed && (NavigationRuntime.current == null || NavigationRuntime.current === this)) AMapNavi.destroy()
+        onStarted = {}; onArrived = {}; onFailed = {}; onExit = {}
+        if (disposed && (NavigationRuntime.current == null || NavigationRuntime.current === this)) {
+            AMapNavi.destroy()
+            NavigationRuntime.naviInitialized = false
+        }
     }
     fun destroy() {
         if (disposed) return
@@ -1230,6 +1284,9 @@ internal class NavigationController(
         stopEngine()
         engine?.removeAMapNaviListener(listener)
         stopService()
-        if (view == null) AMapNavi.destroy()
+        if (view == null) {
+            AMapNavi.destroy()
+            NavigationRuntime.naviInitialized = false
+        }
     }
 }

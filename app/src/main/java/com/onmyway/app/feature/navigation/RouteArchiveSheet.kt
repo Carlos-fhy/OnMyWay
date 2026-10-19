@@ -203,6 +203,8 @@ internal fun RouteArchiveSheet(
                 val stops = route.result.optJSONArray("stops")
                 AppCard(contentPadding = PaddingValues(16.dp)) {
                     val total = route.result.optInt("total_seconds", -1)
+                    // Measured time/distance stays in navigation_metrics for later
+                    // route selection; the archive shows only the original estimate.
                     if (total >= 0) Text(
                         "当时预计 ${formatDuration(total)} · ${if (route.request.optString("mode") == "cycling") "骑行" else "步行"}",
                         style = MaterialTheme.typography.titleMedium,
