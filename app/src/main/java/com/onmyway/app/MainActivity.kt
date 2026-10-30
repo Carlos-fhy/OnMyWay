@@ -209,8 +209,8 @@ private fun AppBottomBar(selected: Int, onSelect: (Int) -> Unit) {
                 Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(24.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f)),
-                shadowElevation = 8.dp,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
+                shadowElevation = 2.dp,
             ) {
                 Row(Modifier.fillMaxWidth().height(62.dp).padding(horizontal = 6.dp)) {
                     homeTabs.forEachIndexed { index, item ->
@@ -247,14 +247,20 @@ private fun RowScope.AppNavItem(
         animationSpec = tween(220),
         label = "nav-indicator",
     )
-    val tint by animateColorAsState(
+    // 图标底色与标签底色不同：选中时标签在浅色底栏上，不能再沿用 onPrimary。
+    val iconTint by animateColorAsState(
         when {
             selected && center -> MaterialTheme.colorScheme.onPrimary
             selected -> MaterialTheme.colorScheme.onPrimaryContainer
             else -> MaterialTheme.colorScheme.onSurfaceVariant
         },
         animationSpec = tween(220),
-        label = "nav-tint",
+        label = "nav-icon-tint",
+    )
+    val labelColor by animateColorAsState(
+        if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        animationSpec = tween(220),
+        label = "nav-label-color",
     )
     Column(
         modifier
@@ -273,13 +279,13 @@ private fun RowScope.AppNavItem(
                 .background(indicator),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(painterResource(icon), contentDescription = null, Modifier.size(21.dp), tint = tint)
+            Icon(painterResource(icon), contentDescription = null, Modifier.size(21.dp), tint = iconTint)
         }
         Spacer(Modifier.height(1.dp))
         Text(
             label,
             style = MaterialTheme.typography.labelSmall,
-            color = tint,
+            color = labelColor,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
         )
     }

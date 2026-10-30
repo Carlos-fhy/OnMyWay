@@ -5,8 +5,10 @@ import android.content.SharedPreferences
 import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.onmyway.app.core.context.ContextSnapshot
 import com.onmyway.app.core.model.Place
 import com.onmyway.app.data.local.TaskDatabase
+import com.onmyway.app.data.local.entity.Errand
 import com.onmyway.app.data.local.entity.SavedTrip
 import com.onmyway.app.data.remote.assistantTripContext
 import com.onmyway.app.feature.planning.PlanningChoices
@@ -215,5 +217,46 @@ class AssistantResponseTransactionTest {
         assertTrue(db.assistant().recentMessages().isEmpty())
         assertNull(db.assistant().draft())
         assertEquals(navigating, db.trips().load())
+    }
+
+    @Test fun taskChangeBetweenReplyCheckAndCommitLeavesExistingDraftAndChoicesUntouched() = runBlocking {
+        val parcel = Errand(id = "parcel", title = "取快递", placeType = "PARCEL")
+        val printing = Errand(id = "printing", title = "打印论文", placeType = "PRINT_SHOP")
+        db.tasks().save(parcel); db.tasks().save(printing)
+        val (choices, question) = seedChoices("current-draft")
+        val snapshot = ContextSnapshot.capture(listOf(parcel, printing), null, taskScope = "all")
+        val requestId = UUID.randomUUID().toString()
+        // The reply passed an earlier check, then a local edit completed before its transaction.
+        db.tasks().save(printing.copy(status = "done"))
+
+        val outcome = runCatching {
+            store.applyResponse(requestId, "current-draft", ChatLine("user", "取快递，打印论文，然后回宿舍"),
+                ChatLine("assistant", "旧方案"), route(requestId, "宿舍"), true,
+                expectedContextSnapshot = snapshot)
+        }
+        assertTrue(outcome.isFailure)
+        assertFalse(store.responseApplied(requestId))
+        assertTrue(db.assistant().recentMessages().isEmpty())
+        assertEquals("current-draft", db.assistant().draft()?.draftId)
+        assertEquals(choices, store.planningChoices())
+        assertEquals(question, store.clarification())
+        assertEquals(parcel, db.tasks().get(parcel.id))
+        assertEquals("done", db.tasks().get(printing.id)?.status)
+    }
+
+    @Test fun unchangedSnapshotCommitsAndReplayCannotConsumeNewDraft() = runBlocking {
+        val task = Errand(id = "parcel", title = "取快递", placeType = "PARCEL")
+        db.tasks().save(task)
+        val snapshot = ContextSnapshot.capture(listOf(task), null, taskScope = "all")
+        val requestId = UUID.randomUUID().toString()
+        assertTrue(store.applyResponse(requestId, null, ChatLine("user", "取快递后回宿舍"),
+            ChatLine("assistant", "请核对方案"), route(requestId, "宿舍"), true,
+            expectedContextSnapshot = snapshot))
+        seedChoices("new-draft")
+        db.tasks().delete(task)
+        assertFalse(store.applyResponse(requestId, null, ChatLine("user", "取快递后回宿舍"),
+            ChatLine("assistant", "请核对方案"), null, true, expectedContextSnapshot = snapshot))
+        assertEquals("new-draft", db.assistant().draft()?.draftId)
+        assertEquals(1, db.assistant().recentMessages().count { it.id == "agent-response-$requestId" })
     }
 }

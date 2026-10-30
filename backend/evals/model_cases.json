@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "suite_id": "parcel-print-dorm-live-v1",
+  "cases": [
+    {
+      "id": "cancel_print_direct",
+      "source_case": "cancel_print_keep_parcel_dorm",
+      "request_override": {"text": "不打印了，取快递后回宿舍"},
+      "expected": {"action": "adjust", "effective_destination": "宿舍", "keep_task_ids": ["parcel"]},
+      "requires_reply": true
+    },
+    {
+      "id": "cancel_print_paraphrase",
+      "source_case": "cancel_print_keep_parcel_dorm",
+      "request_override": {"text": "论文这趟先不打印了，快递照取，最后还是回宿舍"},
+      "expected": {"action": "adjust", "effective_destination": "宿舍", "keep_task_ids": ["parcel"]},
+      "requires_reply": true
+    },
+    {
+      "id": "cancel_parcel_keep_print",
+      "source_case": "cancel_print_keep_parcel_dorm",
+      "request_override": {"text": "快递这趟先不取了，打印论文后回宿舍"},
+      "expected": {"action": "adjust", "effective_destination": "宿舍", "keep_task_ids": ["print"]},
+      "requires_reply": true
+    },
+    {
+      "id": "direct_dorm_no_stops",
+      "source_case": "cancel_print_keep_parcel_dorm",
+      "request_override": {"text": "这趟快递和打印都不去了，直接回宿舍"},
+      "expected": {"action": "adjust", "effective_destination": "宿舍", "keep_task_ids": []},
+      "requires_reply": true
+    },
+    {
+      "id": "change_destination_preserve_tasks",
+      "source_case": "cancel_print_keep_parcel_dorm",
+      "request_override": {"text": "终点改成图书馆，取快递和打印论文都照常"},
+      "expected": {"action": "adjust", "effective_destination": "图书馆", "keep_task_ids": ["parcel", "print"]},
+      "requires_reply": true
+    },
+    {
+      "id": "followup_preserves_pending_destination",
+      "source_case": "cancel_print_keep_parcel_dorm",
+      "request_override": {
+        "text": "那就不打印了，其他照旧",
+        "proposed_destination": "图书馆",
+        "proposed_task_ids": ["parcel", "print"],
+        "history": [
+          {"role": "user", "content": "把终点改成图书馆，快递和打印都保留"},
+          {"role": "assistant", "content": "拟保留快递和打印，终点改为图书馆，请确认方案"}
+        ]
+      },
+      "expected": {"action": "adjust", "effective_destination": "图书馆", "keep_task_ids": ["parcel"]},
+      "requires_reply": true
+    },
+    {
+      "id": "clarify_new_parcel_location",
+      "source_case": "clarify_missing_pickup_place",
+      "request_override": {"text": "再顺路取一个快递，但我还没选领取点"},
+      "expected": {"action": "clarify", "new_place_type": ""},
+      "requires_reply": true
+    },
+    {
+      "id": "clarify_new_takeout_location",
+      "source_case": "clarify_missing_pickup_place",
+      "request_override": {"text": "另外还有一份外卖要顺路取，但具体领取点还不知道"},
+      "expected": {"action": "clarify", "new_place_type": ""},
+      "requires_reply": true
+    }
+  ]
+}

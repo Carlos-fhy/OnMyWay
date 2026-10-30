@@ -3,6 +3,7 @@ package com.onmyway.app.feature.assistant
 import android.content.SharedPreferences
 import androidx.room.*
 import androidx.room.withTransaction
+import com.onmyway.app.core.context.ContextSnapshot
 import com.onmyway.app.core.model.Place
 import com.onmyway.app.core.model.isIndoor
 import com.onmyway.app.core.model.requiresFixedPlace
@@ -312,6 +313,16 @@ internal class AssistantStore(private val database: TaskDatabase, private val le
         selections: Map<String, Int>,
         successText: String,
         onCreated: suspend (Errand) -> Unit,
+    ): Boolean = confirmTasksWithItems(expectedDraftId, selections, successText) { created, _ ->
+        onCreated(created)
+    }
+
+    /** Same confirmation, but exposes the draft item so a receipt can record its version. */
+    suspend fun confirmTasksWithItems(
+        expectedDraftId: String,
+        selections: Map<String, Int>,
+        successText: String,
+        onCreated: suspend (Errand, AssistantDraftItem) -> Unit,
     ): Boolean {
         require(expectedDraftId.isNotBlank() && selections.isNotEmpty()) { "请选择要确认的待办" }
         val receiptId = "assistant-tasks-confirmed-$expectedDraftId"
@@ -340,7 +351,7 @@ internal class AssistantStore(private val database: TaskDatabase, private val le
                 val taskId = taskItemIdentity(item)
                 val created = item.task().copy(id = taskId, createdAt = now, updatedAt = now)
                 database.tasks().save(created)
-                onCreated(created)
+                onCreated(created, item)
                 // Internal receipts survive deletion and backup, but never enter the conversation.
                 dao.addMessage(AssistantMessage("assistant-task-item-confirmed-$taskId", "receipt", "", now, null))
             }
@@ -389,6 +400,7 @@ internal class AssistantStore(private val database: TaskDatabase, private val le
         replacement: JSONObject?,
         replaceDraft: Boolean,
         expectedTripContext: String? = null,
+        expectedContextSnapshot: ContextSnapshot? = null,
     ): Boolean {
         val responseId = responseMessageId(requestId)
         return database.withTransaction {
@@ -398,6 +410,7 @@ internal class AssistantStore(private val database: TaskDatabase, private val le
             if (dao.draft()?.draftId != expectedDraftId) return@withTransaction false
             if (expectedTripContext != null && assistantTripContext(database.trips().load()) != expectedTripContext)
                 return@withTransaction false
+            expectedContextSnapshot?.requireCurrent(database.tasks().all(), database.trips().load(), System.currentTimeMillis())
             dao.addMessages(listOf(AssistantMessage.from(userLine)))
             dao.addMessage(AssistantMessage.from(replyLine.copy(id = responseId, role = "assistant")))
             if (replaceDraft) setDraft(replacement)

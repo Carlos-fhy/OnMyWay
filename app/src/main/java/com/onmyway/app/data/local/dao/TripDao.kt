@@ -12,6 +12,10 @@ import com.onmyway.app.data.local.entity.SavedTrip
 interface TripDao {
     @Query("SELECT * FROM route_history WHERE planId = :planId ORDER BY timestamp DESC, rowid DESC")
     suspend fun historyForPlan(planId: String): List<RouteHistory>
+    @Query("SELECT COALESCE(MAX(planVersion), 0) FROM (" +
+        "SELECT planVersion FROM saved_trip WHERE planId = :planId UNION ALL " +
+        "SELECT planVersion FROM route_history WHERE planId = :planId)")
+    suspend fun latestPlanVersion(planId: String): Int
     @Query("SELECT * FROM saved_trip WHERE id = 1") suspend fun load(): SavedTrip?
     @Upsert suspend fun save(trip: SavedTrip)
     @Query("UPDATE saved_trip SET needsReplan = 1 WHERE id = 1") suspend fun markNeedsReplan(): Int

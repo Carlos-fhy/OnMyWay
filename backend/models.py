@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator, computed_field
+from .context import ContextSnapshot
 
 
 class Model(BaseModel):
@@ -60,6 +61,7 @@ class PlanRequest(Model):
     arrive_by: datetime | None = None
     max_extra_minutes: int | None = Field(default=None, ge=0, le=240)
     allow_partial: bool = False
+    context_snapshot: ContextSnapshot | None = None
 
     @field_validator("departure", "arrive_by")
     @classmethod
@@ -70,6 +72,8 @@ class PlanRequest(Model):
 
     @model_validator(mode="after")
     def valid_request(self):
+        if self.context_snapshot is not None:
+            self.context_snapshot.require_tasks(self.tasks, ("title", "priority", "service_minutes", "deadline"))
         if len({task.id for task in self.tasks}) != len(self.tasks):
             raise ValueError("任务 ID 不能重复")
         if self.arrive_by is not None and self.arrive_by < self.departure:

@@ -15,7 +15,7 @@ internal class HttpEventTransport(credential: BackupCredential) : EventTransport
     private val token = credential.token
 
     override suspend fun deliver(event: BusinessEventOutbox) {
-        api.sendEvent(token, event.toRequestJson())
+        api.sendEvent(token, event)
     }
 }
 
@@ -38,6 +38,8 @@ internal class EventOutboxSender(
                 dao.markDelivered(event.eventId, now())
             } catch (cancelled: CancellationException) {
                 throw cancelled
+            } catch (invalid: EventProtocolException) {
+                dao.markTerminal(event.eventId, now(), errorText(invalid))
             } catch (http: ApiHttpException) {
                 if (http.status in TERMINAL_STATUSES) {
                     dao.markTerminal(event.eventId, now(), errorText(http))

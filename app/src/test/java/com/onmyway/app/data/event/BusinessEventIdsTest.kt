@@ -25,4 +25,25 @@ class BusinessEventIdsTest {
         val random = BusinessEventIds.newObservation()
         assertEquals(random, UUID.fromString(random).toString())
     }
+
+    @Test fun navigationRetryKeepsItsVersionButReplanningStartsANewObservation() {
+        val first = BusinessEventIds.forObservation("NAVIGATION_STARTED", "session-1", 1)
+        assertEquals(first, BusinessEventIds.forObservation("NAVIGATION_STARTED", "session-1", 1))
+        assertNotEquals(first, BusinessEventIds.forObservation("NAVIGATION_STARTED", "session-1", 2))
+    }
+
+    @Test fun unknownLegacyVersionPreservesPreviouslyIssuedEventIds() {
+        val legacy = UUID.nameUUIDFromBytes(
+            "onmyway-business-event:v1:NAVIGATION_ARRIVED:session-1".toByteArray(Charsets.UTF_8),
+        ).toString()
+        assertEquals(legacy, BusinessEventIds.forObservation("NAVIGATION_ARRIVED", "session-1", 0))
+        assertNotEquals(legacy, BusinessEventIds.forObservation("NAVIGATION_ARRIVED", "session-1", 1))
+    }
+
+    @Test fun versionedObservationCannotCollideWithALegacySubjectContainingVersionText() {
+        assertNotEquals(
+            BusinessEventIds.forObservation("NAVIGATION_CANCELLED", "session-1", 2),
+            BusinessEventIds.forObservation("NAVIGATION_CANCELLED", "session-1:2", 0),
+        )
+    }
 }

@@ -281,21 +281,21 @@ internal fun PrepareTrip(vm: AppViewModel, tasks: List<Errand>, submit: () -> Un
                 }
             }
             item {
-                AppCard(contentPadding = PaddingValues(16.dp)) {
+                // 只有两个选项，用紧凑分段选择即可，不再包一张卡片。
+                Column {
                     SectionLabel("怎么走")
-                    Spacer(Modifier.height(10.dp))
-                    AppPillRow {
-                        AppPill("步行", vm.mode == "walking", {
-                            vm.mode = "walking"; vm.inputsChanged()
-                        }, enabled = !vm.busy)
-                        AppPill("骑行", vm.mode == "cycling", {
-                            vm.mode = "cycling"; vm.inputsChanged()
-                        }, enabled = !vm.busy)
+                    ChoiceRow(
+                        listOf("walking" to "步行", "cycling" to "骑行"),
+                        vm.mode,
+                        enabled = !vm.busy,
+                    ) { mode ->
+                        vm.mode = mode; vm.inputsChanged()
                     }
                 }
             }
             item {
-                AppCard(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)) {
+                // 事项与要求是普通清单行，和起终点区域形成清晰层级。
+                Column {
                     SummaryRow(
                         if (chosen.isEmpty()) "这次办什么" else "已选 ${chosen.size} 件事",
                         if (chosen.isEmpty()) "不选事项，直接去目的地" else chosen.take(3).joinToString("、") { it.title } + if (chosen.size > 3) "等" else "",
@@ -459,18 +459,19 @@ internal fun PrepareTrip(vm: AppViewModel, tasks: List<Errand>, submit: () -> Un
                     ChoiceRow(listOf("fastest" to "少花时间", "most_tasks" to "多办事情"), vm.preference) {
                         vm.preference = it; vm.inputsChanged()
                     }
-                    AppCard(contentPadding = PaddingValues(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text("允许部分完成", style = MaterialTheme.typography.titleSmall)
-                                Text(
-                                    if (vm.partial) "可取舍已选任务，并说明原因" else "已选任务必须全部安排",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            Switch(vm.partial, { vm.partial = it; vm.inputsChanged() })
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("允许部分完成", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                if (vm.partial) "可取舍已选任务，并说明原因" else "已选任务必须全部安排",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
+                        Switch(vm.partial, { vm.partial = it; vm.inputsChanged() })
                     }
                     OutlinedTextField(
                         vm.extra,
@@ -483,9 +484,7 @@ internal fun PrepareTrip(vm: AppViewModel, tasks: List<Errand>, submit: () -> Un
                         shape = RoundedCornerShape(14.dp),
                         colors = appTextFieldColors(),
                     )
-                    AppCard(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)) {
-                        SummaryRow("最晚到达", vm.arriveBy.ifBlank { "不限制" }) { pickingArrival = true }
-                    }
+                    SummaryRow("最晚到达", vm.arriveBy.ifBlank { "不限制" }) { pickingArrival = true }
                     if (vm.arriveBy.isNotBlank()) TextButton({ vm.arriveBy = ""; vm.inputsChanged() }) { Text("取消到达限制") }
                 }
                 PlanAction("完成", true) { sheet = "" }
@@ -553,6 +552,7 @@ private fun TripOverview(result: JSONObject, tasks: List<Errand>, vm: AppViewMod
                 onFailed = vm::embeddedNavigationFailed,
                 onAdjustRoute = { conversation = true },
                 autoStart = !vm.explicitNavigationStartRequired,
+                executionIdentity = checkNotNull(vm.navigationExecutionIdentity),
             ) { arrived ->
                 vm.finishTrip(arrived) { onNavigationChanged(false) }
             }

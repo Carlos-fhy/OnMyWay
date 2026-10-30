@@ -22,6 +22,34 @@ def test_compound_intent_gets_trip_context(monkeypatch):
     assert intent.keep_task_ids == ['parcel']
 
 
+@pytest.mark.parametrize('action,fields', [
+    ('adjust', {}),
+    ('add_stop', {'new_task_title': '买瓶水', 'new_place_type': 'SUPERMARKET'}),
+])
+def test_unconfirmed_navigation_reply_cannot_claim_execution(monkeypatch, action, fields):
+    monkeypatch.setattr(assistant, 'completion', lambda *args: json.dumps(dict(
+        action=action, keep_task_ids=['parcel'], destination='',
+        reply='已取消打印，已开始新路线，已保存买水任务。', **fields)))
+    body = request().model_copy(update={'proposed_destination': '宿舍'})
+    result = assistant.navigation(body)
+    assert '取快递' in result.reply
+    assert '宿舍' in result.reply
+    assert '确认' in result.reply
+    assert all(word not in result.reply for word in ('已取消', '已开始', '已保存'))
+    assert result.keep_task_ids == ['parcel']
+    assert result.destination == ''
+
+
+def test_bounded_preview_reply_retains_confirmation_for_long_labels():
+    body = assistant.NavigationRequest(text='调整', destination='终点' * 100,
+        tasks=[assistant.NavigationTask(id=str(i), title='打印' * 50, place_type='PRINT_SHOP')
+               for i in range(6)])
+    result = assistant._validate_navigation(dict(action='add_stop', keep_task_ids=[str(i) for i in range(6)],
+        new_task_title='买水' * 50, new_place_type='SUPERMARKET', reply='已执行'), body)
+    assert len(result.reply) <= 500
+    assert '确认' in result.reply
+
+
 @pytest.mark.parametrize('ids', [['invented'], ['parcel', 'parcel']])
 def test_rejects_invalid_selection(monkeypatch, ids):
     monkeypatch.setattr(assistant, 'completion', lambda *args: json.dumps(dict(action='adjust', keep_task_ids=ids)))

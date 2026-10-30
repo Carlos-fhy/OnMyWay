@@ -1,8 +1,9 @@
 package com.onmyway.app.feature.task
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,9 +16,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -28,7 +30,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -41,7 +46,6 @@ import com.onmyway.app.core.model.Place
 import com.onmyway.app.core.model.isIndoor
 import com.onmyway.app.core.state.AppViewModel
 import com.onmyway.app.core.ui.AppBottomSheet
-import com.onmyway.app.core.ui.AppCard
 import com.onmyway.app.core.ui.AppDatePickerDialog
 import com.onmyway.app.core.ui.AppDateTimeDialog
 import com.onmyway.app.core.ui.AppPrimaryButton
@@ -138,154 +142,116 @@ internal fun TaskEditor(vm: AppViewModel, task: Errand?, dismiss: () -> Unit,
                 Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                AppCard(contentPadding = PaddingValues(16.dp)) {
-                    OutlinedTextField(
-                        title,
-                        { title = it.take(100) },
-                        label = { Text("要办什么") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = appTextFieldColors(),
-                    )
-                }
+                // 名称直接放在弹层内，不再包一层卡片。
+                OutlinedTextField(
+                    title,
+                    { title = it.take(100) },
+                    label = { Text("要办什么") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = appTextFieldColors(),
+                )
 
                 SectionLabel("时间安排")
-                AppCard(contentPadding = PaddingValues(14.dp)) {
-                    OutlinedButton(
+                Column {
+                    EditorFieldRow(
+                        icon = R.drawable.ic_calendar,
+                        label = "计划日期",
+                        value = plannedDate.ifBlank { "计划哪天做（可选）" },
+                        isPlaceholder = plannedDate.isBlank(),
+                        description = "计划日期",
                         onClick = { pickingDate = true },
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)
-                            .semantics { contentDescription = "计划日期" },
-                        shape = RoundedCornerShape(14.dp),
-                    ) {
-                        Icon(painterResource(R.drawable.ic_calendar), null, Modifier.size(17.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(plannedDate.ifBlank { "计划哪天做（可选）" })
-                    }
-                    if (plannedDate.isNotBlank()) {
-                        TextButton({ plannedDate = "" }, contentPadding = PaddingValues(0.dp)) { Text("清除计划日期") }
-                    }
-                    Spacer(Modifier.height(4.dp))
-                    OutlinedButton(
-                        onClick = { pickingDeadline = true },
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)
-                            .semantics { contentDescription = "截止时间" },
-                        shape = RoundedCornerShape(14.dp),
-                    ) {
-                        Icon(painterResource(R.drawable.ic_clock), null, Modifier.size(17.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(deadline.ifBlank { "截止时间（可选）" })
-                    }
-                    if (deadline.isNotBlank()) {
-                        TextButton({ deadline = "" }, contentPadding = PaddingValues(0.dp)) { Text("清除截止时间") }
-                    }
-                    if (mode == TaskEditorMode.Assistant) {
-                        Spacer(Modifier.height(4.dp))
-                        OutlinedButton(
-                            onClick = { pickingReminder = true },
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)
-                                .semantics { contentDescription = "提醒时间" },
-                            shape = RoundedCornerShape(14.dp),
-                        ) {
-                            Icon(painterResource(R.drawable.ic_clock), null, Modifier.size(17.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text(if (reminderAt > 0) "提醒 ${displayReminderTime(reminderAt)}" else "提醒时间（可选）")
-                        }
-                        if (reminderAt > 0) {
-                            TextButton({ reminderAt = 0 }, contentPadding = PaddingValues(0.dp)) { Text("清除提醒") }
-                        }
-                    }
-                    Text(
-                        if (mode == TaskEditorMode.Assistant)
-                            "计划日期决定哪天去办；截止时间是硬期限；提醒到点后发通知。三者相互独立。"
-                        else "计划日期决定哪天去办；截止时间默认在计划日当天结束，可再调整。两处都不填也可以。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        onClear = plannedDate.takeIf { it.isNotBlank() }?.let { { plannedDate = "" } },
                     )
+                    EditorFieldRow(
+                        icon = R.drawable.ic_clock,
+                        label = "截止时间",
+                        value = deadline.ifBlank { "截止时间（可选）" },
+                        isPlaceholder = deadline.isBlank(),
+                        description = "截止时间",
+                        onClick = { pickingDeadline = true },
+                        onClear = deadline.takeIf { it.isNotBlank() }?.let { { deadline = "" } },
+                    )
+                    if (mode == TaskEditorMode.Assistant) {
+                        EditorFieldRow(
+                            icon = R.drawable.ic_clock,
+                            label = "提醒",
+                            value = if (reminderAt > 0) "提醒 ${displayReminderTime(reminderAt)}" else "提醒时间（可选）",
+                            isPlaceholder = reminderAt <= 0,
+                            description = "提醒时间",
+                            onClick = { pickingReminder = true },
+                            onClear = if (reminderAt > 0) ({ reminderAt = 0 }) else null,
+                        )
+                    }
                 }
+                Text(
+                    if (mode == TaskEditorMode.Assistant)
+                        "计划日期决定哪天去办；截止时间是硬期限；提醒到点后发通知。三者相互独立。"
+                    else "计划日期决定哪天去办；截止时间默认在计划日当天结束，可再调整。两处都不填也可以。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
 
                 SectionLabel("地点设置")
-                AppCard(contentPadding = PaddingValues(14.dp)) {
-                    if (mode == TaskEditorMode.Manual) {
-                        ChoiceRow(listOf("out" to "要出门", "indoors" to "不用出门"), if (indoor) "indoors" else "out") {
-                            indoor = it == "indoors"
-                        }
-                        Spacer(Modifier.height(10.dp))
-                        if (indoor) {
-                            Text(
-                                "写作业、复习、线上缴费这类待办会正常保存，但不会进入路线规划。",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        } else {
-                            Text(
-                                if (place == null) "还没有选择地点" else "已选 · ${place.name}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = if (place == null) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurface,
-                            )
-                            if (place != null && place.address.isNotBlank()) Text(
-                                place.address,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            if (place != null && defaultAlias.isNotBlank() && place.id == defaultPlace?.id) Text(
-                                "默认地点「$defaultAlias」，可直接保存或更换。",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Spacer(Modifier.height(8.dp))
-                            OutlinedButton(
-                                onClick = { search = true },
-                                modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp),
-                                shape = RoundedCornerShape(14.dp),
-                            ) {
-                                Icon(painterResource(R.drawable.ic_place_pin), null, Modifier.size(17.dp))
-                                Spacer(Modifier.width(8.dp))
-                                Text(if (place == null) "搜索并选择地点" else "更换地点")
-                            }
-                            if (place == null) Text(
-                                "也可以先保存为「待补办理地点」；补全前不会参与路线规划。",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.tertiary,
-                            )
-                        }
-                    } else if (indoor) {
+                if (mode == TaskEditorMode.Manual) {
+                    ChoiceRow(listOf("out" to "要出门", "indoors" to "不用出门"), if (indoor) "indoors" else "out") {
+                        indoor = it == "indoors"
+                    }
+                    if (indoor) {
                         Text(
-                            "不用出门 · 助手判断为室内事项，不会进入路线规划。",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
+                            "写作业、复习、线上缴费这类待办会正常保存，但不会进入路线规划。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     } else {
-                        Text(
-                            if (place == null) "还没有确定办理地点" else "已选 · ${place.name}",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (place == null) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurface,
-                        )
-                        if (place != null && place.address.isNotBlank()) Text(
-                            place.address,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(
-                            when {
-                                place == null -> "助手没有找到可自动填入的常用地点，请选择。"
-                                familiarAlias != null -> "已按常用地点填入，请核对。"
-                                else -> "地点已选择，请核对。"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        OutlinedButton(
+                        val subtle = MaterialTheme.colorScheme.onSurfaceVariant
+                        val warning = MaterialTheme.colorScheme.tertiary
+                        EditorFieldRow(
+                            icon = R.drawable.ic_place_pin,
+                            label = "地点",
+                            value = if (place != null) "已选 · ${place.name}" else "搜索并选择地点",
+                            isPlaceholder = place == null,
+                            description = "地点",
                             onClick = { search = true },
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp),
-                            shape = RoundedCornerShape(14.dp),
-                        ) {
-                            Icon(painterResource(R.drawable.ic_place_pin), null, Modifier.size(17.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text(if (place == null) "选择地点" else "更换地点")
-                        }
+                            supporting = buildList {
+                                if (place != null && place.address.isNotBlank()) add(place.address to subtle)
+                                if (place != null && defaultAlias.isNotBlank() && place.id == defaultPlace?.id) {
+                                    add("默认地点「$defaultAlias」，可直接保存或更换。" to subtle)
+                                }
+                                if (place == null) {
+                                    add("也可以先保存为「待补办理地点」；补全前不会参与路线规划。" to warning)
+                                }
+                            },
+                        )
                     }
+                } else if (indoor) {
+                    Text(
+                        "不用出门 · 助手判断为室内事项，不会进入路线规划。",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                } else {
+                    val subtle = MaterialTheme.colorScheme.onSurfaceVariant
+                    val warning = MaterialTheme.colorScheme.tertiary
+                    EditorFieldRow(
+                        icon = R.drawable.ic_place_pin,
+                        label = "地点",
+                        value = if (place != null) "已选 · ${place.name}" else "选择地点",
+                        isPlaceholder = place == null,
+                        description = "地点",
+                        onClick = { search = true },
+                        supporting = buildList {
+                            if (place != null && place.address.isNotBlank()) add(place.address to subtle)
+                            add(
+                                when {
+                                    place == null -> "助手没有找到可自动填入的常用地点，请选择。"
+                                    familiarAlias != null -> "已按常用地点填入，请核对。"
+                                    else -> "地点已选择，请核对。"
+                                } to if (place == null) warning else subtle,
+                            )
+                        },
+                    )
                 }
 
                 if (allowIncompleteDraft) Text(
@@ -293,7 +259,7 @@ internal fun TaskEditor(vm: AppViewModel, task: Errand?, dismiss: () -> Unit,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Spacer(Modifier.padding(bottom = 4.dp))
+                Spacer(Modifier.height(4.dp))
             }
             if (!autoSaveOnDismiss) {
                 AppSheetActionBar {
@@ -352,4 +318,67 @@ internal fun TaskEditor(vm: AppViewModel, task: Errand?, dismiss: () -> Unit,
         }
     }
     if (search) PlacePicker(vm, { search = false }) { selectedPlaceJson = it.json().toString(); search = false }
+}
+
+/** 表单行：图标＋字段名＋当前值＋箭头；只有字段本身有边界，不再外包卡片。 */
+@Composable
+private fun EditorFieldRow(
+    icon: Int,
+    label: String,
+    value: String,
+    isPlaceholder: Boolean,
+    description: String,
+    onClick: () -> Unit,
+    onClear: (() -> Unit)? = null,
+    supporting: List<Pair<String, Color>> = emptyList(),
+) {
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .clickable(onClick = onClick)
+                .semantics { contentDescription = description }
+                .heightIn(min = 56.dp)
+                .padding(horizontal = 2.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                painterResource(icon),
+                null,
+                Modifier.size(18.dp),
+                tint = if (isPlaceholder) MaterialTheme.colorScheme.onSurfaceVariant
+                else MaterialTheme.colorScheme.primary,
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    value,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = if (isPlaceholder) MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.onSurface,
+                )
+                supporting.forEach { (text, color) ->
+                    Text(text, style = MaterialTheme.typography.bodySmall, color = color)
+                }
+            }
+            if (onClear != null) {
+                IconButton(onClear, Modifier.size(36.dp)) {
+                    Icon(
+                        painterResource(R.drawable.ic_close),
+                        "清除$label",
+                        Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Icon(
+                painterResource(R.drawable.ic_chevron_right),
+                null,
+                Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.outline,
+            )
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+    }
 }

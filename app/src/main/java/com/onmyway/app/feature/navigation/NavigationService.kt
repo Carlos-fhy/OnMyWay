@@ -88,13 +88,15 @@ internal object NavigationRuntime {
         destination: Place,
         via: List<Place>,
         requireExplicitStart: Boolean = false,
+        executionIdentity: NavigationExecutionIdentity = NavigationExecutionIdentity(sessionId, "", 0),
     ): NavigationController {
-        current?.takeIf { it.matches(sessionId, mode, destination, via) }?.let { return it }
+        current?.takeIf { it.matches(sessionId, mode, destination, via, executionIdentity) }?.let { return it }
         current?.destroy()
         return NavigationController(
             context.applicationContext, sessionId, mode, destination, via,
             requireExplicitStart = requireExplicitStart,
             meter = meters.getOrPut(sessionId) { NavigationMeter() },
+            executionIdentity = executionIdentity,
         ).also { current = it }
     }
     fun owns(sessionId: String) = current?.sessionId == sessionId

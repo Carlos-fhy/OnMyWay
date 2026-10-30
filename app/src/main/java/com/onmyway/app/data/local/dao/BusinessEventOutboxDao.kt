@@ -19,6 +19,9 @@ interface BusinessEventOutboxDao {
     @Query("SELECT COUNT(*) FROM business_event_outbox WHERE deliveredAt IS NULL AND terminalAt IS NULL")
     suspend fun pendingCount(): Int
 
+    @Query("SELECT COUNT(*) FROM business_event_outbox WHERE terminalAt IS NOT NULL")
+    suspend fun terminalCount(): Int
+
     @Query("SELECT * FROM business_event_outbox WHERE eventId = :eventId")
     suspend fun find(eventId: String): BusinessEventOutbox?
 

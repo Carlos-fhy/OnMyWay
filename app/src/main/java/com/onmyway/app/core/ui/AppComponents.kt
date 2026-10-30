@@ -75,13 +75,13 @@ internal fun AppKicker(text: String, modifier: Modifier = Modifier, color: Color
     )
 }
 
-/** 全 App 统一的内容卡片：近白底、细描边、克制圆角。 */
+/** 全 App 统一的内容卡片：只用于需要独立审阅的分组，普通条目不要再包一层。 */
 @Composable
 internal fun AppCard(
     modifier: Modifier = Modifier,
-    shape: androidx.compose.ui.graphics.Shape = MaterialTheme.shapes.large,
+    shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(16.dp),
     color: Color = MaterialTheme.colorScheme.surfaceContainerLowest,
-    border: BorderStroke? = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
+    border: BorderStroke? = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
     contentPadding: PaddingValues = PaddingValues(16.dp),
     content: @Composable ColumnScope.() -> Unit,
 ) {

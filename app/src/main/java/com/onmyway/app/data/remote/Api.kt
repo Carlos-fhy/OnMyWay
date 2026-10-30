@@ -3,6 +3,14 @@ package com.onmyway.app.data.remote
 import com.onmyway.app.core.model.Place
 import com.onmyway.app.core.model.RouteCandidateState
 import com.onmyway.app.core.model.RouteCandidatesResult
+import com.onmyway.app.data.event.ConfirmationAcknowledgement
+import com.onmyway.app.data.event.ConfirmationProtocolException
+import com.onmyway.app.data.event.EventAcknowledgement
+import com.onmyway.app.data.event.EventProtocolException
+import com.onmyway.app.data.event.HarnessState
+import com.onmyway.app.data.event.toRequestJson
+import com.onmyway.app.data.local.entity.BusinessEventOutbox
+import com.onmyway.app.data.local.entity.ConfirmationOutbox
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URLEncoder
@@ -93,10 +101,28 @@ class Api(private val base: String) {
         requirePrivateBackupTransport()
         return JSONObject(request("/sync", body, "PUT", token))
     }
-    suspend fun sendEvent(token: String, event: JSONObject): JSONObject {
+    internal suspend fun sendEvent(token: String, event: BusinessEventOutbox): EventAcknowledgement {
         requirePrivateBackupTransport()
         // One event is small; a long route/backup timeout would stall the queue.
-        return JSONObject(request("/events", event, "POST", token, timeoutMillis = 15_000))
+        val content = request("/events", event.toRequestJson(), "POST", token, timeoutMillis = 15_000)
+        val response = try { JSONObject(content) } catch (_: org.json.JSONException) {
+            throw EventProtocolException()
+        }
+        return EventAcknowledgement.fromJson(response).also { it.requireMatches(event) }
+    }
+    internal suspend fun sendConfirmation(token: String, receipt: ConfirmationOutbox): ConfirmationAcknowledgement {
+        requirePrivateBackupTransport()
+        val content = request("/confirmations", receipt.toRequestJson(), "POST", token, timeoutMillis = 15_000)
+        val response = try { JSONObject(content) } catch (_: org.json.JSONException) {
+            throw ConfirmationProtocolException()
+        }
+        return ConfirmationAcknowledgement.fromJson(response).also { it.requireMatches(receipt) }
+    }
+    internal suspend fun harnessState(token: String, correlationId: String): HarnessState {
+        requirePrivateBackupTransport()
+        val response = JSONObject(request("/state?correlation_id=${URLEncoder.encode(correlationId, "UTF-8")}",
+            backupToken = token, timeoutMillis = 15_000))
+        return HarnessState.fromJson(response, correlationId)
     }
     suspend fun health() = JSONObject(request("/health"))
     suspend fun navigationRequest(body: JSONObject) = JSONObject(request("/assistant/navigation", body))

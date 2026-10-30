@@ -214,7 +214,11 @@ internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: ()
                                 open = { archiveEventId = line.routeHistoryId; showArchive = true },
                             )
                         } else {
-                            ChatBubble(line)
+                            // 连续的助手回复共用首条头像；用户发言之后重新显示头像。
+                            val previous = visibleLines.getOrNull(index - 1)
+                            val continued = line.role == "assistant" && previous?.role == "assistant" &&
+                                previous.routeHistoryId == null
+                            ChatBubble(line, showAvatar = !continued)
                         }
                     }
                 }

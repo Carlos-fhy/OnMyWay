@@ -17,6 +17,14 @@ internal class EventCorrelation(context: Context) {
     private val prefs = context.applicationContext
         .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
+    /** Reading delivery status must not create a new planning correlation. */
+    @Synchronized
+    fun peekActive(now: Long = System.currentTimeMillis()): String? {
+        val id = prefs.getString(KEY_ACTIVE, null)
+        val createdAt = prefs.getLong(KEY_ACTIVE_AT, 0)
+        return id?.takeIf { isUuid(it) && now - createdAt in 0..ACTIVE_TTL_MILLIS }
+    }
+
     /** Reuses the current planning correlation for a bounded time. */
     @Synchronized
     fun active(now: Long = System.currentTimeMillis()): String {

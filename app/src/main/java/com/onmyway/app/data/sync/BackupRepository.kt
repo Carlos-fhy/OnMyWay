@@ -15,6 +15,7 @@ internal class BackupRepository(private val context: Context, private val databa
     private val v10Tables = v8Tables + listOf("planning_draft", "planning_draft_tasks")
     private val v11Tables = v10Tables + listOf("assistant_clarification", "assistant_place_choices")
     private val tables = v11Tables + "assistant_task_drafts"
+    private val localPlanVersionTables = setOf("saved_trip", "route_history")
     private val preferenceKeys = mapOf(
         "settings" to listOf("city", "familiar_places", "familiar_place_purposes",
             "default_familiar_place", "preferred_detour_minutes",
@@ -29,7 +30,10 @@ internal class BackupRepository(private val context: Context, private val databa
         for (table in tables) {
             val rows = JSONArray()
             sql.query("SELECT * FROM `$table` ORDER BY id").use { cursor ->
-                while (cursor.moveToNext()) rows.put(cursorRow(cursor))
+                while (cursor.moveToNext()) rows.put(cursorRow(cursor).also { row ->
+                    // Execution versions belong to this installation, outside the v14 wire schema.
+                    if (table in localPlanVersionTables) row.remove("planVersion")
+                })
             }
             data.put(table, rows)
         }
@@ -163,7 +167,10 @@ internal class BackupRepository(private val context: Context, private val databa
                 }
                 val rows = data.getJSONArray(table)
                 (0 until rows.length()).map { index ->
-                    val row = rows.getJSONObject(index)
+                    // Keep desired/expected snapshots in wire form for sync equality checks.
+                    val row = JSONObject(rows.getJSONObject(index).toString()).apply {
+                        if (table in localPlanVersionTables) put("planVersion", 0)
+                    }
                     require(row.keys().asSequence().toSet() == allowed) { "同步列与数据库结构不一致" }
                     ContentValues().apply {
                         for (column in allowed) when (val value = row.get(column)) {

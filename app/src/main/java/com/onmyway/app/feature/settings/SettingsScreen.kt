@@ -3,6 +3,7 @@ package com.onmyway.app.feature.settings
 import android.content.SharedPreferences
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -14,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.KeyboardType
@@ -29,7 +31,6 @@ import com.onmyway.app.core.model.Place
 import com.onmyway.app.core.state.AppViewModel
 import com.onmyway.app.core.ui.AppCard
 import com.onmyway.app.core.ui.AppConfirmDialog
-import com.onmyway.app.core.ui.AppIconBadge
 import com.onmyway.app.core.ui.AppPrimaryButton
 import com.onmyway.app.core.ui.AppScreenHeader
 import com.onmyway.app.core.ui.AppStatusPill
@@ -37,6 +38,8 @@ import com.onmyway.app.core.ui.SectionLabel
 import com.onmyway.app.core.ui.appTextFieldColors
 import com.onmyway.app.data.local.entity.RouteHistory
 import com.onmyway.app.data.local.entity.SuggestionFeedback
+import com.onmyway.app.data.event.HarnessStatus
+import com.onmyway.app.data.event.HarnessStatusRepository
 import com.onmyway.app.data.sync.BackupCredential
 import com.onmyway.app.data.sync.BackupCredentials
 import com.onmyway.app.data.sync.PcBackupSync
@@ -65,19 +68,31 @@ private fun SettingsField(
     )
 }
 
+/** 设置摘要行：默认只显示当前值，点击后再展开对应配置。 */
 @Composable
-private fun InfoCard(icon: Int, title: String, text: String) {
-    AppCard(contentPadding = PaddingValues(16.dp)) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.Top,
-        ) {
-            AppIconBadge(icon, size = 36.dp)
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text(title, style = MaterialTheme.typography.titleSmall)
-                Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+private fun SettingsSummaryRow(
+    title: String,
+    value: String,
+    expanded: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .heightIn(min = 56.dp)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            Text(value, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        Text(
+            if (expanded) "收起" else "修改",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+        )
     }
 }
 
@@ -124,6 +139,9 @@ internal fun SettingsScreen(vm: AppViewModel, repeatRoute: (RouteHistory) -> Uni
     var walkingDetour by rememberSaveable { mutableStateOf(vm.modeDetourOverride("walking")?.toString().orEmpty()) }
     var cyclingDetour by rememberSaveable { mutableStateOf(vm.modeDetourOverride("cycling")?.toString().orEmpty()) }
     var confirmClearLearning by remember { mutableStateOf(false) }
+    var budgetExpanded by rememberSaveable { mutableStateOf(false) }
+    var connectionExpanded by rememberSaveable { mutableStateOf(false) }
+    var helpOpen by remember { mutableStateOf(false) }
     var backupToken by remember { mutableStateOf("") }
     var backupBusy by remember { mutableStateOf(false) }
     val context = LocalContext.current
@@ -162,44 +180,75 @@ internal fun SettingsScreen(vm: AppViewModel, repeatRoute: (RouteHistory) -> Uni
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             SectionLabel("习惯与预算")
-            AppCard(contentPadding = PaddingValues(16.dp)) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    SettingsField(
-                        preferredDetour,
-                        { preferredDetour = it.filter(Char::isDigit).take(3) },
-                        "默认顺路预算（分钟）",
-                        "没有足够历史选择时使用此预算；0 表示不额外绕路。",
-                        KeyboardType.Number,
-                    )
-                    SettingsField(
-                        walkingDetour,
-                        { walkingDetour = it.filter(Char::isDigit).take(3) },
-                        "步行顺路预算（可留空）",
-                        "填写后优先采用你的设定；留空时参考步行历史选择。",
-                        KeyboardType.Number,
-                    )
-                    SettingsField(
-                        cyclingDetour,
-                        { cyclingDetour = it.filter(Char::isDigit).take(3) },
-                        "骑行顺路预算（可留空）",
-                        "填写后优先采用你的设定；留空时参考骑行历史选择。",
-                        KeyboardType.Number,
-                    )
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("根据建议选择调整预算", style = MaterialTheme.typography.titleSmall)
-                            Text(
-                                "学习记录包含出行方式、时间段、事项数量与额外耗时，开启同步后会保存在电脑。建议仍需你确认。",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+            Column {
+                SettingsSummaryRow(
+                    "顺路预算",
+                    listOfNotNull(
+                        "${preferredDetour.ifBlank { "未设置" }} 分钟",
+                        if (walkingDetour.isNotBlank()) "步行 $walkingDetour 分钟" else "步行跟随历史",
+                        if (cyclingDetour.isNotBlank()) "骑行 $cyclingDetour 分钟" else "骑行跟随历史",
+                    ).joinToString(" · "),
+                    budgetExpanded,
+                ) { budgetExpanded = !budgetExpanded }
+                if (budgetExpanded) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        SettingsField(
+                            preferredDetour,
+                            { preferredDetour = it.filter(Char::isDigit).take(3) },
+                            "默认顺路预算（分钟）",
+                            "没有足够历史选择时使用此预算；0 表示不额外绕路。",
+                            KeyboardType.Number,
+                        )
+                        SettingsField(
+                            walkingDetour,
+                            { walkingDetour = it.filter(Char::isDigit).take(3) },
+                            "步行顺路预算（可留空）",
+                            "填写后优先采用你的设定；留空时参考步行历史选择。",
+                            KeyboardType.Number,
+                        )
+                        SettingsField(
+                            cyclingDetour,
+                            { cyclingDetour = it.filter(Char::isDigit).take(3) },
+                            "骑行顺路预算（可留空）",
+                            "填写后优先采用你的设定；留空时参考骑行历史选择。",
+                            KeyboardType.Number,
+                        )
+                        // 保存动作跟随预算区域，避免被误认为同时保存连接设置。
+                        AppPrimaryButton(
+                            "保存预算设置",
+                            onClick = {
+                                val minutes = preferredDetour.toIntOrNull()
+                                val walk = walkingDetour.toIntOrNull()
+                                val cycle = cyclingDetour.toIntOrNull()
+                                if (minutes == null || minutes !in 0..240 ||
+                                    walkingDetour.isNotBlank() && (walk == null || walk !in 0..240) ||
+                                    cyclingDetour.isNotBlank() && (cycle == null || cycle !in 0..240)
+                                ) vm.message = "顺路预算请输入 0–240 分钟，步行和骑行预算也可留空"
+                                else {
+                                    vm.savePreferredDetourMinutes(minutes)
+                                    vm.saveModeDetourOverride("walking", walk)
+                                    vm.saveModeDetourOverride("cycling", cycle)
+                                    vm.message = "预算设置已保存"
+                                }
+                            },
+                            enabled = !vm.busy,
+                        )
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("根据建议选择调整预算", style = MaterialTheme.typography.titleSmall)
+                                Text(
+                                    "学习记录包含出行方式、时间段、事项数量与额外耗时，开启同步后会保存在电脑。建议仍需你确认。",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            Switch(checked = vm.learningEnabled, onCheckedChange = vm::updateLearningEnabled)
                         }
-                        Spacer(Modifier.width(10.dp))
-                        Switch(checked = vm.learningEnabled, onCheckedChange = vm::updateLearningEnabled)
-                    }
-                    TextButton({ confirmClearLearning = true }, contentPadding = PaddingValues(0.dp)) {
-                        Text("清空建议学习记录")
+                        TextButton({ confirmClearLearning = true }, contentPadding = PaddingValues(0.dp)) {
+                            Text("清空建议学习记录")
+                        }
                     }
                 }
             }
@@ -210,46 +259,36 @@ internal fun SettingsScreen(vm: AppViewModel, repeatRoute: (RouteHistory) -> Uni
             }
 
             SectionLabel("连接")
-            AppCard(contentPadding = PaddingValues(16.dp)) {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    SettingsField(server, { server = it }, "规划服务地址")
-                    SettingsField(city, { city = it }, "常用搜索城市")
-                    AppPrimaryButton(
-                        "保存设置",
-                        onClick = {
-                            val minutes = preferredDetour.toIntOrNull()
-                            val walk = walkingDetour.toIntOrNull()
-                            val cycle = cyclingDetour.toIntOrNull()
-                            if (minutes == null || minutes !in 0..240 ||
-                                walkingDetour.isNotBlank() && (walk == null || walk !in 0..240) ||
-                                cyclingDetour.isNotBlank() && (cycle == null || cycle !in 0..240)
-                            ) vm.message = "顺路预算请输入 0–240 分钟，步行和骑行预算也可留空"
-                            else {
-                                vm.savePreferredDetourMinutes(minutes)
-                                vm.saveModeDetourOverride("walking", walk)
-                                vm.saveModeDetourOverride("cycling", cycle)
-                                vm.settings(server, city)
-                            }
-                        },
-                        enabled = !vm.busy,
-                    )
-                    OutlinedButton(
-                        vm::health,
-                        enabled = !vm.checking && server.trim().trimEnd('/') == vm.server,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                        shape = RoundedCornerShape(16.dp),
-                    ) { Text(if (vm.checking) "检查中…" else "检查已保存地址的连接") }
+            Column {
+                SettingsSummaryRow(
+                    "规划服务",
+                    "${server.ifBlank { "未设置" }} · ${city.ifBlank { "未设置城市" }}",
+                    connectionExpanded,
+                ) { connectionExpanded = !connectionExpanded }
+                if (connectionExpanded) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        SettingsField(server, { server = it }, "规划服务地址")
+                        SettingsField(city, { city = it }, "常用搜索城市")
+                        // 保存连接设置只作用于本区域，预算在「习惯与预算」中单独保存。
+                        AppPrimaryButton(
+                            "保存连接设置",
+                            onClick = { vm.settings(server, city) },
+                            enabled = !vm.busy,
+                        )
+                        OutlinedButton(
+                            vm::health,
+                            enabled = !vm.checking && server.trim().trimEnd('/') == vm.server,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                            shape = RoundedCornerShape(16.dp),
+                        ) { Text(if (vm.checking) "检查中…" else "检查已保存地址的连接") }
+                    }
                 }
             }
+            HarnessStatusPanel(vm.server, backupConfigured)
 
             SectionLabel("电脑数据同步")
             AppCard(contentPadding = PaddingValues(16.dp)) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(
-                        "使用同一个数据服务口令连接。新安装会先读取电脑记录；离线修改留在手机，联网后提交。电脑确认保存后才显示同步成功，两端发生冲突时保留双方记录。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                     OutlinedTextField(
                         backupToken,
                         { backupToken = it },
@@ -355,50 +394,60 @@ internal fun SettingsScreen(vm: AppViewModel, repeatRoute: (RouteHistory) -> Uni
                         color = MaterialTheme.colorScheme.primary,
                         style = MaterialTheme.typography.bodySmall,
                     )
-                    Text(
-                        "重装后使用原来的服务地址与口令连接即可恢复。手机尚未同步的修改，卸载后无法从电脑找回。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 }
             }
 
             SectionLabel("记录")
-            AppCard(contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    TextButton(
-                        {
-                            scope.launch {
-                                try { history = vm.routeHistory() } catch (_: Exception) { vm.message = "行程记录读取失败" }
-                            }
-                        },
-                        modifier = Modifier.weight(1f),
-                    ) { Text("行程记录") }
-                    TextButton(
-                        {
-                            scope.launch {
-                                try { feedback = vm.suggestionDecisions() } catch (_: Exception) { vm.message = "建议反馈读取失败" }
-                            }
-                        },
-                        modifier = Modifier.weight(1f),
-                    ) { Text("顺路建议反馈") }
-                }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(
+                    {
+                        scope.launch {
+                            try { history = vm.routeHistory() } catch (_: Exception) { vm.message = "行程记录读取失败" }
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                ) { Text("行程记录") }
+                TextButton(
+                    {
+                        scope.launch {
+                            try { feedback = vm.suggestionDecisions() } catch (_: Exception) { vm.message = "建议反馈读取失败" }
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                ) { Text("顺路建议反馈") }
             }
-
-            InfoCard(
-                R.drawable.ic_location,
-                "连接你的电脑",
-                "USB 调试转发后使用 http://127.0.0.1:8000。Android 模拟器访问电脑可用 http://10.0.2.2:8000。具体启动步骤见项目 README。",
-            )
-            InfoCard(
-                R.drawable.ic_settings,
-                "关于地点与隐私",
-                "点击「使用当前位置」后才获取手机位置，并通过本地服务交给高德转换坐标与识别地址。室内暂时没有新定位时，会明确提示并使用最近一次的缓存位置，请核对起点。退出导航会结束本次行程，方案留在行程记录；再次出发会重新定位规划。",
-            )
+            // 连接教程、同步机制和隐私说明统一收进帮助入口，主页面只保留设置与状态。
+            TextButton({ helpOpen = true }, contentPadding = PaddingValues(0.dp)) {
+                Text("连接、同步与隐私说明")
+            }
             Text(
                 "OnMyWay 0.1 · 步行 / 骑行",
                 Modifier.fillMaxWidth().padding(top = 4.dp),
                 style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+    if (helpOpen) {
+        RecordDialog("连接、同步与隐私", { helpOpen = false }) {
+            Text("连接你的电脑", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "USB 调试转发后使用 http://127.0.0.1:8000。Android 模拟器访问电脑可用 http://10.0.2.2:8000。具体启动步骤见项目 README。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+            Text("电脑数据同步", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "使用同一个数据服务口令连接。新安装会先读取电脑记录；离线修改留在手机，联网后提交。电脑确认保存后才显示同步成功，两端发生冲突时保留双方记录。重装后使用原来的服务地址与口令连接即可恢复。手机尚未同步的修改，卸载后无法从电脑找回。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+            Text("关于地点与隐私", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "点击「使用当前位置」后才获取手机位置，并通过本地服务交给高德转换坐标与识别地址。室内暂时没有新定位时，会明确提示并使用最近一次的缓存位置，请核对起点。退出导航会结束本次行程，方案留在行程记录；再次出发会重新定位规划。",
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -490,6 +539,67 @@ internal fun SettingsScreen(vm: AppViewModel, repeatRoute: (RouteHistory) -> Uni
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun HarnessStatusPanel(server: String, connected: Boolean) {
+    val context = LocalContext.current
+    val repository = remember(context) { HarnessStatusRepository(context) }
+    var status by remember { mutableStateOf<HarnessStatus?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf("") }
+    var refresh by remember { mutableIntStateOf(0) }
+    LaunchedEffect(server, connected, refresh) {
+        loading = true
+        status = null
+        error = ""
+        try {
+            status = repository.read(server)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            error = "本机确认状态读取失败，请重试。"
+        } finally {
+            loading = false
+        }
+    }
+    AppCard(contentPadding = PaddingValues(16.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("确认与导航状态", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                TextButton({ refresh++ }, enabled = !loading) { Text(if (loading) "读取中…" else "刷新") }
+            }
+            status?.let { result ->
+                val queue = result.queue
+                Text("等待上报：确认 ${queue.pendingConfirmations} 条 · 导航与任务事件 ${queue.pendingEvents} 条",
+                    style = MaterialTheme.typography.bodySmall)
+                Text("终止失败：确认 ${queue.terminalConfirmations} 条 · 事件 ${queue.terminalEvents} 条",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (queue.terminalConfirmations + queue.terminalEvents > 0)
+                        MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+                if (queue.terminalConfirmations > 0) Text("存在被拒绝的确认，请重新规划或确认；重复刷新不会重试冲突记录。",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                result.remote?.let { remote ->
+                    Text(if (remote.recordedCount > 0) "服务端已记录 ${remote.recordedCount} 条确认" else "服务端尚未记录本次确认",
+                        style = MaterialTheme.typography.bodySmall)
+                    remote.currentPlan?.let { plan ->
+                        Text("服务端最新确认版本：${plan.version}", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Text("该版本的设备回执：${remote.executionLabel}", style = MaterialTheme.typography.bodyMedium)
+                    if (remote.latestObservationMatches == false) Text("最近导航回执与当前确认版本不匹配。",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    else if (remote.latestObservationMatches == null) Text("尚无可核对当前计划版本的导航回执。",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("确认已记录仅表示服务端收到确认；导航状态以当前计划的设备回执为准。",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (result.message.isNotBlank()) Text(result.message, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (error.isNotBlank()) Text(error, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error)
         }
     }
 }

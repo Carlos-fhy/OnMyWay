@@ -6,6 +6,7 @@ import io
 import wave
 from uuid import UUID
 from .harness import propose, status
+from .context import ContextSnapshot, context_prompt, require_fresh_context
 from datetime import date, datetime
 from typing import Literal
 
@@ -27,7 +28,7 @@ class IntentRunStatus(BaseModel):
 def _request_status(body, operation, validate):
     result = status(str(body.request_id), operation,
                     _chat_payload(body) if operation == 'chat'
-                    else body.model_dump(mode='json', exclude={'request_id'}))
+                    else _navigation_payload(body))
     if result['state'] == 'completed':
         try:
             result['result'] = validate(result['result']).model_dump(mode='json')
@@ -51,6 +52,13 @@ class NavigationRequest(BaseModel):
     history: list['NavigationTurn'] = Field(default_factory=list, max_length=12)
     proposed_destination: str = Field(default='', max_length=200)
     proposed_task_ids: list[str] | None = Field(default=None, max_length=6)
+    context_snapshot: ContextSnapshot | None = None
+
+    @model_validator(mode='after')
+    def tasks_match_context(self):
+        if self.context_snapshot is not None:
+            self.context_snapshot.require_tasks(self.tasks, ('title', 'place_type'))
+        return self
 
 
 class NavigationTurn(BaseModel):
@@ -77,10 +85,11 @@ class NavigationIntent(BaseModel):
 
 @router.post('/assistant/navigation', response_model=NavigationIntent)
 def navigation(body: NavigationRequest):
+    require_fresh_context(body.context_snapshot)
     if body.request_id is None:
         return _navigation(body)
     result = propose(str(body.request_id), "navigation",
-                     body.model_dump(mode="json", exclude={"request_id"}),
+                     _navigation_payload(body),
                      lambda: _navigation(body).model_dump(mode="json"))
     return _validate_navigation(result, body)
 
@@ -104,7 +113,9 @@ keep_task_ids 是调整后还要经过的任务，不是已完成任务。destin
 家、宿舍、学校、公司是可使用的预设地点名称，无需追问地址，手机会解析。
 用户明确提出新增顺路事项，例如“附近买瓶水”“顺路找打印店”，action=add_stop；new_task_title 是要办的事，new_place_type 分别用 SUPERMARKET、PRINT_SHOP、PHARMACY。它是待确认的新事项，不能声称已加入路线或已保存。取快递、取外卖需要确切领取地点，不得用 add_stop 猜地点，应 clarify。
 add_stop 可同时更换终点、保留或移除原路线事项：根据用户整句要求填 destination 和 keep_task_ids；没有明确更改原路线事项时继承 proposed_task_ids 或当前全部任务。例如“取完快递去上方山，中途买水”应保留快递、把上方山设为终点并新增买水，给出一份待确认方案。只有一个新事项可被提议；不明确时才 clarify。普通 adjust、clarify 的 new_task_title/new_place_type 必须留空。
-回复应概述保留事项和终点；真实路线由程序试算，用户确认后才更新。'''
+回复应概述保留事项和终点；真实路线由程序试算，用户确认后才更新。
+当前仅生成待确认建议。reply 必须用“拟调整”“建议”“请确认”等待确认措辞，不得声称“已取消”“已修改终点”“已加入路线”“已保存”或“已开始导航”。移除途经事项不等于删除或完成正式待办。'''
+    prompt += context_prompt(body.context_snapshot)
     content = completion([{'role': 'system', 'content': prompt},
                           {'role': 'user', 'content': body.model_dump_json()}],
                          os.getenv('AGENT_MODEL', 'qwen3.8-max'), True)
@@ -123,9 +134,25 @@ def _validate_navigation(value, body: NavigationRequest):
                 raise ValueError('invalid new stop')
         elif intent.new_task_title or intent.new_place_type:
             raise ValueError('unexpected new stop')
+        if intent.action in ('adjust', 'add_stop'):
+            intent.reply = _navigation_preview_reply(intent, body)
         return intent
     except (ValueError, ValidationError):
         raise HTTPException(502, '导航调整结果未通过校验，请重新说一次。') from None
+
+
+def _navigation_preview_reply(intent: NavigationIntent, body: NavigationRequest):
+    """Execution status is owned by the app, never inferred from model prose."""
+    def label(value):
+        return value if len(value) <= 40 else value[:39] + '…'
+    titles = {task.id: task.title for task in body.tasks}
+    stops = '、'.join(label(titles[identity]) for identity in intent.keep_task_ids) or '无'
+    destination = label(intent.destination.strip() or body.proposed_destination.strip()
+                        or body.destination.strip() or '待选择')
+    reply = f'拟调整本次路线：途经事项：{stops}；终点：{destination}。'
+    if intent.action == 'add_stop':
+        reply += f'另建议新增“{label(intent.new_task_title)}”，需先选择地点并试算。'
+    return reply + '请确认方案后再更新路线。'
 
 
 class Message(BaseModel):
@@ -225,6 +252,7 @@ class ChatRequest(BaseModel):
     now: datetime
     route_active: bool = False
     draft_items: list[DraftItem] = Field(default_factory=list, max_length=10)
+    context_snapshot: ContextSnapshot | None = None
 
     @field_validator('draft_items')
     @classmethod
@@ -260,6 +288,8 @@ class Proposal(BaseModel):
 
 def _chat_payload(body):
     payload = body.model_dump(mode='json', exclude={'request_id'})
+    if body.context_snapshot is None:
+        payload.pop('context_snapshot', None)
     # Existing durable requests were fingerprinted before draft_items existed.
     if not body.draft_items:
         payload.pop('draft_items', None)
@@ -268,6 +298,13 @@ def _chat_payload(body):
         for item in payload['draft_items']:
             if not item.get('reminder_at'):
                 item.pop('reminder_at', None)
+    return payload
+
+
+def _navigation_payload(body):
+    payload = body.model_dump(mode='json', exclude={'request_id'})
+    if body.context_snapshot is None:
+        payload.pop('context_snapshot', None)
     return payload
 
 
@@ -298,6 +335,7 @@ def completion(messages, model, structured=False):
 
 @router.post('/assistant/chat', response_model=Proposal)
 def chat(body: ChatRequest):
+    require_fresh_context(body.context_snapshot)
     if body.request_id is None:
         return _chat(body)
     result = propose(str(body.request_id), "chat",
@@ -329,6 +367,7 @@ list_tasks 用于查看待办，实际列表由手机读取。plan_route 必须�
 mode 仅在本次用户明确说步行/走路或骑行/骑自行车时填写 walking/cycling，否则必须留空，由手机询问出行方式，不沿用旧对话的方式。
 例如“我要回宿舍”返回 action=plan_route,destination=宿舍,mode=""；“骑车去图书馆”返回 mode=cycling。如果需要追问而无法生成有效操作，action 必须是 reply，不能返回空字段的 create_task/plan_route。
 对话中的确认不代表此前工具执行成功；以手机给出的真实执行结果为准。当前不支持通过对话删除或完成任务，提示去待办操作。'''
+    prompt += context_prompt(body.context_snapshot)
     content = completion([{'role': 'system', 'content': prompt}] + [m.model_dump() for m in body.messages],
                          os.getenv('AGENT_MODEL', 'qwen3.8-max'), True)
     return _validate_proposal(content, body)

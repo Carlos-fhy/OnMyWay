@@ -1,6 +1,6 @@
 package com.onmyway.app.feature.assistant
 
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -11,6 +11,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.testTag
@@ -57,7 +58,7 @@ internal fun AssistantChatHeader(historyLabel: String?, history: () -> Unit, rou
 }
 
 @Composable
-internal fun ChatBubble(line: ChatLine, allowCopy: Boolean = true) {
+internal fun ChatBubble(line: ChatLine, allowCopy: Boolean = true, showAvatar: Boolean = true) {
     val user = line.role == "user"
     val clipboard = LocalClipboardManager.current
     var copied by remember(line.id) { mutableStateOf(false) }
@@ -65,37 +66,59 @@ internal fun ChatBubble(line: ChatLine, allowCopy: Boolean = true) {
         if (copied) { delay(2_000); copied = false }
     }
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val bubbleWidth = maxWidth * 0.76f
+        val bubbleWidth = maxWidth * 0.82f
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
             if (user) Spacer(Modifier.weight(1f)) else {
-                AppIconBadge(R.drawable.ic_assistant, size = 34.dp)
-                Spacer(Modifier.width(8.dp))
+                if (showAvatar) {
+                    AppIconBadge(R.drawable.ic_assistant, size = 34.dp)
+                    Spacer(Modifier.width(8.dp))
+                } else {
+                    // 连续回复共用首条头像，正文仍与头像后的文字对齐。
+                    Spacer(Modifier.width(42.dp))
+                }
             }
             Column(Modifier.widthIn(max = bubbleWidth)) {
-                Surface(
-                    color = if (user) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLowest,
-                    shape = if (user) RoundedCornerShape(16.dp, 4.dp, 16.dp, 16.dp)
-                        else RoundedCornerShape(4.dp, 16.dp, 16.dp, 16.dp),
-                    border = if (user) null else BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
-                ) {
-                    SelectionContainer {
-                        Text(
-                            line.text,
-                            Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
-                            color = if (user) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
-                            style = MaterialTheme.typography.bodyLarge,
-                        )
+                if (user) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shape = RoundedCornerShape(16.dp, 4.dp, 16.dp, 16.dp),
+                    ) {
+                        SelectionContainer {
+                            Text(
+                                line.text,
+                                Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                style = MaterialTheme.typography.bodyLarge,
+                            )
+                        }
+                    }
+                } else {
+                    // 普通回复保留浅色气泡、不加描边；任务、路线等待确认内容才使用卡片。
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        shape = RoundedCornerShape(4.dp, 16.dp, 16.dp, 16.dp),
+                    ) {
+                        SelectionContainer {
+                            Text(
+                                line.text,
+                                Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                style = MaterialTheme.typography.bodyLarge,
+                            )
+                        }
                     }
                 }
                 if (!user && allowCopy) {
-                    TextButton(
+                    IconButton(
                         onClick = { clipboard.setText(AnnotatedString(line.text)); copied = true },
-                        modifier = Modifier.semantics { contentDescription = "复制回复" },
-                        contentPadding = PaddingValues(horizontal = 4.dp),
+                        modifier = Modifier.size(32.dp),
                     ) {
-                        Icon(painterResource(if (copied) R.drawable.ic_check else R.drawable.ic_copy), null, Modifier.size(14.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text(if (copied) "已复制" else "复制", style = MaterialTheme.typography.labelSmall)
+                        Icon(
+                            painterResource(if (copied) R.drawable.ic_check else R.drawable.ic_copy),
+                            contentDescription = "复制回复",
+                            modifier = Modifier.size(15.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
             }
@@ -119,20 +142,17 @@ internal fun AssistantWelcome(onPrompt: (String) -> Unit) {
         Column(Modifier.padding(start = 42.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("试试这样说", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             listOf("取快递、打印论文后回宿舍", "今天有哪些待办？", "明天提醒我打印论文").forEach { prompt ->
-                Surface(
-                    onClick = { onPrompt(prompt) },
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                // 示例句是轻量入口，不再逐条做成描边卡片。
+                Row(
+                    Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { onPrompt(prompt) }
+                        .padding(horizontal = 8.dp, vertical = 11.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Row(
-                        Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(prompt, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.bodyMedium)
-                        Icon(painterResource(R.drawable.ic_chevron_right), null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+                    Text(prompt, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.bodyMedium)
+                    Icon(painterResource(R.drawable.ic_chevron_right), null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.outline)
                 }
             }
         }
@@ -171,59 +191,60 @@ internal fun AssistantComposer(
     onVoiceError: (String) -> Unit,
     send: () -> Unit,
 ) {
-    Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
-        Column {
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.Bottom,
+    // 输入区只保留输入框这一层容器；外层不再套底色面板和分隔线。
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        IconButton(toggleVoice, enabled = ready && !busy, modifier = Modifier.size(48.dp)) {
+            Icon(painterResource(if (showVoice) R.drawable.ic_keyboard else R.drawable.ic_mic),
+                if (showVoice) "切换文字输入" else "切换语音输入", Modifier.size(24.dp))
+        }
+        if (showVoice) {
+            Box(Modifier.weight(1f).heightIn(min = 48.dp), contentAlignment = Alignment.Center) {
+                CloudVoiceButton(server, enabled = canSend, result = onVoice, failure = onVoiceError)
+            }
+        } else {
+            Surface(
+                Modifier.weight(1f),
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLowest,
             ) {
-                IconButton(toggleVoice, enabled = ready && !busy, modifier = Modifier.size(48.dp)) {
-                    Icon(painterResource(if (showVoice) R.drawable.ic_keyboard else R.drawable.ic_mic),
-                        if (showVoice) "切换文字输入" else "切换语音输入", Modifier.size(24.dp))
-                }
-                if (showVoice) {
-                    Box(Modifier.weight(1f).heightIn(min = 48.dp), contentAlignment = Alignment.Center) {
-                        CloudVoiceButton(server, enabled = canSend, result = onVoice, failure = onVoiceError)
-                    }
-                } else {
-                    Surface(
-                        Modifier.weight(1f),
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)),
-                    ) {
-                        BasicTextField(
-                            value = input,
-                            onValueChange = { onInput(it.take(4000)) },
-                            modifier = Modifier.testTag("assistant-input").semantics { contentDescription = "消息输入框" }.heightIn(min = 48.dp)
-                                .padding(horizontal = 12.dp, vertical = 11.dp),
-                            enabled = ready,
-                            readOnly = busy,
-                            maxLines = 5,
-                            textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                            keyboardActions = KeyboardActions(onSend = { if (canSend && input.isNotBlank()) send() }),
-                            decorationBox = { field ->
-                                Box {
-                                    if (input.isEmpty()) Text("说点什么…", style = MaterialTheme.typography.bodyLarge,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    field()
-                                }
-                            },
-                        )
-                    }
-                    FilledIconButton(
-                        onClick = send,
-                        enabled = canSend && input.isNotBlank(),
-                        modifier = Modifier.size(48.dp),
-                        shape = RoundedCornerShape(12.dp),
-                    ) {
-                        Icon(painterResource(R.drawable.ic_send), "发送", Modifier.size(22.dp))
-                    }
-                }
+                BasicTextField(
+                    value = input,
+                    onValueChange = { onInput(it.take(4000)) },
+                    modifier = Modifier.testTag("assistant-input").semantics { contentDescription = "消息输入框" }.heightIn(min = 48.dp)
+                        .padding(horizontal = 14.dp, vertical = 11.dp),
+                    enabled = ready,
+                    readOnly = busy,
+                    maxLines = 5,
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { if (canSend && input.isNotBlank()) send() }),
+                    decorationBox = { field ->
+                        Box {
+                            if (input.isEmpty()) Text("说点什么…", style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            field()
+                        }
+                    },
+                )
+            }
+            // 发送动作改为轻量图标，避免右侧再出现一个实心按钮。
+            IconButton(
+                onClick = send,
+                enabled = canSend && input.isNotBlank(),
+                modifier = Modifier.size(48.dp),
+            ) {
+                Icon(
+                    painterResource(R.drawable.ic_send),
+                    "发送",
+                    Modifier.size(22.dp),
+                    tint = if (canSend && input.isNotBlank()) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.outline,
+                )
             }
         }
     }

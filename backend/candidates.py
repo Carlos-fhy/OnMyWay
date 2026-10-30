@@ -11,6 +11,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .models import Place
+from .context import ContextSnapshot, require_fresh_context
 
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
@@ -50,6 +51,7 @@ class RouteCandidatesRequest(_Model):
     tasks: list[CandidateTask] = Field(default_factory=list, max_length=100)
     now: datetime
     limit: int = Field(default=6, ge=1, le=20)
+    context_snapshot: ContextSnapshot | None = None
 
     @field_validator("now")
     @classmethod
@@ -60,6 +62,8 @@ class RouteCandidatesRequest(_Model):
 
     @model_validator(mode="after")
     def unique_task_ids(self):
+        if self.context_snapshot is not None:
+            self.context_snapshot.require_tasks(self.tasks, ("title", "place_type", "deadline", "planned_date"))
         if len({task.id for task in self.tasks}) != len(self.tasks):
             raise ValueError("任务 ID 不能重复")
         return self
@@ -115,4 +119,5 @@ def evaluate(body: RouteCandidatesRequest) -> RouteCandidatesResult:
 
 @router.post("/route-candidates", response_model=RouteCandidatesResult)
 def route_candidates(body: RouteCandidatesRequest):
+    require_fresh_context(body.context_snapshot)
     return evaluate(body)

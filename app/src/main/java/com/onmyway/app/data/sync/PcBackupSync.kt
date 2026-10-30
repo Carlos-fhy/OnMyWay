@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.work.*
 import com.onmyway.app.OnMyWayApplication
 import com.onmyway.app.core.reminder.scheduleReminders
+import com.onmyway.app.data.event.ConfirmationOutboxSync
 import com.onmyway.app.data.event.EventOutboxSync
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
@@ -57,6 +58,7 @@ internal object PcBackupSync {
             PERIODIC_NAME, ExistingPeriodicWorkPolicy.UPDATE, periodic)
         schedule(context)
         EventOutboxSync.schedule(context)
+        ConfirmationOutboxSync.schedule(context)
     }
 
     fun disable(context: Context) {
@@ -65,5 +67,6 @@ internal object PcBackupSync {
         WorkManager.getInstance(context).cancelUniqueWork(PERIODIC_NAME)
         // Pending events remain local and are retried after a connection is configured again.
         EventOutboxSync.cancel(context)
+        ConfirmationOutboxSync.cancel(context)
     }
 }

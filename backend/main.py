@@ -12,15 +12,18 @@ from .planner import PlanningError, plan, recommend
 from .assistant import router as assistant_router
 from .backup import router as backup_router
 from .candidates import router as candidates_router
+from .confirmations import router as confirmations_router
 from .events import router as events_router
 from .sync import router as sync_router
 from .tasks import router as tasks_router
+from .context import require_fresh_context
 
 load_dotenv(Path(__file__).with_name(".env"))
 app = FastAPI(title="OnMyWay local planner", version="0.1.0")
 app.include_router(assistant_router)
 app.include_router(backup_router)
 app.include_router(candidates_router)
+app.include_router(confirmations_router)
 app.include_router(events_router)
 app.include_router(sync_router)
 app.include_router(tasks_router)
@@ -70,6 +73,7 @@ def places(q: str = Query(min_length=1, max_length=100), city: str = Query(min_l
 
 @app.post("/plans", response_model=PlanResult)
 def plans(body: PlanRequest):
+    require_fresh_context(body.context_snapshot)
     if not planning_slot.acquire(blocking=False):
         return JSONResponse(status_code=429, content={"detail": "已有规划正在运行，请稍后重试。"})
     try:
@@ -80,6 +84,7 @@ def plans(body: PlanRequest):
 
 @app.post("/recommendations")
 def recommendations(body: PlanRequest):
+    require_fresh_context(body.context_snapshot)
     if not planning_slot.acquire(blocking=False):
         return JSONResponse(status_code=429, content={"detail": "已有规划正在运行，请稍后重试。"})
     try:

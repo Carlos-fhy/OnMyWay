@@ -2,6 +2,7 @@ package com.onmyway.app.feature.planning
 
 import com.onmyway.app.data.local.entity.Errand
 import com.onmyway.app.data.local.entity.SavedTrip
+import com.onmyway.app.core.context.ContextSnapshot
 
 internal data class ConfirmedRouteSnapshot(
     val versionId: String,
@@ -12,6 +13,7 @@ internal data class ConfirmedRouteSnapshot(
     val createdAt: Long,
     val planId: String = previous?.planId ?: java.util.UUID.randomUUID().toString(),
     val draftId: String? = null,
+    val contextSnapshot: ContextSnapshot = ContextSnapshot.capture(tasks, previous, now = createdAt),
 )
 
 internal fun validateRouteConfirmation(createdAt: Long, now: Long, sameTrip: Boolean, sameTasks: Boolean) {

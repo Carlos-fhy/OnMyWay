@@ -49,7 +49,7 @@ internal fun AppBottomSheet(
         onDismissRequest = onDismissRequest,
         sheetState = sheetState,
         modifier = modifier,
-        shape = RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp),
+        shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp),
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         contentColor = MaterialTheme.colorScheme.onSurface,
     ) {
@@ -81,11 +81,13 @@ internal fun BottomSheetTitle(
         }
         if (onClose != null) {
             Spacer(Modifier.width(8.dp))
-            IconButton(
-                onClose,
-                Modifier.size(36.dp).background(MaterialTheme.colorScheme.surfaceContainerHigh, CircleShape),
-            ) {
-                Icon(painterResource(R.drawable.ic_close), contentDescription = "关闭", Modifier.size(18.dp))
+            IconButton(onClose, Modifier.size(36.dp)) {
+                Icon(
+                    painterResource(R.drawable.ic_close),
+                    contentDescription = "关闭",
+                    Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }

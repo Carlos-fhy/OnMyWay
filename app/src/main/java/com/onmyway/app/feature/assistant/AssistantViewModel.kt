@@ -11,6 +11,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.onmyway.app.core.context.ContextSnapshot
 import com.onmyway.app.core.location.FamiliarPlaceLookup
 import com.onmyway.app.core.location.FamiliarPlaceResolver
 import com.onmyway.app.core.model.Place
@@ -374,9 +375,28 @@ internal class AssistantViewModel internal constructor(
             .put("started", vm.tripStarted).toString()
     }
 
-    private fun contextMatches(request: PendingAssistantRequest, vm: AppViewModel): Boolean =
-        !vm.restoringTrip && !vm.updatingTrip && !vm.busy && !automatic.busy &&
-            runCatching { Api.validateBase(vm.server) == request.server && requestContext(vm) == request.contextKey }.getOrDefault(false)
+    private fun requestSnapshot(request: PendingAssistantRequest): ContextSnapshot {
+        val snapshot = JSONObject(request.bodyJson).optJSONObject("context_snapshot")
+            ?: error("上次请求缺少可核对的上下文，请重新编辑原指令。")
+        return ContextSnapshot.fromJson(snapshot)
+    }
+
+    private suspend fun contextMatches(request: PendingAssistantRequest, vm: AppViewModel): Boolean = try {
+        check(!vm.restoringTrip && !vm.updatingTrip && !vm.busy && !automatic.busy) {
+            "当前行程正在更新，暂时无法核对上次请求。"
+        }
+        check(Api.validateBase(vm.server) == request.server) { "服务地址已变化，旧请求不会应用。" }
+        val snapshot = requestSnapshot(request)
+        check(requestContext(vm) == request.contextKey) { "当前草稿或行程已变化，旧回复不会应用。" }
+        vm.requireCurrentContext(snapshot)
+        recoveryMessage = ""
+        true
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        recoveryMessage = (e.message ?: "无法核对请求上下文。") + " 原指令与当前待办已保留，请重新编辑后发送。"
+        false
+    }
 
     /** Explicit recovery queries the saved request before considering a same-ID resubmission. */
     fun recoverRequest(vm: AppViewModel) {
@@ -391,7 +411,6 @@ internal class AssistantViewModel internal constructor(
                     return@launch
                 }
                 if (!contextMatches(request, vm)) {
-                    recoveryMessage = "服务地址或当前方案已变化，旧结果不会应用。请重新编辑原指令。"
                     return@launch
                 }
                 if (request.resultJson != null) {
@@ -409,7 +428,6 @@ internal class AssistantViewModel internal constructor(
                         // and ID; a concurrent/late first attempt is deduplicated by the server.
                         if (contextMatches(request, vm))
                             receiveResponse(request, requestTransport.submit(request.server, JSONObject(request.bodyJson)), vm)
-                        else recoveryMessage = "当前方案已变化，请重新编辑原指令。"
                     }
                     "running" -> recoveryMessage = "服务仍在处理，请稍后继续获取结果；不会重复发送。"
                     "failed" -> recoveryMessage = "上次请求处理失败（HTTP ${status.optInt("error_status", 500)}），可重新编辑后发送。"
@@ -455,7 +473,6 @@ internal class AssistantViewModel internal constructor(
             return
         }
         if (!contextMatches(request, vm)) {
-            recoveryMessage = "当前方案或服务地址已变化，回复已保留但未应用。请重新编辑原指令。"
             return
         }
         require(assistantCardVersionSupported(answer)) { "建议版本暂不支持，回复未应用，请重新输入需求。" }
@@ -492,14 +509,22 @@ internal class AssistantViewModel internal constructor(
                 .filter { it.isNotBlank() }.joinToString(" ")
         }
         val expectedDraft = JSONObject(request.contextKey).optString("draft_id").takeIf { it.isNotBlank() && it != "null" }
-        val applied = writeMutex.withLock {
-            if (!contextMatches(request, vm)) false else store.applyResponse(request.requestId, expectedDraft,
-                ChatLine("user", request.userText, request.userMessageId, request.createdAt),
-                ChatLine("assistant", reply), replacement, replace,
-                expectedTripContext = JSONObject(request.contextKey).getString("trip"))
+        val applied = try {
+            writeMutex.withLock {
+                if (!contextMatches(request, vm)) false else store.applyResponse(request.requestId, expectedDraft,
+                    ChatLine("user", request.userText, request.userMessageId, request.createdAt),
+                    ChatLine("assistant", reply), replacement, replace,
+                    expectedTripContext = JSONObject(request.contextKey).getString("trip"),
+                    expectedContextSnapshot = requestSnapshot(request))
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: IllegalStateException) {
+            recoveryMessage = (e.message ?: "当前待办或行程已变化。") + " 回复和原指令已保留，请重新编辑后发送。"
+            return
         }
         if (!applied && !writeMutex.withLock { store.responseApplied(request.requestId) }) {
-            recoveryMessage = "待确认方案已更新，旧回复未应用。请重新编辑原指令。"
+            if (recoveryMessage.isBlank()) recoveryMessage = "待确认方案已更新，旧回复未应用。请重新编辑原指令。"
             return
         }
         // Room's receipt is authoritative. If the process dies before journal deletion,
@@ -722,12 +747,16 @@ internal class AssistantViewModel internal constructor(
                     messages.put(JSONObject().put("role", "user").put("content", text))
                 }
                 val requestId = UUID.randomUUID().toString()
+                val contextKey = requestContext(vm)
+                val snapshot = vm.captureContextSnapshot()
                 val body = JSONObject().put("request_id", requestId).put("messages", messages)
                     .put("route_active", vm.tripStarted).put("now", java.time.OffsetDateTime.now().toString())
+                    .put("context_snapshot", snapshot.json())
                 if (pendingAtSend?.optString("action") == "create_tasks")
                     body.put("draft_items", taskDraftRequestItems(pendingAtSend))
                 val request = PendingAssistantRequest(requestId, Api.validateBase(vm.server), body.toString(),
-                    text, userLine.id, userLine.createdAt, requestContext(vm))
+                    text, userLine.id, userLine.createdAt, contextKey)
+                check(contextMatches(request, vm)) { recoveryMessage }
                 journal { it.create(request) }
                 pendingRequest = request
                 // The journal always precedes transport. A crash before this message write is

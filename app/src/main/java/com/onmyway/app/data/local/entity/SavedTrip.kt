@@ -12,4 +12,5 @@ data class SavedTrip(@PrimaryKey val id: Int = 1, val requestJson: String, val r
     @ColumnInfo(defaultValue = "0") val startedAt: Long = 0,
     @ColumnInfo(defaultValue = "0") val plannedAt: Long = System.currentTimeMillis(),
     @ColumnInfo(defaultValue = "0") val needsReplan: Boolean = false,
-    @ColumnInfo(defaultValue = "''") val planId: String = sessionId)
+    @ColumnInfo(defaultValue = "''") val planId: String = sessionId,
+    @ColumnInfo(defaultValue = "0") val planVersion: Int = 0)

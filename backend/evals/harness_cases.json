@@ -1,0 +1,986 @@
+{
+  "schema_version": 1,
+  "suite_id": "parcel-print-dorm-backend-v1",
+  "cases": [
+    {
+      "id": "cancel_print_keep_parcel_dorm",
+      "description": "固定调整响应经过真实导航校验：移除打印，保留快递与宿舍；只生成建议。",
+      "operation": "navigation",
+      "request": {
+        "request_id": "00000000-0000-4000-8000-000000000001",
+        "text": "不打印了，取快递后回宿舍",
+        "destination": "宿舍",
+        "tasks": [
+          {
+            "id": "parcel",
+            "title": "取快递",
+            "place_type": "PARCEL"
+          },
+          {
+            "id": "print",
+            "title": "打印论文",
+            "place_type": "PRINT_SHOP"
+          }
+        ],
+        "context_snapshot": {
+          "schema_version": 1,
+          "snapshot_id": "10000000-0000-4000-8000-000000000001",
+          "captured_at": 1793239200000,
+          "task_scope": "all",
+          "tasks": [
+            {
+              "id": "parcel",
+              "title": "取快递",
+              "priority": 2,
+              "service_minutes": 5,
+              "deadline": "",
+              "place": null,
+              "place_type": "PARCEL",
+              "status": "pending",
+              "planned_date": "",
+              "reminder_at": 0,
+              "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "id": "print",
+              "title": "打印论文",
+              "priority": 2,
+              "service_minutes": 5,
+              "deadline": "",
+              "place": null,
+              "place_type": "PRINT_SHOP",
+              "status": "pending",
+              "planned_date": "",
+              "reminder_at": 0,
+              "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "plan": null,
+          "location": {
+            "source": "unknown",
+            "observed_at": null,
+            "latitude": null,
+            "longitude": null,
+            "accuracy_m": null
+          },
+          "device": {
+            "navigation_state": "idle"
+          }
+        }
+      },
+      "model_responses": [
+        {
+          "value": {
+            "action": "adjust",
+            "destination": "宿舍",
+            "keep_task_ids": [
+              "parcel"
+            ],
+            "reply": "保留取快递和宿舍，移除打印；请确认新方案。"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "name": "submit_adjustment",
+          "endpoint": "submit",
+          "at_ms": 1793239200000,
+          "expected": {
+            "status_code": 200,
+            "body": {
+              "action": "adjust",
+              "destination": "宿舍",
+              "keep_task_ids": [
+                "parcel"
+              ]
+            },
+            "model_calls": 1,
+            "ledger_states": [
+              "completed"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "clarify_missing_pickup_place",
+      "description": "新增领取事项缺确切地点时，固定澄清响应保持 clarify，不生成新增途经点。",
+      "operation": "navigation",
+      "request": {
+        "request_id": "00000000-0000-4000-8000-000000000001",
+        "text": "再顺路取一个快递，但我还没选领取点",
+        "destination": "宿舍",
+        "tasks": [
+          {
+            "id": "parcel",
+            "title": "取快递",
+            "place_type": "PARCEL"
+          },
+          {
+            "id": "print",
+            "title": "打印论文",
+            "place_type": "PRINT_SHOP"
+          }
+        ],
+        "context_snapshot": {
+          "schema_version": 1,
+          "snapshot_id": "10000000-0000-4000-8000-000000000001",
+          "captured_at": 1793239200000,
+          "task_scope": "all",
+          "tasks": [
+            {
+              "id": "parcel",
+              "title": "取快递",
+              "priority": 2,
+              "service_minutes": 5,
+              "deadline": "",
+              "place": null,
+              "place_type": "PARCEL",
+              "status": "pending",
+              "planned_date": "",
+              "reminder_at": 0,
+              "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "id": "print",
+              "title": "打印论文",
+              "priority": 2,
+              "service_minutes": 5,
+              "deadline": "",
+              "place": null,
+              "place_type": "PRINT_SHOP",
+              "status": "pending",
+              "planned_date": "",
+              "reminder_at": 0,
+              "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "plan": null,
+          "location": {
+            "source": "unknown",
+            "observed_at": null,
+            "latitude": null,
+            "longitude": null,
+            "accuracy_m": null
+          },
+          "device": {
+            "navigation_state": "idle"
+          }
+        }
+      },
+      "model_responses": [
+        {
+          "value": {
+            "action": "clarify",
+            "reply": "请先选择实际快递领取点。"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "name": "submit_clarification",
+          "endpoint": "submit",
+          "at_ms": 1793239200000,
+          "expected": {
+            "status_code": 200,
+            "body": {
+              "action": "clarify",
+              "destination": "",
+              "keep_task_ids": [],
+              "new_task_title": "",
+              "new_place_type": ""
+            },
+            "model_calls": 1,
+            "ledger_states": [
+              "completed"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "expired_context_rejected",
+      "description": "原快照超过30分钟时，新提交必须在调用模型前拒绝。",
+      "operation": "navigation",
+      "request": {
+        "request_id": "00000000-0000-4000-8000-000000000001",
+        "text": "不打印了，取快递后回宿舍",
+        "destination": "宿舍",
+        "tasks": [
+          {
+            "id": "parcel",
+            "title": "取快递",
+            "place_type": "PARCEL"
+          },
+          {
+            "id": "print",
+            "title": "打印论文",
+            "place_type": "PRINT_SHOP"
+          }
+        ],
+        "context_snapshot": {
+          "schema_version": 1,
+          "snapshot_id": "10000000-0000-4000-8000-000000000001",
+          "captured_at": 1793239200000,
+          "task_scope": "all",
+          "tasks": [
+            {
+              "id": "parcel",
+              "title": "取快递",
+              "priority": 2,
+              "service_minutes": 5,
+              "deadline": "",
+              "place": null,
+              "place_type": "PARCEL",
+              "status": "pending",
+              "planned_date": "",
+              "reminder_at": 0,
+              "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "id": "print",
+              "title": "打印论文",
+              "priority": 2,
+              "service_minutes": 5,
+              "deadline": "",
+              "place": null,
+              "place_type": "PRINT_SHOP",
+              "status": "pending",
+              "planned_date": "",
+              "reminder_at": 0,
+              "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "plan": null,
+          "location": {
+            "source": "unknown",
+            "observed_at": null,
+            "latitude": null,
+            "longitude": null,
+            "accuracy_m": null
+          },
+          "device": {
+            "navigation_state": "idle"
+          }
+        }
+      },
+      "model_responses": [],
+      "steps": [
+        {
+          "name": "reject_expired_submission",
+          "endpoint": "submit",
+          "at_ms": 1793241060000,
+          "expected": {
+            "status_code": 409,
+            "body": {
+              "detail": "上下文已过期或设备时间不一致，请刷新当前任务后重新提交。"
+            },
+            "model_calls": 0,
+            "ledger_states": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "task_projection_conflict_rejected",
+      "description": "请求中的打印标题与同一快照不一致，在模型前拒绝；不是对服务端权威任务版本的证明。",
+      "operation": "navigation",
+      "request": {
+        "request_id": "00000000-0000-4000-8000-000000000001",
+        "text": "不打印了，取快递后回宿舍",
+        "destination": "宿舍",
+        "tasks": [
+          {
+            "id": "parcel",
+            "title": "取快递",
+            "place_type": "PARCEL"
+          },
+          {
+            "id": "print",
+            "title": "打印两份论文",
+            "place_type": "PRINT_SHOP"
+          }
+        ],
+        "context_snapshot": {
+          "schema_version": 1,
+          "snapshot_id": "10000000-0000-4000-8000-000000000001",
+          "captured_at": 1793239200000,
+          "task_scope": "all",
+          "tasks": [
+            {
+              "id": "parcel",
+              "title": "取快递",
+              "priority": 2,
+              "service_minutes": 5,
+              "deadline": "",
+              "place": null,
+              "place_type": "PARCEL",
+              "status": "pending",
+              "planned_date": "",
+              "reminder_at": 0,
+              "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "id": "print",
+              "title": "打印论文",
+              "priority": 2,
+              "service_minutes": 5,
+              "deadline": "",
+              "place": null,
+              "place_type": "PRINT_SHOP",
+              "status": "pending",
+              "planned_date": "",
+              "reminder_at": 0,
+              "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "plan": null,
+          "location": {
+            "source": "unknown",
+            "observed_at": null,
+            "latitude": null,
+            "longitude": null,
+            "accuracy_m": null
+          },
+          "device": {
+            "navigation_state": "idle"
+          }
+        }
+      },
+      "model_responses": [],
+      "steps": [
+        {
+          "name": "reject_mismatched_task_projection",
+          "endpoint": "submit",
+          "at_ms": 1793239200000,
+          "expected": {
+            "status_code": 422,
+            "body": {},
+            "model_calls": 0,
+            "ledger_states": []
+          }
+        }
+      ]
+    },
+    {
+      "id": "unknown_task_response_rejected",
+      "description": "固定模型响应引用不存在的任务ID，真实输出校验应拒绝并持久记录失败。",
+      "operation": "navigation",
+      "request": {
+        "request_id": "00000000-0000-4000-8000-000000000001",
+        "text": "不打印了，取快递后回宿舍",
+        "destination": "宿舍",
+        "tasks": [
+          {
+            "id": "parcel",
+            "title": "取快递",
+            "place_type": "PARCEL"
+          },
+          {
+            "id": "print",
+            "title": "打印论文",
+            "place_type": "PRINT_SHOP"
+          }
+        ],
+        "context_snapshot": {
+          "schema_version": 1,
+          "snapshot_id": "10000000-0000-4000-8000-000000000001",
+          "captured_at": 1793239200000,
+          "task_scope": "all",
+          "tasks": [
+            {
+              "id": "parcel",
+              "title": "取快递",
+              "priority": 2,
+              "service_minutes": 5,
+              "deadline": "",
+              "place": null,
+              "place_type": "PARCEL",
+              "status": "pending",
+              "planned_date": "",
+              "reminder_at": 0,
+              "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "id": "print",
+              "title": "打印论文",
+              "priority": 2,
+              "service_minutes": 5,
+              "deadline": "",
+              "place": null,
+              "place_type": "PRINT_SHOP",
+              "status": "pending",
+              "planned_date": "",
+              "reminder_at": 0,
+              "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "plan": null,
+          "location": {
+            "source": "unknown",
+            "observed_at": null,
+            "latitude": null,
+            "longitude": null,
+            "accuracy_m": null
+          },
+          "device": {
+            "navigation_state": "idle"
+          }
+        }
+      },
+      "model_responses": [
+        {
+          "value": {
+            "action": "adjust",
+            "destination": "宿舍",
+            "keep_task_ids": [
+              "invented-task"
+            ],
+            "reply": "保留取快递和宿舍，移除打印；请确认新方案。"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "name": "reject_invented_task_id",
+          "endpoint": "submit",
+          "at_ms": 1793239200000,
+          "expected": {
+            "status_code": 502,
+            "body": {
+              "detail": "导航调整结果未通过校验，请重新说一次。"
+            },
+            "model_calls": 1,
+            "ledger_states": [
+              "failed"
+            ]
+          }
+        },
+        {
+          "name": "recover_failed_validation",
+          "endpoint": "status",
+          "at_ms": 1793239200000,
+          "expected": {
+            "status_code": 200,
+            "body": {
+              "state": "failed",
+              "result": null,
+              "error_status": 502
+            },
+            "model_calls": 1,
+            "ledger_states": [
+              "failed"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "duplicate_request_and_payload_conflict",
+      "description": "相同请求重传/结果读取不再次调用模型，同一ID改内容返回冲突。",
+      "operation": "navigation",
+      "request": {
+        "request_id": "00000000-0000-4000-8000-000000000001",
+        "text": "不打印了，取快递后回宿舍",
+        "destination": "宿舍",
+        "tasks": [
+          {
+            "id": "parcel",
+            "title": "取快递",
+            "place_type": "PARCEL"
+          },
+          {
+            "id": "print",
+            "title": "打印论文",
+            "place_type": "PRINT_SHOP"
+          }
+        ],
+        "context_snapshot": {
+          "schema_version": 1,
+          "snapshot_id": "10000000-0000-4000-8000-000000000001",
+          "captured_at": 1793239200000,
+          "task_scope": "all",
+          "tasks": [
+            {
+              "id": "parcel",
+              "title": "取快递",
+              "priority": 2,
+              "service_minutes": 5,
+              "deadline": "",
+              "place": null,
+              "place_type": "PARCEL",
+              "status": "pending",
+              "planned_date": "",
+              "reminder_at": 0,
+              "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "id": "print",
+              "title": "打印论文",
+              "priority": 2,
+              "service_minutes": 5,
+              "deadline": "",
+              "place": null,
+              "place_type": "PRINT_SHOP",
+              "status": "pending",
+              "planned_date": "",
+              "reminder_at": 0,
+              "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "plan": null,
+          "location": {
+            "source": "unknown",
+            "observed_at": null,
+            "latitude": null,
+            "longitude": null,
+            "accuracy_m": null
+          },
+          "device": {
+            "navigation_state": "idle"
+          }
+        }
+      },
+      "model_responses": [
+        {
+          "value": {
+            "action": "adjust",
+            "destination": "宿舍",
+            "keep_task_ids": [
+              "parcel"
+            ],
+            "reply": "保留取快递和宿舍，移除打印；请确认新方案。"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "name": "initial_submit",
+          "endpoint": "submit",
+          "at_ms": 1793239200000,
+          "expected": {
+            "status_code": 200,
+            "body": {
+              "action": "adjust",
+              "keep_task_ids": [
+                "parcel"
+              ]
+            },
+            "model_calls": 1,
+            "ledger_states": [
+              "completed"
+            ]
+          }
+        },
+        {
+          "name": "duplicate_submit",
+          "endpoint": "submit",
+          "at_ms": 1793239200000,
+          "expected": {
+            "status_code": 200,
+            "body": {
+              "action": "adjust",
+              "keep_task_ids": [
+                "parcel"
+              ]
+            },
+            "model_calls": 1,
+            "ledger_states": [
+              "completed"
+            ]
+          }
+        },
+        {
+          "name": "recover_completed_result",
+          "endpoint": "status",
+          "at_ms": 1793239200000,
+          "expected": {
+            "status_code": 200,
+            "body": {
+              "state": "completed",
+              "result": {
+                "action": "adjust",
+                "destination": "宿舍",
+                "keep_task_ids": [
+                  "parcel"
+                ]
+              }
+            },
+            "model_calls": 1,
+            "ledger_states": [
+              "completed"
+            ]
+          }
+        },
+        {
+          "name": "reject_changed_payload",
+          "endpoint": "status",
+          "at_ms": 1793239200000,
+          "expected": {
+            "status_code": 409,
+            "body": {
+              "detail": "请求编号已用于其他内容，请重新提交。"
+            },
+            "model_calls": 1,
+            "ledger_states": [
+              "completed"
+            ]
+          },
+          "request_override": {
+            "text": "改去图书馆"
+          }
+        }
+      ]
+    },
+    {
+      "id": "failed_request_requires_explicit_new_identity",
+      "description": "上游固定失败后可读取失败状态，原ID不盲目重试；显式新ID可成功生成建议。",
+      "operation": "navigation",
+      "request": {
+        "request_id": "00000000-0000-4000-8000-000000000001",
+        "text": "不打印了，取快递后回宿舍",
+        "destination": "宿舍",
+        "tasks": [
+          {
+            "id": "parcel",
+            "title": "取快递",
+            "place_type": "PARCEL"
+          },
+          {
+            "id": "print",
+            "title": "打印论文",
+            "place_type": "PRINT_SHOP"
+          }
+        ],
+        "context_snapshot": {
+          "schema_version": 1,
+          "snapshot_id": "10000000-0000-4000-8000-000000000001",
+          "captured_at": 1793239200000,
+          "task_scope": "all",
+          "tasks": [
+            {
+              "id": "parcel",
+              "title": "取快递",
+              "priority": 2,
+              "service_minutes": 5,
+              "deadline": "",
+              "place": null,
+              "place_type": "PARCEL",
+              "status": "pending",
+              "planned_date": "",
+              "reminder_at": 0,
+              "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "id": "print",
+              "title": "打印论文",
+              "priority": 2,
+              "service_minutes": 5,
+              "deadline": "",
+              "place": null,
+              "place_type": "PRINT_SHOP",
+              "status": "pending",
+              "planned_date": "",
+              "reminder_at": 0,
+              "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "plan": null,
+          "location": {
+            "source": "unknown",
+            "observed_at": null,
+            "latitude": null,
+            "longitude": null,
+            "accuracy_m": null
+          },
+          "device": {
+            "navigation_state": "idle"
+          }
+        }
+      },
+      "model_responses": [
+        {
+          "error_status": 502
+        },
+        {
+          "value": {
+            "action": "adjust",
+            "destination": "宿舍",
+            "keep_task_ids": [
+              "parcel"
+            ],
+            "reply": "保留取快递和宿舍，移除打印；请确认新方案。"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "name": "provider_failure",
+          "endpoint": "submit",
+          "at_ms": 1793239200000,
+          "expected": {
+            "status_code": 502,
+            "body": {
+              "detail": "Fixed offline provider failure"
+            },
+            "model_calls": 1,
+            "ledger_states": [
+              "failed"
+            ]
+          }
+        },
+        {
+          "name": "read_failure",
+          "endpoint": "status",
+          "at_ms": 1793239200000,
+          "expected": {
+            "status_code": 200,
+            "body": {
+              "state": "failed",
+              "result": null,
+              "error_status": 502
+            },
+            "model_calls": 1,
+            "ledger_states": [
+              "failed"
+            ]
+          }
+        },
+        {
+          "name": "reject_automatic_resubmit",
+          "endpoint": "submit",
+          "at_ms": 1793239200000,
+          "expected": {
+            "status_code": 409,
+            "body": {},
+            "model_calls": 1,
+            "ledger_states": [
+              "failed"
+            ]
+          }
+        },
+        {
+          "name": "explicit_new_request",
+          "endpoint": "submit",
+          "at_ms": 1793239200000,
+          "expected": {
+            "status_code": 200,
+            "body": {
+              "action": "adjust",
+              "destination": "宿舍",
+              "keep_task_ids": [
+                "parcel"
+              ]
+            },
+            "model_calls": 2,
+            "ledger_states": [
+              "failed",
+              "completed"
+            ]
+          },
+          "request_override": {
+            "request_id": "00000000-0000-4000-8000-000000000002"
+          }
+        }
+      ]
+    },
+    {
+      "id": "recover_original_snapshot_without_refresh",
+      "description": "过期后仍能读回原请求结果用于诊断，刷新快照不能冒充原请求，原快照也不能重新提交。",
+      "operation": "navigation",
+      "request": {
+        "request_id": "00000000-0000-4000-8000-000000000001",
+        "text": "不打印了，取快递后回宿舍",
+        "destination": "宿舍",
+        "tasks": [
+          {
+            "id": "parcel",
+            "title": "取快递",
+            "place_type": "PARCEL"
+          },
+          {
+            "id": "print",
+            "title": "打印论文",
+            "place_type": "PRINT_SHOP"
+          }
+        ],
+        "context_snapshot": {
+          "schema_version": 1,
+          "snapshot_id": "10000000-0000-4000-8000-000000000001",
+          "captured_at": 1793239200000,
+          "task_scope": "all",
+          "tasks": [
+            {
+              "id": "parcel",
+              "title": "取快递",
+              "priority": 2,
+              "service_minutes": 5,
+              "deadline": "",
+              "place": null,
+              "place_type": "PARCEL",
+              "status": "pending",
+              "planned_date": "",
+              "reminder_at": 0,
+              "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "id": "print",
+              "title": "打印论文",
+              "priority": 2,
+              "service_minutes": 5,
+              "deadline": "",
+              "place": null,
+              "place_type": "PRINT_SHOP",
+              "status": "pending",
+              "planned_date": "",
+              "reminder_at": 0,
+              "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "plan": null,
+          "location": {
+            "source": "unknown",
+            "observed_at": null,
+            "latitude": null,
+            "longitude": null,
+            "accuracy_m": null
+          },
+          "device": {
+            "navigation_state": "idle"
+          }
+        }
+      },
+      "model_responses": [
+        {
+          "value": {
+            "action": "adjust",
+            "destination": "宿舍",
+            "keep_task_ids": [
+              "parcel"
+            ],
+            "reply": "保留取快递和宿舍，移除打印；请确认新方案。"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "name": "initial_submit",
+          "endpoint": "submit",
+          "at_ms": 1793239200000,
+          "expected": {
+            "status_code": 200,
+            "body": {
+              "action": "adjust",
+              "keep_task_ids": [
+                "parcel"
+              ]
+            },
+            "model_calls": 1,
+            "ledger_states": [
+              "completed"
+            ]
+          }
+        },
+        {
+          "name": "read_original_after_expiry",
+          "endpoint": "status",
+          "at_ms": 1793241060000,
+          "expected": {
+            "status_code": 200,
+            "body": {
+              "state": "completed",
+              "result": {
+                "action": "adjust",
+                "destination": "宿舍",
+                "keep_task_ids": [
+                  "parcel"
+                ]
+              }
+            },
+            "model_calls": 1,
+            "ledger_states": [
+              "completed"
+            ]
+          }
+        },
+        {
+          "name": "reject_restamped_identity",
+          "endpoint": "status",
+          "at_ms": 1793241060000,
+          "expected": {
+            "status_code": 409,
+            "body": {
+              "detail": "请求编号已用于其他内容，请重新提交。"
+            },
+            "model_calls": 1,
+            "ledger_states": [
+              "completed"
+            ]
+          },
+          "request_override": {
+            "context_snapshot": {
+              "schema_version": 1,
+              "snapshot_id": "10000000-0000-4000-8000-000000000001",
+              "captured_at": 1793241060000,
+              "task_scope": "all",
+              "tasks": [
+                {
+                  "id": "parcel",
+                  "title": "取快递",
+                  "priority": 2,
+                  "service_minutes": 5,
+                  "deadline": "",
+                  "place": null,
+                  "place_type": "PARCEL",
+                  "status": "pending",
+                  "planned_date": "",
+                  "reminder_at": 0,
+                  "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                {
+                  "id": "print",
+                  "title": "打印论文",
+                  "priority": 2,
+                  "service_minutes": 5,
+                  "deadline": "",
+                  "place": null,
+                  "place_type": "PRINT_SHOP",
+                  "status": "pending",
+                  "planned_date": "",
+                  "reminder_at": 0,
+                  "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                }
+              ],
+              "plan": null,
+              "location": {
+                "source": "unknown",
+                "observed_at": null,
+                "latitude": null,
+                "longitude": null,
+                "accuracy_m": null
+              },
+              "device": {
+                "navigation_state": "idle"
+              }
+            }
+          }
+        },
+        {
+          "name": "reject_old_new_submission",
+          "endpoint": "submit",
+          "at_ms": 1793241060000,
+          "expected": {
+            "status_code": 409,
+            "body": {
+              "detail": "上下文已过期或设备时间不一致，请刷新当前任务后重新提交。"
+            },
+            "model_calls": 1,
+            "ledger_states": [
+              "completed"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,7 +1,6 @@
 package com.onmyway.app.feature.assistant
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -61,65 +60,64 @@ internal fun AssistantTaskDraftCard(
             }
         }
         Spacer(Modifier.height(10.dp))
+        // 一张外卡 + 无背景清单行；不再给每个事项套灰色圆角块。
         items.forEachIndexed { index, item ->
             val id = item.getString("item_id")
             val task = taskDraftErrand(item)
             val place = task.place()
             val familiarAlias = familiarAliasFor(place, familiarPlaces)
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            Row(
+                Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.Top,
             ) {
-                Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 10.dp, top = 8.dp, bottom = 8.dp)) {
-                    Checkbox(
-                        id in selected,
-                        onCheckedChange = { checked ->
-                            selected = if (checked) selected + id else selected - id
-                        },
-                        enabled = enabled,
-                        modifier = Modifier.semantics { contentDescription = "选择第 ${index + 1} 项：${task.title}" },
-                    )
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text("${index + 1}. ${task.title}", style = MaterialTheme.typography.titleSmall)
-                        Text(
+                Checkbox(
+                    id in selected,
+                    onCheckedChange = { checked ->
+                        selected = if (checked) selected + id else selected - id
+                    },
+                    enabled = enabled,
+                    modifier = Modifier.semantics { contentDescription = "选择第 ${index + 1} 项：${task.title}" },
+                )
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("${index + 1}. ${task.title}", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        listOf(
                             task.plannedDate.ifBlank { "未设计划日期" },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(
                             when {
                                 isIndoor(task.placeType) -> "不用出门"
                                 place != null && familiarAlias != null -> "${place.name} · 常用地点「$familiarAlias」"
                                 place != null -> place.name
                                 else -> "待补办理地点"
                             },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        if (task.deadline.isNotBlank()) Text(
-                            "截止 ${displayTime(task.deadline)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        if (task.reminderAt > 0) Text(
-                            "提醒 ${displayReminderTime(task.reminderAt)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        if (!isIndoor(task.placeType) && task.place() == null) Text(
-                            "未补地点，暂不参与路线规划",
-                            color = MaterialTheme.colorScheme.tertiary,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                        TextButton(
-                            onClick = { edit(TaskDraftEdit(task, draftId, id, item.getInt("version"))) },
-                            enabled = enabled,
-                            contentPadding = PaddingValues(horizontal = 0.dp, vertical = 4.dp),
-                            modifier = Modifier.semantics { contentDescription = "修改第 ${index + 1} 项：${task.title}" },
-                        ) { Text("修改日期 / 地点 / 内容") }
-                    }
+                        ).joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (task.deadline.isNotBlank()) Text(
+                        "截止 ${displayTime(task.deadline)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (task.reminderAt > 0) Text(
+                        "提醒 ${displayReminderTime(task.reminderAt)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (!isIndoor(task.placeType) && task.place() == null) Text(
+                        "未补地点，暂不参与路线规划",
+                        color = MaterialTheme.colorScheme.tertiary,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 }
+                TextButton(
+                    onClick = { edit(TaskDraftEdit(task, draftId, id, item.getInt("version"))) },
+                    enabled = enabled,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                    modifier = Modifier.semantics { contentDescription = "修改第 ${index + 1} 项：${task.title}" },
+                ) { Text("修改") }
+            }
+            if (index != items.lastIndex) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

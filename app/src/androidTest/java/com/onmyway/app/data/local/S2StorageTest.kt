@@ -87,7 +87,7 @@ class S2StorageTest {
         } finally { helper.close() }
         val database = open(context, name)
         try {
-            assertEquals(15, database.openHelper.writableDatabase.version)
+            assertEquals(17, database.openHelper.writableDatabase.version)
             // The local-only outbox table exists after upgrade and starts empty.
             assertEquals(0, database.businessEvents().pendingCount())
             val parcel = database.tasks().get("parcel")!!

@@ -215,7 +215,8 @@ def test_prompt_carries_current_id_version_and_actual_empty_dates(client, monkey
 def test_old_request_receipt_hash_is_unchanged_when_items_absent_or_empty(client, monkeypatch):
     current = body()
     # Reproduce the old ChatRequest wire fingerprint without the new field.
-    legacy = assistant.ChatRequest.model_validate(current).model_dump(mode="json", exclude={"request_id", "draft_items"})
+    legacy = assistant.ChatRequest.model_validate(current).model_dump(
+        mode="json", exclude={"request_id", "draft_items", "context_snapshot"})
     legacy_result = {"action": "create_task", "reply": "请确认", "title": "取快递", "place_type": "PARCEL"}
     propose(current["request_id"], "chat", legacy, lambda: legacy_result)
     monkeypatch.setattr(assistant, "completion", lambda *args: pytest.fail("legacy receipt reexecuted"))

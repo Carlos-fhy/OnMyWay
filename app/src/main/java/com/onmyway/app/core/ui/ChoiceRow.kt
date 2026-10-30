@@ -10,13 +10,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
 @Composable
-internal fun ChoiceRow(options: List<Pair<String, String>>, selected: String, change: (String) -> Unit) {
+internal fun ChoiceRow(
+    options: List<Pair<String, String>>,
+    selected: String,
+    enabled: Boolean = true,
+    change: (String) -> Unit,
+) {
     Row(
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         options.forEach { (key, label) ->
-            AppPill(text = label, selected = selected == key, onClick = { change(key) })
+            AppPill(text = label, selected = selected == key, onClick = { change(key) }, enabled = enabled)
         }
     }
 }

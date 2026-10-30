@@ -315,6 +315,25 @@ class NavigationRecoveryTest {
         assertEquals("done", db.tasks().get(task.id)?.status)
     }
 
+    @Test fun taskChangedAfterDestinationChoicesRejectsSelectionWithoutReplanningOldIntent() = runBlocking {
+        transport.answer = addStop("Campus library")
+        val vm = startModel()
+        val choice = withContext(Dispatchers.Main) {
+            runCatching { vm.previewNavigationChange("Buy water and change to the library") }
+                .exceptionOrNull() as? NavigationDestinationChoice
+        }
+        assertNotNull(choice)
+        db.tasks().save(task.copy(title = "Print two copies"))
+        val restored = restartModel()
+        val failure = withContext(Dispatchers.Main) {
+            runCatching { restored.previewNavigationChange("选择第一个", alternative) }.exceptionOrNull()
+        }
+        assertTrue(failure is IllegalStateException)
+        assertTrue(maps.planned.isEmpty())
+        assertEquals(initial, db.trips().load())
+        assertEquals("Print two copies", db.tasks().get(task.id)?.title)
+    }
+
     @Test fun overlappingAdjustmentsCannotReplaceAnInFlightProposal() = runBlocking {
         val entered = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()

@@ -5,6 +5,7 @@ import com.onmyway.app.core.format.parseTime
 import com.onmyway.app.core.memory.DetourGuidance
 import com.onmyway.app.core.memory.GuidanceSource
 import com.onmyway.app.core.model.Place
+import com.onmyway.app.core.context.ContextSnapshot
 import com.onmyway.app.core.model.routeBlockedLabel
 import com.onmyway.app.core.state.AppViewModel
 import com.onmyway.app.core.state.networkMessage
@@ -83,7 +84,7 @@ internal class AutomaticRoutePlanner(private val scope: CoroutineScope,
         val request = generation
         job = scope.launch {
             busy = true; error = ""
-            try { calculate(vm) }
+            try { start = vm.assistantOrigin(); calculate(vm) }
             catch (e: CancellationException) { throw e }
             catch (e: Exception) { if (generation == request) error = networkMessage(e) }
             finally { if (generation == request) busy = false }
@@ -94,6 +95,7 @@ internal class AutomaticRoutePlanner(private val scope: CoroutineScope,
     private var calculatedAt = 0L
     private var selectedRequest: JSONObject? = null
     private var baseTrip: SavedTrip? = null
+    private var decisionContext: ContextSnapshot? = null
     private var previewVersionId = java.util.UUID.randomUUID().toString()
     private var feedbackId: String? = null
     private var ownsEdit = false
@@ -136,12 +138,16 @@ internal class AutomaticRoutePlanner(private val scope: CoroutineScope,
                     if (revision != selectionRevision) continue
                     val idsSnapshot = selectedIds
                     try {
+                        val context = checkNotNull(decisionContext) { "方案上下文缺失，请重新规划。" }
+                        vm.requireCurrentContext(context)
                         val body = JSONObject().put("origin", start!!.json()).put("destination", end!!.json())
+                            .put("context_snapshot", context.json())
                             .put("mode", mode).put("tasks", JSONArray(candidates.filter { it.id in idsSnapshot }.map { it.json() }))
                             .put("preference", vm.preference).put("departure", OffsetDateTime.now().toString())
                             .put("allow_partial", false).put("max_extra_minutes", JSONObject.NULL)
                             .put("arrive_by", parseTime(latest) ?: JSONObject.NULL)
                         val route = Api(vm.server).plan(body)
+                        vm.requireCurrentContext(context)
                         if (session != generation) return@launch
                         if (revision != selectionRevision) continue
                         previewVersionId = java.util.UUID.randomUUID().toString()
@@ -170,7 +176,7 @@ internal class AutomaticRoutePlanner(private val scope: CoroutineScope,
     }
     fun clear(): Boolean {
         if (!cancel()) return false
-        selectedRequest = null; baseTrip = null; feedbackId = null; preview = null; choices = emptyList()
+        selectedRequest = null; baseTrip = null; decisionContext = null; feedbackId = null; preview = null; choices = emptyList()
         error = ""; start = null; end = null; selectedIds = emptySet()
         return true
     }
@@ -276,9 +282,13 @@ internal class AutomaticRoutePlanner(private val scope: CoroutineScope,
 
     private suspend fun calculate(vm: AppViewModel) {
         stage = "正在计算直达与顺路方案…"
-        val pending = vm.tasks.value.filter { it.status == "pending" }
+        selectedRequest = null; selectedRoute = null
+        val context = vm.captureContextSnapshot(location = vm.contextLocation(start))
+        val pending = vm.currentTasks().filter { it.status == "pending" }
+        vm.requireCurrentContext(context)
+        baseTrip = vm.planningBase()
         // The backend owns eligibility, ordering and the six-item window.
-        val eligibility = if (pending.isEmpty()) null else vm.routeCandidates(pending, limit = 6)
+        val eligibility = if (pending.isEmpty()) null else vm.routeCandidates(pending, limit = 6, context = context)
         val byId = pending.associateBy { it.id }
         candidates = eligibility?.selectedIds.orEmpty().mapNotNull(byId::get)
         note = buildList {
@@ -290,11 +300,14 @@ internal class AutomaticRoutePlanner(private val scope: CoroutineScope,
             }
         }.joinToString("\n")
         val body = JSONObject().put("origin", start!!.json()).put("destination", end!!.json())
+            .put("context_snapshot", context.json())
             .put("mode", mode).put("tasks", JSONArray(candidates.map { it.json() }))
             .put("preference", vm.preference).put("departure", OffsetDateTime.now().toString())
             .put("allow_partial", true).put("max_extra_minutes", budget.toInt())
             .put("arrive_by", parseTime(latest) ?: JSONObject.NULL)
         val result = Api(vm.server).recommend(body)
+        vm.requireCurrentContext(context)
+        decisionContext = context
         feedbackId?.let { vm.recordSuggestionDecision(it, "SUPERSEDED", 0, 0) }
         feedbackId = null
         previewVersionId = java.util.UUID.randomUUID().toString()
@@ -319,6 +332,7 @@ internal class AutomaticRoutePlanner(private val scope: CoroutineScope,
                 .put("tasks", JSONArray(candidates.filter { it.id in ids }.map { it.json() }))
                 .put("allow_partial", false).put("max_extra_minutes", JSONObject.NULL)
             val restoredRoute = Api(vm.server).plan(restoredRequest)
+            vm.requireCurrentContext(context)
             selectedRequest = restoredRequest.put("max_extra_minutes", budget.toInt())
             selectedRoute = restoredRoute
             previewVersionId = java.util.UUID.randomUUID().toString()
@@ -346,13 +360,12 @@ internal class AutomaticRoutePlanner(private val scope: CoroutineScope,
         if (preview == null || start == null || end == null) return
         if (vm.editingPlan && !ownsEdit) { error = "请先完成顺路页的行程调整，再确认建议。"; return }
         if (System.currentTimeMillis() - calculatedAt > 5 * 60_000) { error = "方案已超过五分钟，请重新定位并计算。"; return }
-        if (ids.any { id -> candidates.none { it.id == id } || candidates.find { it.id == id } != vm.tasks.value.find { it.id == id && it.status == "pending" } }) {
-            error = "待办已发生变化，请重新计算后确认。"; return
-        }
+        val context = decisionContext ?: run { error = "方案上下文缺失，请重新规划。"; return }
         val request = selectedRequest ?: return
         val route = selectedRoute ?: return
         val snapshot = ConfirmedRouteSnapshot(previewVersionId, request.toString(), route.toString(), baseTrip,
-            candidates.filter { it.id in ids }, calculatedAt, planId = planIdentity, draftId = draftIdentity)
+            candidates.filter { it.id in ids }, calculatedAt, planId = planIdentity, draftId = draftIdentity,
+            contextSnapshot = context)
         val traceId = feedbackId
         val suggestedAtConfirmation = suggestedIds()
         committing = true; busy = true; error = ""; stage = "正在保存所选方案…"

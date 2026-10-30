@@ -6,12 +6,14 @@ import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.onmyway.app.core.model.Place
+import com.onmyway.app.core.context.ContextSnapshot
 import com.onmyway.app.core.state.AppViewModel
 import com.onmyway.app.data.local.TaskDatabase
 import com.onmyway.app.data.local.entity.Errand
 import com.onmyway.app.data.local.entity.RouteHistory
 import com.onmyway.app.data.local.entity.SavedTrip
 import com.onmyway.app.data.remote.assistantTripContext
+import com.onmyway.app.feature.planning.ConfirmedRouteSnapshot
 import java.util.UUID
 import kotlinx.coroutines.*
 import org.json.JSONArray
@@ -89,6 +91,16 @@ class NavigationConfirmationBoundaryTest {
         }
     }
 
+    @Test fun snapshotCannotBlessDatabaseTripWhileScreenStillShowsOldVersion() = runBlocking {
+        withModel { vm, db, trip, _ ->
+            val changed = trip.copy(planVersion = trip.planVersion + 1)
+            db.trips().save(changed)
+            expectRejected { vm.captureContextSnapshot() }
+            assertEquals(changed, db.trips().load())
+            assertEquals(trip, vm.planningBase())
+        }
+    }
+
     @Test fun changedDatabaseTaskIsRejectedWithoutWaitingForObservedTaskList() = runBlocking {
         val task = Errand(id = "task", title = "Original", placeType = "SUPERMARKET")
         withModel(listOf(task)) { vm, db, trip, _ ->
@@ -115,6 +127,23 @@ class NavigationConfirmationBoundaryTest {
             assertEquals(existing, db.tasks().get(existing.id))
             assertEquals(trip, db.trips().load())
             assertTrue(db.trips().history().isEmpty())
+        }
+    }
+
+    @Test fun changedUnselectedCandidateRejectsOldRecommendationWithoutChangingParcelOrDorm() = runBlocking {
+        val parcel = Errand(id = "parcel", title = "取快递", placeJson = shop.json().toString(), placeType = "PARCEL")
+        val print = Errand(id = "print", title = "打印论文", placeType = "PRINT_SHOP")
+        withModel(listOf(parcel, print)) { vm, db, trip, _ ->
+            val context = ContextSnapshot.capture(listOf(parcel, print), trip, taskScope = "all")
+            val snapshot = ConfirmedRouteSnapshot(UUID.randomUUID().toString(), body(listOf(parcel)).toString(),
+                JSONObject("{\"stops\":[],\"total_seconds\":100}").toString(), trip,
+                listOf(parcel), System.currentTimeMillis(), contextSnapshot = context)
+            db.tasks().delete(print)
+            expectRejected { vm.confirmAssistantRoute(snapshot) }
+            assertEquals(parcel, db.tasks().get(parcel.id))
+            assertEquals(trip, db.trips().load())
+            assertTrue(db.trips().history().isEmpty())
+            assertEquals(0, db.confirmations().pendingCount())
         }
     }
 

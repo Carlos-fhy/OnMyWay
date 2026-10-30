@@ -34,12 +34,13 @@ class TripPersistenceTest {
                 old.execSQL("INSERT INTO tasks VALUES ('test-task','保留的任务',2,5,'','','PHARMACY','pending',1)")
                 old.version = 1
             }
-            fun open() = Room.databaseBuilder(context, TaskDatabase::class.java, name).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15).build()
+            fun open() = Room.databaseBuilder(context, TaskDatabase::class.java, name).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17).build()
             val first = open().also { database = it }
             val task = first.tasks().observe().first().single()
             assertEquals("保留的任务", task.title)
-            assertEquals(15, first.openHelper.readableDatabase.version)
+            assertEquals(17, first.openHelper.readableDatabase.version)
             assertEquals(0, first.businessEvents().pendingCount())
+            assertEquals(0, first.confirmations().pendingCount())
             assertEquals("", task.plannedDate)
             assertTrue(first.assistant().draftItems().isEmpty())
             assertEquals(task.createdAt, task.updatedAt)
@@ -106,12 +107,14 @@ class TripPersistenceTest {
                 old.version = 10
             }
             fun open() = Room.databaseBuilder(context, TaskDatabase::class.java, name)
-                .addMigrations(MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15).build()
+                .addMigrations(MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17).build()
             val migrated = open().also { database = it }
             assertEquals("existing-session", migrated.trips().load()!!.planId)
-            assertEquals(15, migrated.openHelper.readableDatabase.version)
+            assertEquals(17, migrated.openHelper.readableDatabase.version)
+            assertEquals(0, migrated.trips().load()!!.planVersion)
             assertTrue(migrated.assistant().draftItems().isEmpty())
             assertEquals("", migrated.trips().history().single().planId)
+            assertEquals(0, migrated.trips().history().single().planVersion)
             assertEquals("existing-draft", migrated.assistant().draft()!!.draftId)
             assertEquals("existing-draft", migrated.assistant().draft()!!.planId)
             assertEquals("existing-draft", migrated.assistant().planningDraft()!!.planId)

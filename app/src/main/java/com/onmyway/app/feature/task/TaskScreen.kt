@@ -6,7 +6,6 @@ import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -18,7 +17,6 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
@@ -33,7 +31,6 @@ import com.onmyway.app.core.model.placeTypeIcon
 import com.onmyway.app.core.reminder.notificationsAllowed
 import com.onmyway.app.core.time.currentDate
 import com.onmyway.app.core.time.rememberCurrentDate
-import com.onmyway.app.core.ui.AppCard
 import com.onmyway.app.core.ui.AppIconBadge
 import com.onmyway.app.core.ui.AppRouteArt
 import com.onmyway.app.core.ui.AppScreenHeader
@@ -89,7 +86,7 @@ internal fun TaskScreen(tasks: List<Errand>, add: () -> Unit, edit: (Errand) -> 
                 Modifier.weight(1f),
                 state = listState,
                 contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 104.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 if (visible.isEmpty()) item {
                     Column(
@@ -184,14 +181,10 @@ private fun TaskRow(
         task.reminderAt.takeIf { it > 0 }?.let { "提醒 ${displayReminderTime(it)}" },
         if (task.deadline.isNotBlank()) "${displayTime(task.deadline)} 前" else null,
     )
-    Surface(
-        modifier = modifier,
-        shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.surfaceContainerLowest,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)),
-    ) {
+    // 连续清单：普通任务不单独描边，依靠留白和分隔线分组。
+    Column(modifier) {
         Row(
-            Modifier.fillMaxWidth().padding(start = 6.dp, end = 2.dp, top = 8.dp, bottom = 8.dp),
+            Modifier.fillMaxWidth().padding(start = 2.dp, end = 0.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Checkbox(
@@ -270,6 +263,7 @@ private fun TaskRow(
                 }
             }
         }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
     }
 }
 

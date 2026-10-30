@@ -7,9 +7,12 @@ import java.util.UUID
  * A retry reuses the row's event id; a genuinely new observation gets a new id.
  */
 internal object BusinessEventIds {
-    fun forObservation(kind: String, subject: String): String = UUID.nameUUIDFromBytes(
-        "onmyway-business-event:v1:$kind:$subject".toByteArray(Charsets.UTF_8),
-    ).toString()
+    fun forObservation(kind: String, subject: String, planVersion: Int = 0): String {
+        val identity = if (planVersion > 0)
+            "onmyway-business-event:v2:$kind:$subject:plan-version:$planVersion"
+        else "onmyway-business-event:v1:$kind:$subject"
+        return UUID.nameUUIDFromBytes(identity.toByteArray(Charsets.UTF_8)).toString()
+    }
 
     fun newObservation(): String = UUID.randomUUID().toString()
 }

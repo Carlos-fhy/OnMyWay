@@ -35,7 +35,6 @@ import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.room.withTransaction
 import com.amap.api.maps.MapsInitializer
 import com.amap.api.maps.model.LatLng
 import com.amap.api.maps.model.Polyline
@@ -63,7 +62,8 @@ import com.onmyway.app.core.ui.AppConfirmDialog
 import com.onmyway.app.core.ui.AppIconBadge
 import com.onmyway.app.core.ui.AppPrimaryButton
 import com.onmyway.app.data.local.TaskDatabase
-import com.onmyway.app.data.local.entity.RouteHistory
+import com.onmyway.app.data.event.EventCorrelation
+import com.onmyway.app.data.event.EventOutboxSync
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -78,11 +78,12 @@ internal fun EmbeddedNavigationScreen(
     mode: String,
     destination: Place,
     via: List<Place>,
-    onStarted: () -> Unit,
-    onArrived: () -> Unit = {},
-    onFailed: (String) -> Unit = {},
+    onStarted: (NavigationExecutionIdentity) -> Unit,
+    onArrived: (NavigationExecutionIdentity) -> Unit = {},
+    onFailed: (NavigationExecutionIdentity, String) -> Unit = { _, _ -> },
     onAdjustRoute: () -> Unit = {},
     autoStart: Boolean = true,
+    executionIdentity: NavigationExecutionIdentity = NavigationExecutionIdentity(sessionId, "", 0),
     onExit: (Boolean) -> Unit,
 ) {
     val context = LocalContext.current
@@ -93,10 +94,11 @@ internal fun EmbeddedNavigationScreen(
     val started by rememberUpdatedState(onStarted)
     val arrived by rememberUpdatedState(onArrived)
     val failed by rememberUpdatedState(onFailed)
-    val controller = remember(sessionId, mode, destination, via) {
+    val controller = remember(sessionId, mode, destination, via, executionIdentity) {
         NavigationRuntime.obtain(
             context, sessionId, mode, destination, via,
             requireExplicitStart = !autoStart,
+            executionIdentity = executionIdentity,
         )
     }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -109,9 +111,9 @@ internal fun EmbeddedNavigationScreen(
     BackHandler { confirmExit = true }
     DisposableEffect(controller, owner) {
         controller.attach(context,
-            started = { started() },
-            arrived = { arrived() },
-            failed = { failed(it) },
+            started = { started(controller.executionIdentity) },
+            arrived = { arrived(controller.executionIdentity) },
+            failed = { failed(controller.executionIdentity, it) },
             exit = { confirmExit = true })
         val previousKeepScreenOn = hostView.keepScreenOn
         hostView.keepScreenOn = true
@@ -179,6 +181,7 @@ internal class NavigationController(
     private val via: List<Place>,
     requireExplicitStart: Boolean = false,
     private val meter: NavigationMeter = NavigationMeter(),
+    val executionIdentity: NavigationExecutionIdentity = NavigationExecutionIdentity(sessionId, "", 0),
 ) {
     val runId = java.util.UUID.randomUUID().toString()
     var serviceLease = 0L
@@ -199,8 +202,8 @@ internal class NavigationController(
         private set
     val needsService get() = phase.needsService
     private fun transition(event: NavigationEvent) { phase = navigationTransition(phase, event) }
-    fun matches(id: String, travelMode: String, end: Place, stops: List<Place>) =
-        sessionId == id && mode == travelMode && destination == end && via == stops
+    fun matches(id: String, travelMode: String, end: Place, stops: List<Place>, identity: NavigationExecutionIdentity) =
+        sessionId == id && mode == travelMode && destination == end && via == stops && executionIdentity == identity
     private var disposed = false
     private var engine: AMapNavi? = null
     private var view by mutableStateOf<AMapNaviView?>(null)
@@ -245,19 +248,16 @@ internal class NavigationController(
             if (disposed || phase != NavigationPhase.STARTING) return
             if (startCommit != null) return
             meter.start(System.currentTimeMillis(), android.os.SystemClock.elapsedRealtime())
+            val attemptId = "$runId:$serviceLease"
+            val observedAt = System.currentTimeMillis()
             startCommit = scope.launch {
                 try {
                     val database = TaskDatabase.get(context)
-                    database.withTransaction {
-                        val trip = database.trips().load()
-                        check(trip != null && trip.sessionId == sessionId) { "导航方案已变化" }
-                        val opened = trip.copy(started = true,
-                            startedAt = trip.startedAt.takeIf { it > 0 } ?: System.currentTimeMillis())
-                        database.trips().save(opened)
-                        if (!trip.started) database.trips().record(RouteHistory(sessionId = sessionId, planId = trip.planId,
-                            state = NavigationState.NAVIGATION_OPENED.name, timestamp = opened.startedAt,
-                            requestJson = trip.requestJson, resultJson = trip.resultJson))
-                    }
+                    NavigationStartRecorder(RoomNavigationStartStore(database),
+                        EventCorrelation(context).forSession(sessionId))
+                        .record(executionIdentity, observedAt, attemptId)
+                    // A scheduling failure leaves a durable row for the next app start.
+                    runCatching { EventOutboxSync.schedule(context) }
                     if (!disposed && phase == NavigationPhase.STARTING) {
                         handler.removeCallbacks(timeout)
                         transition(NavigationEvent.SDK_STARTED)
@@ -647,32 +647,24 @@ internal class NavigationController(
                 detail = status
             }
         }
+        // 保留地图上的可读背景，但减轻阴影，并去掉内部圆底和距离胶囊。
         Surface(
             Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(24.dp),
+            shape = RoundedCornerShape(18.dp),
             color = MaterialTheme.colorScheme.primary,
             contentColor = MaterialTheme.colorScheme.onPrimary,
-            shadowElevation = 10.dp,
+            shadowElevation = 4.dp,
         ) {
             Row(
-                Modifier.padding(16.dp),
+                Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Surface(
-                    Modifier.size(58.dp),
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.14f),
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        val icon = turnIcon?.takeUnless { it.isRecycled }
-                        when {
-                            arrived -> Icon(painterResource(R.drawable.ic_check), null, Modifier.size(28.dp))
-                            icon != null && active -> Image(icon.asImageBitmap(), "转向提示", Modifier.size(42.dp))
-                            else -> Icon(painterResource(R.drawable.ic_route), null, Modifier.size(26.dp))
-                        }
-                    }
+                val icon = turnIcon?.takeUnless { it.isRecycled }
+                when {
+                    arrived -> Icon(painterResource(R.drawable.ic_check), null, Modifier.size(30.dp))
+                    icon != null && active -> Image(icon.asImageBitmap(), "转向提示", Modifier.size(40.dp))
+                    else -> Icon(painterResource(R.drawable.ic_route), null, Modifier.size(28.dp))
                 }
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Row(
@@ -685,20 +677,16 @@ internal class NavigationController(
                             color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.68f),
                             fontWeight = FontWeight.SemiBold,
                         )
-                        if (active && stepRetainDistance > 0) {
-                            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.14f)) {
-                                Text(
-                                    "${formatDistance(stepRetainDistance)}后",
-                                    Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onPrimary,
-                                )
-                            }
-                        }
+                        if (active && stepRetainDistance > 0) Text(
+                            "${formatDistance(stepRetainDistance)}后",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.92f),
+                            fontWeight = FontWeight.SemiBold,
+                        )
                     }
                     Text(
                         title,
-                        style = MaterialTheme.typography.titleMedium,
+                        style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 3,
                         overflow = TextOverflow.Ellipsis,
@@ -721,10 +709,10 @@ internal class NavigationController(
     private fun StatusBanner(text: String) {
         Surface(
             Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(14.dp),
+            shape = RoundedCornerShape(10.dp),
             color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.96f),
             contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-            shadowElevation = 3.dp,
+            shadowElevation = 1.dp,
         ) {
             Text(
                 text,

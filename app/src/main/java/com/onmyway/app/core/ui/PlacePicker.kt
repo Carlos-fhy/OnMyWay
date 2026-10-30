@@ -1,26 +1,27 @@
 package com.onmyway.app.core.ui
 
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -36,6 +37,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -46,6 +48,44 @@ import com.onmyway.app.core.model.Place
 import com.onmyway.app.core.state.AppViewModel
 import com.onmyway.app.core.state.networkMessage
 import kotlinx.coroutines.launch
+
+/** 搜索与常用地点共用的无卡片列表行。 */
+@Composable
+private fun PlaceListRow(name: String, detail: String, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .heightIn(min = 56.dp)
+            .padding(horizontal = 4.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            painterResource(R.drawable.ic_place_pin),
+            null,
+            Modifier.size(16.dp),
+            tint = MaterialTheme.colorScheme.tertiary,
+        )
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                name,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (detail.isNotBlank()) Text(
+                detail,
+                Modifier.padding(top = 2.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
 
 @Composable
 internal fun PlacePicker(vm: AppViewModel, dismiss: () -> Unit, initialKeyword: String = "", choose: (Place) -> Unit) {
@@ -116,26 +156,6 @@ internal fun PlacePicker(vm: AppViewModel, dismiss: () -> Unit, initialKeyword: 
                         )
                     }
                 }
-                if (items.isEmpty() && !loading && vm.familiarPlaces.isNotEmpty()) {
-                    Text(
-                        "常用地点",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Row(
-                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        vm.familiarPlaces.forEach { (alias, place) ->
-                            AppPill(
-                                text = "$alias · ${place.name}",
-                                selected = false,
-                                onClick = { choose(place) },
-                                icon = R.drawable.ic_place_pin,
-                            )
-                        }
-                    }
-                }
             }
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 when {
@@ -151,6 +171,24 @@ internal fun PlacePicker(vm: AppViewModel, dismiss: () -> Unit, initialKeyword: 
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    }
+                    // 没有搜索结果时，常用地点直接以列表呈现，整行点击即可选用。
+                    items.isEmpty() && message.isBlank() && vm.familiarPlaces.isNotEmpty() -> LazyColumn(
+                        Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 24.dp),
+                    ) {
+                        item {
+                            Text(
+                                "常用地点",
+                                Modifier.padding(bottom = 4.dp),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        items(vm.familiarPlaces.entries.toList(), key = { it.key }) { (alias, place) ->
+                            PlaceListRow("$alias · ${place.name}", place.address) { choose(place) }
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                        }
                     }
                     items.isEmpty() && message.isBlank() -> Column(
                         Modifier.fillMaxSize().padding(24.dp),
@@ -168,52 +206,10 @@ internal fun PlacePicker(vm: AppViewModel, dismiss: () -> Unit, initialKeyword: 
                     else -> LazyColumn(
                         Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 24.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         items(items, key = { it.id }) { place ->
-                            Surface(
-                                onClick = { choose(place) },
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = MaterialTheme.shapes.large,
-                                color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)),
-                            ) {
-                                Row(
-                                    Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                ) {
-                                    AppIconBadge(
-                                        R.drawable.ic_place_pin,
-                                        size = 34.dp,
-                                        tint = MaterialTheme.colorScheme.tertiary,
-                                        container = MaterialTheme.colorScheme.tertiaryContainer,
-                                    )
-                                    Column(Modifier.weight(1f)) {
-                                        Text(
-                                            place.name,
-                                            style = MaterialTheme.typography.titleSmall,
-                                            fontWeight = FontWeight.SemiBold,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                        Text(
-                                            place.address,
-                                            Modifier.padding(top = 2.dp),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 2,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                    }
-                                    Icon(
-                                        painterResource(R.drawable.ic_chevron_right),
-                                        null,
-                                        Modifier.size(18.dp),
-                                        tint = MaterialTheme.colorScheme.outline,
-                                    )
-                                }
-                            }
+                            PlaceListRow(place.name, place.address) { choose(place) }
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                         }
                     }
                 }

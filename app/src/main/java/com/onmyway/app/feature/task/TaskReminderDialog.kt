@@ -1,12 +1,12 @@
 package com.onmyway.app.feature.task
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -15,7 +15,6 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -29,13 +28,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
-import com.onmyway.app.R
 import com.onmyway.app.core.ui.AppBottomSheet
-import com.onmyway.app.core.ui.AppCard
 import com.onmyway.app.core.ui.AppDateTimeDialog
-import com.onmyway.app.core.ui.AppIconBadge
 import com.onmyway.app.core.ui.AppPrimaryButton
 import com.onmyway.app.core.ui.AppSheetActionBar
 import com.onmyway.app.core.ui.BottomSheetTitle
@@ -58,74 +55,68 @@ internal fun TaskReminderDialog(task: Errand, dismiss: () -> Unit, confirm: (Lon
             BottomSheetTitle("稍后提醒：${task.title}", close, subtitle = "只改提醒，不改计划")
             Column(
                 Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                AppCard(contentPadding = PaddingValues(14.dp)) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                Text(
+                    "仅调整本任务的提醒，不改变计划日期、截止时间和优先级。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (task.reminderAt > 0) Text(
+                    "当前预约：${displayReminderTime(task.reminderAt)}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.height(6.dp))
+                listOf("hour" to "1 小时后", "tomorrow" to "明天 09:00", "custom" to "自选日期时间").forEach { (value, label) ->
+                    val selected = choice == value
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                        else Color.Transparent,
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
-                        AppIconBadge(R.drawable.ic_clock, size = 34.dp)
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(
-                                "仅调整本任务的提醒，不改变计划日期、截止时间和优先级。",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            if (task.reminderAt > 0) {
-                                Text(
-                                    "当前预约：${displayReminderTime(task.reminderAt)}",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.primary,
-                                )
+                        Column {
+                            Row(
+                                Modifier.fillMaxWidth()
+                                    .selectable(selected, role = Role.RadioButton, onClick = {
+                                        choice = value; error = ""
+                                    })
+                                    .heightIn(min = 48.dp)
+                                    .padding(horizontal = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                RadioButton(selected = selected, onClick = null)
+                                Spacer(Modifier.width(6.dp))
+                                Text(label, style = MaterialTheme.typography.titleSmall)
+                            }
+                            // 自定义时间直接展开在选项下方，不再套一层卡片和描边按钮。
+                            if (value == "custom" && selected) {
+                                Row(
+                                    Modifier.fillMaxWidth().padding(start = 48.dp, end = 4.dp, bottom = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        if (customAt > 0) displayReminderTime(customAt) else "尚未选择时间",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    Spacer(Modifier.weight(1f))
+                                    TextButton(onClick = { picking = true }) {
+                                        Text(if (customAt > 0) "修改" else "选择日期和时间")
+                                    }
+                                }
                             }
                         }
                     }
                 }
-                listOf("hour" to "1 小时后", "tomorrow" to "明天 09:00", "custom" to "自选日期时间").forEach { (value, label) ->
-                    val selected = choice == value
-                    Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLowest,
-                        border = BorderStroke(
-                            1.dp,
-                            if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
-                            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f),
-                        ),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Row(
-                            Modifier.fillMaxWidth().selectable(selected, role = Role.RadioButton, onClick = {
-                                choice = value; error = ""
-                            }).padding(horizontal = 8.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            RadioButton(selected = selected, onClick = null)
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                label,
-                                style = MaterialTheme.typography.titleSmall,
-                                color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
-                    }
-                }
-                if (choice == "custom") {
-                    AppCard(contentPadding = PaddingValues(14.dp)) {
-                        if (customAt > 0) Text(
-                            "将于 ${displayReminderTime(customAt)} 提醒",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        OutlinedButton(
-                            onClick = { picking = true },
-                            modifier = Modifier.fillMaxWidth().padding(top = if (customAt > 0) 8.dp else 0.dp),
-                            shape = RoundedCornerShape(14.dp),
-                        ) { Text("选择日期和时间") }
-                    }
-                }
-                if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                Spacer(Modifier.padding(bottom = 2.dp))
+                if (error.isNotBlank()) Text(
+                    error,
+                    Modifier.padding(top = 6.dp),
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Spacer(Modifier.height(2.dp))
             }
             AppSheetActionBar {
                 AppPrimaryButton(

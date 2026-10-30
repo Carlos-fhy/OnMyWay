@@ -234,6 +234,70 @@ class AssistantRecoveryTest {
         assertTrue(reopened.recoveryMessage.isNotBlank() || reopened.error.isNotBlank())
     }
 
+    @Test fun taskEditedWhileRequestIsInterruptedRejectsRecoveryAndKeepsOriginalInstruction() = runBlocking {
+        val parcel = Errand(id = "parcel", title = "取快递", placeType = "PARCEL")
+        val printing = Errand(id = "printing", title = "打印论文", placeType = "PRINT_SHOP")
+        db.tasks().save(parcel); db.tasks().save(printing)
+        val original = openChat()
+        val instruction = "取快递，打印论文，然后回宿舍"
+        val request = interruptedSend(original, instruction)
+        assertTrue(JSONObject(request.bodyJson).has("context_snapshot"))
+        stop(original)
+        db.tasks().save(printing.copy(title = "打印两份论文"))
+        val reopened = openChat()
+        transport.onStatus = { _, body -> status(body, "completed", routeReply()) }
+        recover(reopened)
+
+        assertEquals(request.requestId, reopened.pendingRequest?.requestId)
+        assertFalse(db.assistant().hasMessage("agent-response-${request.requestId}"))
+        assertNull(db.assistant().draft())
+        assertEquals(parcel, db.tasks().get(parcel.id))
+        assertEquals("打印两份论文", db.tasks().get(printing.id)?.title)
+        assertTrue(reopened.recoveryMessage.contains("待办") || reopened.error.contains("待办"))
+        withContext(Dispatchers.Main) { reopened.editInterruptedRequest() }
+        waitUntil { reopened.pendingRequest == null && !reopened.busy }
+        assertEquals(instruction, reopened.input)
+    }
+
+    @Test fun taskDeletedWhileReplyIsReturningCannotCreateDraftOrReceipt() = runBlocking {
+        val parcel = Errand(id = "parcel", title = "取快递", placeType = "PARCEL")
+        val printing = Errand(id = "printing", title = "打印论文", placeType = "PRINT_SHOP")
+        db.tasks().save(parcel); db.tasks().save(printing)
+        transport.onSubmit = { _, _ ->
+            db.tasks().delete(printing)
+            routeReply().put("destination", "宿舍")
+        }
+        val chat = openChat()
+        withContext(Dispatchers.Main) { chat.input = "取快递，打印论文，然后回宿舍"; chat.send(vm) }
+        waitUntil { transport.submissions.isNotEmpty() && !chat.busy }
+
+        val request = chat.pendingRequest!!
+        assertNotNull(request.resultJson)
+        assertFalse(db.assistant().hasMessage("agent-response-${request.requestId}"))
+        assertNull(db.assistant().draft())
+        assertEquals(parcel, db.tasks().get(parcel.id))
+        assertNull(db.tasks().get(printing.id))
+        assertTrue(chat.recoveryMessage.contains("待办") || chat.error.contains("待办"))
+    }
+
+    @Test fun preSnapshotPendingRequestCannotApplyLegacyCachedResult() = runBlocking {
+        val original = openChat()
+        val request = interruptedSend(original)
+        stop(original)
+        val legacyBody = JSONObject(request.bodyJson).apply { remove("context_snapshot") }
+        AssistantRequestJournal(app, journalName).use {
+            assertTrue(it.finish(request.requestId))
+            it.create(request.copy(bodyJson = legacyBody.toString(), resultJson = routeReply().toString()))
+        }
+        val reopened = openChat()
+        recover(reopened)
+
+        assertEquals(request.requestId, reopened.pendingRequest?.requestId)
+        assertFalse(db.assistant().hasMessage("agent-response-${request.requestId}"))
+        assertNull(db.assistant().draft())
+        assertTrue(reopened.recoveryMessage.contains("重新编辑") || reopened.error.contains("重新编辑"))
+    }
+
     @Test fun unfinishedStatesNeverResubmitAndUserCanExplicitlyEditAgain() = runBlocking {
         val original = openChat()
         val request = interruptedSend(original)

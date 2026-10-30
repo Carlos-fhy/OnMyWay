@@ -1,5 +1,6 @@
 package com.onmyway.app.feature.planning
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -7,6 +8,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.onmyway.app.R
@@ -30,6 +32,7 @@ internal fun AutomaticRouteCard(auto: AutomaticRoutePlanner, vm: AppViewModel, r
     manual: () -> Unit, cancel: () -> Unit, accepted: (JSONObject) -> Unit,
     canAct: () -> Boolean = { true }) {
     var details by remember { mutableStateOf(false) }
+    var budgetOpen by remember { mutableStateOf(false) }
     var editingBudget by remember { mutableStateOf(false) }
     var customBudget by remember { mutableStateOf("") }
     var directBecauseDetour by remember(auto.preview) { mutableStateOf(false) }
@@ -98,62 +101,73 @@ internal fun AutomaticRouteCard(auto: AutomaticRoutePlanner, vm: AppViewModel, r
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Spacer(Modifier.height(10.dp))
-            SectionLabel("本次顺路预算")
-            Text("最多多花 ${auto.budget} 分钟", style = MaterialTheme.typography.titleMedium)
-            val budgetSource = if (vm.modeDetourOverride(auto.travelMode) == auto.budget.toInt()) {
-                "你设定的${if (auto.travelMode == "cycling") "骑行" else "步行"}预算"
-            } else when (auto.budgetGuidance.source) {
-                GuidanceSource.EXPLICIT -> "你设定的${if (auto.travelMode == "cycling") "骑行" else "步行"}预算"
-                GuidanceSource.LEARNED -> "根据同种出行方式的 ${auto.budgetGuidance.evidenceCount} 次选择估计"
-                GuidanceSource.DEFAULT -> "默认预算；积累选择后可按出行方式调整"
+            Spacer(Modifier.height(6.dp))
+            // 预算默认压缩成一行，点“调整”才展开选项。
+            Row(
+                Modifier.fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { budgetOpen = !budgetOpen }
+                    .padding(horizontal = 2.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "最多多花 ${auto.budget} 分钟",
+                    Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Text(
+                    if (budgetOpen) "收起" else "调整",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                )
             }
-            Text(budgetSource, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(8.dp))
-            listOf(listOf(5, 10, 15), listOf(20, 30)).forEach { row ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    row.forEach { mins ->
-                        AppPill(
-                            text = "${mins}分钟",
-                            selected = auto.budget == mins.toString(),
-                            onClick = { if (canAct()) { auto.updateBudget(mins); editingBudget = false } },
+            if (budgetOpen) {
+                Spacer(Modifier.height(4.dp))
+                listOf(listOf(5, 10, 15), listOf(20, 30)).forEach { row ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        row.forEach { mins ->
+                            AppPill(
+                                text = "${mins}分钟",
+                                selected = auto.budget == mins.toString(),
+                                onClick = { if (canAct()) { auto.updateBudget(mins); editingBudget = false } },
+                                enabled = !auto.busy && !vm.busy,
+                            )
+                        }
+                        if (row.size == 2) AppPill(
+                            text = "自定义",
+                            selected = auto.budget.toIntOrNull() !in listOf(5, 10, 15, 20, 30),
+                            onClick = { customBudget = auto.budget; editingBudget = !editingBudget },
                             enabled = !auto.busy && !vm.busy,
                         )
                     }
-                    if (row.size == 2) AppPill(
-                        text = "自定义",
-                        selected = auto.budget.toIntOrNull() !in listOf(5, 10, 15, 20, 30),
-                        onClick = { customBudget = auto.budget; editingBudget = !editingBudget },
-                        enabled = !auto.busy && !vm.busy,
-                    )
+                    Spacer(Modifier.height(8.dp))
                 }
-                Spacer(Modifier.height(8.dp))
-            }
-            if (editingBudget) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        customBudget,
-                        { customBudget = it.filter(Char::isDigit).take(3) },
-                        label = { Text("0–240 分钟") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true,
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = appTextFieldColors(),
-                    )
-                    Button(
-                        onClick = {
-                            if (canAct()) customBudget.toIntOrNull()?.takeIf { it in 0..240 }?.let {
-                                auto.updateBudget(it); editingBudget = false
-                            }
-                        },
-                        enabled = customBudget.toIntOrNull()?.let { it in 0..240 } == true,
-                        shape = RoundedCornerShape(14.dp),
-                    ) { Text("应用") }
+                if (editingBudget) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            customBudget,
+                            { customBudget = it.filter(Char::isDigit).take(3) },
+                            label = { Text("0–240 分钟") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = appTextFieldColors(),
+                        )
+                        Button(
+                            onClick = {
+                                if (canAct()) customBudget.toIntOrNull()?.takeIf { it in 0..240 }?.let {
+                                    auto.updateBudget(it); editingBudget = false
+                                }
+                            },
+                            enabled = customBudget.toIntOrNull()?.let { it in 0..240 } == true,
+                            shape = RoundedCornerShape(14.dp),
+                        ) { Text("应用") }
+                    }
                 }
-            }
-            if (auto.budget.toInt() != vm.modeDetourOverride(auto.travelMode)) {
-                TextButton({ if (canAct()) vm.saveModeDetourOverride(auto.travelMode, auto.budget.toInt()) }) { Text("设为此出行方式的预算") }
+                if (auto.budget.toInt() != vm.modeDetourOverride(auto.travelMode)) {
+                    TextButton({ if (canAct()) vm.saveModeDetourOverride(auto.travelMode, auto.budget.toInt()) }) { Text("设为此出行方式的预算") }
+                }
             }
             if (auto.budgetChanged) {
                 Surface(
@@ -179,35 +193,35 @@ internal fun AutomaticRouteCard(auto: AutomaticRoutePlanner, vm: AppViewModel, r
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Spacer(Modifier.height(6.dp))
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-                    shape = RoundedCornerShape(16.dp),
-                ) {
-                    Column(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp)) {
-                        for (i in 0 until assessments.length()) {
-                            val entry = assessments.getJSONObject(i)
-                            val id = entry.getString("task_id")
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Checkbox(
-                                    checked = id in auto.selectedIds,
-                                    onCheckedChange = { if (canAct()) auto.toggle(vm, id) },
-                                    enabled = !auto.busy && !vm.busy && !entry.isNull("extra_seconds"),
+                Spacer(Modifier.height(4.dp))
+                // 事项使用无背景清单行，不再套第二层灰色卡片。
+                Column(Modifier.fillMaxWidth()) {
+                    for (i in 0 until assessments.length()) {
+                        val entry = assessments.getJSONObject(i)
+                        val id = entry.getString("task_id")
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(
+                                checked = id in auto.selectedIds,
+                                onCheckedChange = { if (canAct()) auto.toggle(vm, id) },
+                                enabled = !auto.busy && !vm.busy && !entry.isNull("extra_seconds"),
+                            )
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                                Text(
+                                    if (entry.isNull("extra_seconds")) "${entry.getString("title")}：${entry.getString("reason")}"
+                                    else "${entry.getString("title")} · 多 ${formatDistance(entry.optInt("extra_meters"))} / 约 ${formatDuration(entry.getInt("extra_seconds"))} · ${if (entry.getInt("extra_seconds") <= auto.budget.toInt() * 60) "预算内" else "超出预算"}",
+                                    style = MaterialTheme.typography.bodyMedium,
                                 )
-                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                                    Text(
-                                        if (entry.isNull("extra_seconds")) "${entry.getString("title")}：${entry.getString("reason")}"
-                                        else "${entry.getString("title")} · 多 ${formatDistance(entry.optInt("extra_meters"))} / 约 ${formatDuration(entry.getInt("extra_seconds"))} · ${if (entry.getInt("extra_seconds") <= auto.budget.toInt() * 60) "预算内" else "超出预算"}",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                    )
-                                    if (!auto.budgetChanged && id in auto.suggestedIds()) Text(
-                                        "助手建议",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.primary,
-                                    )
-                                }
+                                if (!auto.budgetChanged && id in auto.suggestedIds()) Text(
+                                    "助手建议",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
                             }
                         }
+                        if (i != assessments.length() - 1) HorizontalDivider(
+                            Modifier.padding(start = 4.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                        )
                     }
                 }
                 Text(
@@ -287,6 +301,14 @@ internal fun AutomaticRouteCard(auto: AutomaticRoutePlanner, vm: AppViewModel, r
             )
             TextButton({ details = !details }) { Text(if (details) "收起说明" else "查看说明") }
             if (details) {
+                val budgetSource = if (vm.modeDetourOverride(auto.travelMode) == auto.budget.toInt()) {
+                    "你设定的${if (auto.travelMode == "cycling") "骑行" else "步行"}预算"
+                } else when (auto.budgetGuidance.source) {
+                    GuidanceSource.EXPLICIT -> "你设定的${if (auto.travelMode == "cycling") "骑行" else "步行"}预算"
+                    GuidanceSource.LEARNED -> "根据同种出行方式的 ${auto.budgetGuidance.evidenceCount} 次选择估计"
+                    GuidanceSource.DEFAULT -> "默认预算；积累选择后可按出行方式调整"
+                }
+                Text("预算来源：$budgetSource", style = MaterialTheme.typography.bodySmall)
                 if (preview.optString("note").isNotBlank()) Text(preview.getString("note"), style = MaterialTheme.typography.bodySmall)
                 suggested?.let { route ->
                     val omitted = route.getJSONArray("omitted")

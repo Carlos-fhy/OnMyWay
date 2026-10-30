@@ -1,15 +1,15 @@
 package com.onmyway.app.core.location
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -53,6 +53,7 @@ internal fun familiarPlaceAlias(text: String): String = when (val name = text.tr
     else -> name
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun FamiliarPlacesSettings(vm: AppViewModel) {
     var editing by remember { mutableStateOf<String?>(null) }
@@ -258,14 +259,22 @@ internal fun FamiliarPlacesSettings(vm: AppViewModel) {
             onClose = { tagging = null },
             subtitle = "可多选。小助手只自动填入同类型且距离当前位置不远的地点。",
         ) {
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            // 自动换行的用途标签，全部选项无需横滑即可看见。
+            FlowRow(
+                Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 placeTypes.forEach { (type, label) ->
                     AppPill(label, type in tags, { vm.toggleFamiliarPlacePurpose(alias, type) })
                 }
             }
+            Text(
+                if (tags.isEmpty()) "尚未选择用途"
+                else "已选：${tags.sorted().joinToString("、") { placeTypeLabel(it) }}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
             Text(
                 "例如文印室位于移动营业厅内，只要标注「打印店」，打印任务就会优先推荐它。",
                 style = MaterialTheme.typography.bodySmall,

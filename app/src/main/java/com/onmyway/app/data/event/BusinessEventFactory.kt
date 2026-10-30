@@ -74,8 +74,9 @@ internal object BusinessEventFactory {
         correlationId: String,
         occurredAt: Long,
         replanned: Boolean,
+        planVersion: Int = 0,
     ) = BusinessEventOutbox(
-        eventId = BusinessEventIds.forObservation("ROUTE_CONFIRMED", historyId),
+        eventId = BusinessEventIds.forObservation("ROUTE_CONFIRMED", historyId, planVersion),
         correlationId = correlationId,
         kind = "ROUTE_CONFIRMED",
         source = SOURCE_USER,
@@ -85,6 +86,7 @@ internal object BusinessEventFactory {
         payloadJson = JSONObject()
             .put("route_session_id", sessionId)
             .put("plan_id", planId)
+            .put("plan_version", planVersion.takeIf { it > 0 } ?: JSONObject.NULL)
             .put("mode", request.optString("mode"))
             .put("selected_task_count", request.optJSONArray("tasks")?.length() ?: 0)
             .put("selected_task_ids", taskIds(request))
@@ -101,8 +103,10 @@ internal object BusinessEventFactory {
         request: JSONObject,
         correlationId: String,
         occurredAt: Long,
+        planVersion: Int = 0,
+        attemptId: String = "",
     ) = navigationEvent(
-        eventId = BusinessEventIds.forObservation("NAVIGATION_STARTED", sessionId),
+        eventId = navigationEventId("NAVIGATION_STARTED", sessionId, planId, planVersion, attemptId),
         kind = "NAVIGATION_STARTED",
         correlationId = correlationId,
         sessionId = sessionId,
@@ -110,6 +114,7 @@ internal object BusinessEventFactory {
         request = request,
         metrics = null,
         occurredAt = occurredAt,
+        planVersion = planVersion,
     )
 
     fun navigationArrived(
@@ -119,8 +124,9 @@ internal object BusinessEventFactory {
         metrics: TripMetrics?,
         correlationId: String,
         occurredAt: Long = metrics?.endedAt?.takeIf { it > 0 } ?: System.currentTimeMillis(),
+        planVersion: Int = 0,
     ) = navigationEvent(
-        eventId = BusinessEventIds.forObservation("NAVIGATION_ARRIVED", sessionId),
+        eventId = navigationEventId("NAVIGATION_ARRIVED", sessionId, planId, planVersion),
         kind = "NAVIGATION_ARRIVED",
         correlationId = correlationId,
         sessionId = sessionId,
@@ -128,6 +134,7 @@ internal object BusinessEventFactory {
         request = request,
         metrics = metrics,
         occurredAt = occurredAt,
+        planVersion = planVersion,
     )
 
     fun navigationCancelled(
@@ -138,8 +145,9 @@ internal object BusinessEventFactory {
         reason: String,
         correlationId: String,
         occurredAt: Long = System.currentTimeMillis(),
+        planVersion: Int = 0,
     ) = navigationEvent(
-        eventId = BusinessEventIds.forObservation("NAVIGATION_CANCELLED", sessionId),
+        eventId = navigationEventId("NAVIGATION_CANCELLED", sessionId, planId, planVersion),
         kind = "NAVIGATION_CANCELLED",
         correlationId = correlationId,
         sessionId = sessionId,
@@ -148,6 +156,7 @@ internal object BusinessEventFactory {
         metrics = metrics,
         occurredAt = occurredAt,
         reason = reason,
+        planVersion = planVersion,
     )
 
     fun navigationFailed(
@@ -157,6 +166,7 @@ internal object BusinessEventFactory {
         reason: String,
         correlationId: String,
         occurredAt: Long = System.currentTimeMillis(),
+        planVersion: Int = 0,
     ) = navigationEvent(
         // Every failed attempt is a distinct observation, even in one session.
         eventId = BusinessEventIds.newObservation(),
@@ -168,7 +178,14 @@ internal object BusinessEventFactory {
         metrics = null,
         occurredAt = occurredAt,
         reason = reason,
+        planVersion = planVersion,
     )
+
+    private fun navigationEventId(kind: String, sessionId: String, planId: String, version: Int, attemptId: String = ""): String {
+        val subject = if (version == 0 && attemptId.isBlank()) sessionId
+            else JSONArray().put(sessionId).put(planId).put(attemptId).toString()
+        return BusinessEventIds.forObservation(kind, subject, version)
+    }
 
     private fun navigationEvent(
         eventId: String,
@@ -180,6 +197,7 @@ internal object BusinessEventFactory {
         metrics: TripMetrics?,
         occurredAt: Long,
         reason: String = "",
+        planVersion: Int = 0,
     ) = BusinessEventOutbox(
         eventId = eventId,
         correlationId = correlationId,
@@ -191,6 +209,7 @@ internal object BusinessEventFactory {
         payloadJson = JSONObject()
             .put("route_session_id", sessionId)
             .put("plan_id", planId)
+            .put("plan_version", planVersion.takeIf { it > 0 } ?: JSONObject.NULL)
             .put("mode", request.optString("mode"))
             .put("selected_task_count", request.optJSONArray("tasks")?.length() ?: 0)
             .put("selected_task_ids", taskIds(request))

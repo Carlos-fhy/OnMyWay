@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface TaskDao {
+    @Query("SELECT * FROM tasks ORDER BY id") suspend fun all(): List<Errand>
     @Query("SELECT * FROM tasks ORDER BY createdAt DESC") fun observe(): Flow<List<Errand>>
     @Upsert suspend fun save(task: Errand)
     @Delete suspend fun delete(task: Errand)

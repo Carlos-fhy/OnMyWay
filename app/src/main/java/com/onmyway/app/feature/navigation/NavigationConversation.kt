@@ -1,6 +1,6 @@
 package com.onmyway.app.feature.navigation
 
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -11,13 +11,16 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.onmyway.app.R
 import com.onmyway.app.core.format.formatDistance
 import com.onmyway.app.core.format.formatDuration
 import com.onmyway.app.core.model.Place
+import com.onmyway.app.core.context.ContextSnapshot
 import com.onmyway.app.core.state.AppViewModel
 import com.onmyway.app.core.state.networkMessage
 import com.onmyway.app.core.ui.AppBottomSheet
@@ -60,6 +63,7 @@ internal class NavigationConversationState {
     var pendingInstruction by mutableStateOf("")
     var pendingIds: Set<String>? = null
     var pendingChoiceNewTask: Errand? = null
+    var choiceContext: ContextSnapshot? = null
     var history by mutableStateOf(listOf<Pair<String, String>>())
     var persist: (() -> Unit)? = null
 
@@ -72,15 +76,18 @@ internal class NavigationConversationState {
         pendingNewTask = newTask
         persist?.invoke()
     }
-    fun setChoices(options: List<Place>, keep: Set<String>, instruction: String, newTask: Errand?) {
+    fun setChoices(options: List<Place>, keep: Set<String>, instruction: String, newTask: Errand?,
+        context: ContextSnapshot? = null) {
         places = options.take(10)
         pendingIds = keep
         pendingChoiceNewTask = newTask
+        choiceContext = context
         pendingInstruction = instruction
         persist?.invoke()
     }
     fun invalidatePreview() {
         draft = null; places = emptyList(); pendingInstruction = ""; pendingIds = null; pendingChoiceNewTask = null
+        choiceContext = null
     }
     fun clear() {
         input = ""; invalidatePreview(); proposedBody = null; pendingNewTask = null; history = emptyList()
@@ -101,6 +108,7 @@ internal class NavigationConversationState {
         } ?: JSONObject.NULL)
         .put("places", JSONArray(places.map(Place::json)))
         .put("pending_instruction", pendingInstruction)
+        .put("choice_context", choiceContext?.json() ?: JSONObject.NULL)
         .put("pending_ids", pendingIds?.let { JSONArray(it.toList()) } ?: JSONObject.NULL)
         .put("pending_choice_new_task", pendingChoiceNewTask?.let { task ->
             JSONObject().put("id", task.id).put("title", task.title)
@@ -134,6 +142,7 @@ internal class NavigationConversationState {
             }.take(10)
         } ?: emptyList()
         pendingInstruction = snapshot.optString("pending_instruction")
+        choiceContext = snapshot.optJSONObject("choice_context")?.let(ContextSnapshot::fromJson)
         pendingIds = snapshot.optJSONArray("pending_ids")?.let { array ->
             (0 until array.length()).map { array.getString(it) }.toSet()
         }
@@ -224,7 +233,7 @@ internal fun NavigationConversation(vm: AppViewModel, dismiss: () -> Unit) {
         input = text; error = ""; busy = true; progress = "正在处理调整"
         scope.launch {
             try { draft = vm.previewNavigationChange(instruction, chosen) { progress = it }; places = emptyList(); state.pendingIds = null }
-            catch (e: NavigationDestinationChoice) { state.setChoices(e.places, e.keepIds, instruction, e.newTask) }
+            catch (e: NavigationDestinationChoice) { state.setChoices(e.places, e.keepIds, instruction, e.newTask, e.context) }
             catch (e: CancellationException) { throw e }
             catch (e: Exception) { error = networkMessage(e) }
             finally { busy = false }
@@ -247,24 +256,16 @@ internal fun NavigationConversation(vm: AppViewModel, dismiss: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (pendingRequest != null) {
-                AppCard(contentPadding = PaddingValues(16.dp)) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        AppIconBadge(R.drawable.ic_clock, size = 34.dp)
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text("上次调整尚未完成", style = MaterialTheme.typography.titleMedium)
-                            Text(
-                                pendingRequest.userText,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
+                // 恢复提示是普通内容，不单独成为一张卡片。
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("上次调整尚未完成", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        pendingRequest.userText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     Text(
                         vm.navigationRecoveryMessage.ifBlank { "可以继续获取结果；当前路线会保持到你确认新方案。" },
-                        Modifier.padding(top = 8.dp),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -306,7 +307,7 @@ internal fun NavigationConversation(vm: AppViewModel, dismiss: () -> Unit) {
                 ) { Text("发送") }
             }
             if (busy) {
-                AppCard(contentPadding = PaddingValues(14.dp)) {
+                Column {
                     LinearProgressIndicator(
                         Modifier.fillMaxWidth(),
                         color = MaterialTheme.colorScheme.primary,
@@ -321,7 +322,7 @@ internal fun NavigationConversation(vm: AppViewModel, dismiss: () -> Unit) {
                 }
             }
             if (pendingRequest == null && draft == null && state.proposedBody != null) {
-                AppCard(contentPadding = PaddingValues(16.dp)) {
+                Column {
                     Text("有一份未确认的调整方案。请重新计算当前位置和路线，检查后再确认。")
                     OutlinedButton(
                         onClick = ::recalculatePending,
@@ -335,35 +336,32 @@ internal fun NavigationConversation(vm: AppViewModel, dismiss: () -> Unit) {
                 SectionLabel("请选择新的目的地，可以说“第一个”")
             }
             (if (pendingRequest == null) places else emptyList()).forEachIndexed { index, place ->
-                Surface(
-                    onClick = { send(input, place) },
-                    enabled = !busy,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = MaterialTheme.shapes.large,
-                    color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)),
+                // 候选地点使用普通列表行，整行点击选择。
+                Row(
+                    Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable(enabled = !busy) { send(input, place) }
+                        .heightIn(min = 56.dp)
+                        .padding(horizontal = 4.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        AppIconBadge(
-                            R.drawable.ic_place_pin,
-                            size = 34.dp,
-                            tint = MaterialTheme.colorScheme.tertiary,
-                            container = MaterialTheme.colorScheme.tertiaryContainer,
+                    Icon(
+                        painterResource(R.drawable.ic_place_pin),
+                        null,
+                        Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.tertiary,
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("${index + 1}. ${place.name}", style = MaterialTheme.typography.titleSmall)
+                        if (place.address.isNotBlank()) Text(
+                            place.address,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text("${index + 1}. ${place.name}", style = MaterialTheme.typography.titleSmall)
-                            if (place.address.isNotBlank()) Text(
-                                place.address,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
                     }
                 }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             }
             draft?.takeIf { pendingRequest == null }?.let { change ->
                 val route = change.route
@@ -465,14 +463,19 @@ internal data class NavigationChange(
     val addedTask: Errand?,
     val createdAt: Long,
     val versionId: String,
+    val contextSnapshot: ContextSnapshot = ContextSnapshot.capture(tasks, previous, now = createdAt,
+        proposedTasks = listOfNotNull(addedTask)),
 ) {
     constructor(previous: SavedTrip, body: JSONObject, route: JSONObject, tasks: List<Errand>,
         addedTask: Errand? = null, createdAt: Long = System.currentTimeMillis(),
-        versionId: String = java.util.UUID.randomUUID().toString()) :
-        this(previous, body.toString(), route.toString(), tasks.toList(), addedTask, createdAt, versionId)
+        versionId: String = java.util.UUID.randomUUID().toString(),
+        contextSnapshot: ContextSnapshot = ContextSnapshot.capture(tasks, previous, now = createdAt,
+            proposedTasks = listOfNotNull(addedTask))) :
+        this(previous, body.toString(), route.toString(), tasks.toList(), addedTask, createdAt, versionId, contextSnapshot)
 
     val body: JSONObject get() = JSONObject(bodyJson)
     val route: JSONObject get() = JSONObject(routeJson)
 }
 
-internal class NavigationDestinationChoice(val places: List<Place>, val keepIds: Set<String>, val newTask: Errand? = null) : Exception()
+internal class NavigationDestinationChoice(val places: List<Place>, val keepIds: Set<String>,
+    val newTask: Errand? = null, val context: ContextSnapshot? = null) : Exception()

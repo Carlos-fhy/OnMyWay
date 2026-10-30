@@ -18,6 +18,7 @@ internal object HttpAssistantRequestTransport : AssistantRequestTransport {
 internal fun assistantTripContext(trip: SavedTrip?): String {
     if (trip == null) return "none"
     val content = JSONObject().put("session", trip.sessionId).put("plan", trip.planId)
+        .put("plan_version", trip.planVersion).put("needs_replan", trip.needsReplan)
         .put("request", trip.requestJson).put("result", trip.resultJson)
         .put("started", trip.started).put("started_at", trip.startedAt)
         .put("planned_at", trip.plannedAt).toString()

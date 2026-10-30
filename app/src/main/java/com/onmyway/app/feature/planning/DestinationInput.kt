@@ -11,12 +11,13 @@ import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -28,6 +29,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -254,44 +256,31 @@ internal fun DestinationInput(vm: AppViewModel, enabled: Boolean, choose: (Place
         ) {
             (vm.familiarPlaces.keys + familiarPlaceSuggestions).distinct().forEach { alias ->
                 val place = vm.familiarPlaces[alias]
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)),
+                // 整行点击选择；仅保留右侧轻量编辑入口。
+                Row(
+                    Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable(enabled = place != null) { pickAlias(alias) }
+                        .heightIn(min = 56.dp)
+                        .padding(horizontal = 4.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        AppIconBadge(
-                            R.drawable.ic_place_pin,
-                            size = 32.dp,
-                            tint = MaterialTheme.colorScheme.tertiary,
-                            container = MaterialTheme.colorScheme.tertiaryContainer,
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                        Text(
+                            alias,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
                         )
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                            Text(
-                                alias,
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                            Text(
-                                place?.name ?: "设置地点",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                            )
-                        }
-                        if (place != null) {
-                            TextButton({ pickAlias(alias) }) { Text("使用") }
-                            TextButton({ editAlias(alias) }) { Text("修改") }
-                        } else {
-                            TextButton({ editAlias(alias) }) { Text("设置") }
-                        }
+                        Text(
+                            place?.name ?: "设置地点",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
                     }
+                    TextButton({ editAlias(alias) }) { Text(if (place != null) "修改" else "设置") }
                 }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             }
         }
         TextButton({ aliases = false }, Modifier.fillMaxWidth()) { Text("关闭") }

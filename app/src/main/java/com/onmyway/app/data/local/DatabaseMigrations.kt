@@ -118,3 +118,21 @@ val MIGRATION_14_15 = object : Migration(14, 15) {
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_business_event_outbox_deliveredAt_terminalAt_occurredAt` ON `business_event_outbox` (`deliveredAt`, `terminalAt`, `occurredAt`)")
     }
 }
+
+val MIGRATION_15_16 = object : Migration(15, 16) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // Local-only confirmation receipts. An accepted version from an older
+        // build was never observed, so no historical receipts are invented.
+        db.execSQL("CREATE TABLE IF NOT EXISTS `confirmation_outbox` (`receiptId` TEXT NOT NULL, `subjectType` TEXT NOT NULL, `subjectId` TEXT NOT NULL, `subjectVersion` INTEGER NOT NULL, `correlationId` TEXT NOT NULL, `confirmedAt` INTEGER NOT NULL, `validUntil` INTEGER, `snapshotJson` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `deliveredAt` INTEGER, `terminalAt` INTEGER, `attempts` INTEGER NOT NULL, `lastAttemptAt` INTEGER NOT NULL, `lastError` TEXT NOT NULL, PRIMARY KEY(`receiptId`))")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_confirmation_outbox_deliveredAt_terminalAt_confirmedAt` ON `confirmation_outbox` (`deliveredAt`, `terminalAt`, `confirmedAt`)")
+    }
+}
+
+val MIGRATION_16_17 = object : Migration(16, 17) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // Existing execution history does not identify a confirmed plan version.
+        // Keep it unknown; previously recorded confirmation versions remain in their outbox.
+        db.execSQL("ALTER TABLE saved_trip ADD COLUMN planVersion INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE route_history ADD COLUMN planVersion INTEGER NOT NULL DEFAULT 0")
+    }
+}
