@@ -6,14 +6,12 @@ import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -56,9 +54,7 @@ import com.onmyway.app.core.ui.AppIconBadge
 import com.onmyway.app.core.ui.AppPill
 import com.onmyway.app.core.ui.AppPillRow
 import com.onmyway.app.core.ui.AppPrimaryButton
-import com.onmyway.app.core.ui.AppRouteArt
 import com.onmyway.app.core.ui.AppScreenHeader
-import com.onmyway.app.core.ui.AppStatusPill
 import com.onmyway.app.core.ui.BottomSheetTitle
 import com.onmyway.app.core.ui.ChoiceRow
 import com.onmyway.app.core.ui.PlacePicker
@@ -105,10 +101,9 @@ internal fun PlanScreen(vm: AppViewModel, tasks: List<Errand>, navigatingHere: B
 @Composable
 private fun PlanAction(label: String, enabled: Boolean, action: () -> Unit) {
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+        color = MaterialTheme.colorScheme.background,
     ) {
-        Box(Modifier.padding(horizontal = 20.dp, vertical = 10.dp)) {
+        Box(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
             AppPrimaryButton(label, action, enabled = enabled)
         }
     }
@@ -118,12 +113,12 @@ private fun PlanAction(label: String, enabled: Boolean, action: () -> Unit) {
 private fun SummaryRow(title: String, detail: String, enabled: Boolean = true, action: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(enabled = enabled, onClick = action)
-            .heightIn(min = 56.dp).padding(vertical = 10.dp),
+            .heightIn(min = 64.dp).padding(vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            if (detail.isNotBlank()) Text(detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            if (detail.isNotBlank()) Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Icon(
             painterResource(R.drawable.ic_chevron_right),
@@ -146,7 +141,7 @@ private fun EndpointRow(
 ) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(enabled = enabled, onClick = onClick)
-            .padding(vertical = 9.dp),
+            .heightIn(min = 64.dp).padding(vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.width(22.dp), contentAlignment = Alignment.Center) {
@@ -234,9 +229,10 @@ internal fun PrepareTrip(vm: AppViewModel, tasks: List<Errand>, submit: () -> Un
         )
         LazyColumn(
             Modifier.weight(1f),
-            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
+            if (vm.planningRecoveryVisible) item(key = "planning-recovery") { PlanningRecoveryCard(vm) }
             item {
                 AppCard(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -245,7 +241,7 @@ internal fun PrepareTrip(vm: AppViewModel, tasks: List<Errand>, submit: () -> Un
                                 "起点",
                                 vm.origin?.name ?: "选择起点",
                                 R.drawable.ic_location,
-                                MaterialTheme.colorScheme.primary,
+                                MaterialTheme.colorScheme.onSurfaceVariant,
                                 !vm.busy && !vm.locating,
                                 { pick = "origin" },
                             )
@@ -267,7 +263,7 @@ internal fun PrepareTrip(vm: AppViewModel, tasks: List<Errand>, submit: () -> Un
                         "终点",
                         vm.destination?.name ?: "去哪里？",
                         R.drawable.ic_place_pin,
-                        MaterialTheme.colorScheme.tertiary,
+                        MaterialTheme.colorScheme.onSurfaceVariant,
                         !vm.busy,
                         { sheet = "destination" },
                     ) {
@@ -326,7 +322,7 @@ internal fun PrepareTrip(vm: AppViewModel, tasks: List<Errand>, submit: () -> Un
                 }
             }
             if (blocked.isNotEmpty()) item {
-                AppCard(contentPadding = PaddingValues(16.dp)) {
+                Column(Modifier.padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     SectionLabel("本次不参与路线")
                     blocked.forEach { state ->
                         Text(
@@ -343,9 +339,9 @@ internal fun PrepareTrip(vm: AppViewModel, tasks: List<Errand>, submit: () -> Un
                 }
             }
             if (vm.busy) item {
-                AppCard(contentPadding = PaddingValues(16.dp)) {
+                Column(Modifier.padding(horizontal = 4.dp, vertical = 4.dp)) {
                     LinearProgressIndicator(
-                        Modifier.fillMaxWidth(),
+                        Modifier.fillMaxWidth().height(2.dp),
                         color = MaterialTheme.colorScheme.primary,
                         trackColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
                     )
@@ -548,8 +544,6 @@ private fun TripOverview(result: JSONObject, tasks: List<Errand>, vm: AppViewMod
                 remaining.map { Place.from(it.getJSONObject("place")) }.distinctBy { it.id }
                     .filterNot { it.latitude == destination.latitude && it.longitude == destination.longitude },
                 onStarted = vm::embeddedNavigationStarted,
-                onArrived = vm::embeddedNavigationArrived,
-                onFailed = vm::embeddedNavigationFailed,
                 onAdjustRoute = { conversation = true },
                 autoStart = !vm.explicitNavigationStartRequired,
                 executionIdentity = checkNotNull(vm.navigationExecutionIdentity),
@@ -586,9 +580,10 @@ private fun TripOverview(result: JSONObject, tasks: List<Errand>, vm: AppViewMod
         )
         LazyColumn(
             Modifier.weight(1f),
-            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
+            if (vm.planningRecoveryVisible) item(key = "planning-recovery") { PlanningRecoveryCard(vm) }
             if (vm.planNeedsRefresh) item {
                 Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.large) {
                     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -617,8 +612,8 @@ private fun TripOverview(result: JSONObject, tasks: List<Errand>, vm: AppViewMod
                     )
                 }
                 item {
-                    Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.extraLarge) {
-                        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AppCard(contentPadding = PaddingValues(20.dp)) {
+                        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Row(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -627,19 +622,19 @@ private fun TripOverview(result: JSONObject, tasks: List<Errand>, vm: AppViewMod
                                     painterResource(R.drawable.ic_place_pin),
                                     null,
                                     Modifier.size(15.dp),
-                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    tint = MaterialTheme.colorScheme.primary,
                                 )
                                 Text(
                                     if (remaining.isEmpty()) "前往最终目的地" else "下一处办事",
                                     style = MaterialTheme.typography.labelLarge,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
                             Text(
                                 if (remaining.isEmpty()) destination.name else Place.from(remaining.first().getJSONObject("place")).name,
                                 style = MaterialTheme.typography.headlineSmall,
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                color = MaterialTheme.colorScheme.onSurface,
                             )
                             remaining.firstOrNull()?.let { stop ->
                                 StopTasks(stop, tasks, vm, true)
@@ -648,41 +643,37 @@ private fun TripOverview(result: JSONObject, tasks: List<Errand>, vm: AppViewMod
                     }
                 }
                 item {
-                    AppCard(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)) {
-                        SummaryRow("完整行程", "终点 · ${destination.name}") { expanded = !expanded }
-                    }
+                    SummaryRow("完整行程", "终点 · ${destination.name}") { expanded = !expanded }
                 }
             } else {
                 item {
-                    Surface(color = MaterialTheme.colorScheme.primary, shape = MaterialTheme.shapes.extraLarge) {
-                        Box(Modifier.fillMaxWidth()) {
-                            AppRouteArt(
-                                Modifier.align(Alignment.BottomEnd).padding(end = 8.dp, bottom = 6.dp).width(176.dp).height(92.dp),
-                                color = Color.White.copy(alpha = 0.42f),
-                                endColor = MaterialTheme.colorScheme.tertiaryContainer,
+                    AppCard(contentPadding = PaddingValues(20.dp)) {
+                        Text(
+                            if (allIds.isEmpty()) "直达 ${minutes(result.getInt("total_seconds"))}" else "多花 ${minutes(result.getInt("extra_seconds"))}",
+                            style = MaterialTheme.typography.headlineLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            if (allIds.isEmpty()) destination.name else "顺路办 ${allIds.size} 件事 · 全程 ${minutes(result.getInt("total_seconds"))}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                painterResource(R.drawable.ic_clock), null, Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(
-                                    if (allIds.isEmpty()) "直达 ${minutes(result.getInt("total_seconds"))}" else "多花 ${minutes(result.getInt("extra_seconds"))}",
-                                    style = MaterialTheme.typography.displaySmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onPrimary,
-                                )
-                                Text(
-                                    if (allIds.isEmpty()) destination.name else "顺路办 ${allIds.size} 件事 · 全程 ${minutes(result.getInt("total_seconds"))}",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.88f),
-                                )
-                                Spacer(Modifier.height(2.dp))
-                                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.14f)) {
-                                    Text(
-                                        "规划预计 ${displayTime(result.getString("arrival"))} 到达",
-                                        Modifier.padding(horizontal = 11.dp, vertical = 5.dp),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onPrimary,
-                                    )
-                                }
-                            }
+                            Text(
+                                "规划预计 ${displayTime(result.getString("arrival"))} 到达",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                     }
                 }
@@ -727,7 +718,7 @@ private fun TripOverview(result: JSONObject, tasks: List<Errand>, vm: AppViewMod
                 }
             }
             item {
-                AppCard(contentPadding = PaddingValues(16.dp)) {
+                Column(Modifier.padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("原计划估算 · 非实时到达时间", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     if (!vm.tripStarted) Text("办完后返回行程标记完成。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     val warnings = result.getJSONArray("warnings")
@@ -812,8 +803,8 @@ private fun RouteTimelineItem(title: String, number: Int? = null, first: Boolean
         Box(Modifier.width(28.dp).fillMaxHeight().drawBehind {
             val x = size.width / 2
             val y = 14.dp.toPx()
-            if (!first) drawLine(line, Offset(x, 0f), Offset(x, y), 2.dp.toPx())
-            if (!last) drawLine(line, Offset(x, y), Offset(x, size.height), 2.dp.toPx())
+            if (!first) drawLine(line, Offset(x, 0f), Offset(x, y), 1.dp.toPx())
+            if (!last) drawLine(line, Offset(x, y), Offset(x, size.height), 1.dp.toPx())
             drawCircle(pinColor, 11.dp.toPx(), Offset(x, y))
             if (number == null) drawCircle(pinHole, 4.dp.toPx(), Offset(x, y), style = Stroke(2.dp.toPx()))
         }, contentAlignment = Alignment.TopCenter) {
@@ -842,7 +833,7 @@ private fun StopTasks(stop: JSONObject, tasks: List<Errand>, vm: AppViewModel, a
                     painterResource(placeTypeIcon(task.placeType)),
                     null,
                     Modifier.size(16.dp),
-                    tint = if (done) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.primary,
+                    tint = if (done) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.width(8.dp))
             }

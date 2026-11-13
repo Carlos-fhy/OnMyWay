@@ -13,28 +13,62 @@ import com.onmyway.app.data.remote.assistantTripContext
 import com.onmyway.app.feature.planning.PlanningChoices
 import com.onmyway.app.feature.planning.PlanningDraft
 import com.onmyway.app.feature.planning.PlanningDraftTask
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import java.util.UUID
 import kotlinx.coroutines.flow.first
 import org.json.JSONArray
 import org.json.JSONObject
 
-private const val MAIN_CONVERSATION = "primary"
 private const val ROUTE_DRAFT_LIFETIME = 30 * 60_000L
 
-@Entity(tableName = "assistant_messages", indices = [Index("createdAt")])
+/** Legacy IDs remain readable; new conversations use an explicit persistent identity. */
+internal fun conversationKey(timestamp: Long): String =
+    "day-" + Instant.ofEpochMilli(timestamp).atZone(ZoneId.systemDefault()).toLocalDate()
+internal fun conversationKey(day: LocalDate): String = "day-$day"
+internal fun todayConversation(): String = conversationKey(System.currentTimeMillis())
+
+@Entity(tableName = "assistant_messages", indices = [Index("createdAt"), Index("conversationId")])
 data class AssistantMessage(
     @PrimaryKey val id: String,
     val role: String,
     val text: String,
     val createdAt: Long,
     val routeHistoryId: String?,
-    val conversationId: String = MAIN_CONVERSATION,
+    val conversationId: String = conversationKey(createdAt),
 ) {
     internal fun line() = ChatLine(role, text, id, createdAt, routeHistoryId)
     companion object {
         internal fun from(line: ChatLine) = AssistantMessage(line.id, line.role, line.text, line.createdAt, line.routeHistoryId)
     }
 }
+
+/** 跨对话长期偏好及其原话证据；完整聊天记录单独保存。 */
+@Entity(tableName = "assistant_memory", indices = [Index(value = ["text"], unique = true)])
+data class AssistantMemory(
+    @PrimaryKey val id: String = UUID.randomUUID().toString(),
+    val text: String,
+    val createdAt: Long = System.currentTimeMillis(),
+    @ColumnInfo(defaultValue = "'preference'") val kind: String = "preference",
+    @ColumnInfo(defaultValue = "'general'") val scope: String = "general",
+    @ColumnInfo(defaultValue = "'legacy'") val sourceType: String = "legacy",
+    @ColumnInfo(defaultValue = "''") val sourceMessageId: String = "",
+    @ColumnInfo(defaultValue = "''") val sourceQuote: String = "",
+    @ColumnInfo(defaultValue = "0") val updatedAt: Long = createdAt,
+    @ColumnInfo(defaultValue = "'active'") val status: String = "active",
+    @ColumnInfo(defaultValue = "1") val revision: Long = 1,
+    @ColumnInfo(defaultValue = "0") val expiresAt: Long = 0,
+    @ColumnInfo(defaultValue = "''") val replaces: String = "",
+)
+
+@Entity(tableName = "assistant_memory_state")
+data class AssistantMemoryState(
+    @PrimaryKey val id: Int = 1,
+    val revision: Long = 0,
+    val useMemory: Boolean = true,
+    val autoRemember: Boolean = true,
+)
 
 @Entity(tableName = "assistant_draft")
 data class AssistantDraft(
@@ -55,7 +89,7 @@ data class AssistantDraft(
     val knownAddress: String = "",
     val savedAt: Long,
     val expiresAt: Long = 0,
-    val conversationId: String = MAIN_CONVERSATION,
+    val conversationId: String = conversationKey(savedAt),
 ) {
     fun valid(now: Long = System.currentTimeMillis()) =
         draftId.isNotBlank() && planId.isNotBlank() && ((action == "create_task" && title.isNotBlank()) ||
@@ -135,13 +169,23 @@ interface AssistantDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun savePlanningTasks(value: List<PlanningDraftTask>)
     @Query("DELETE FROM planning_draft") suspend fun clearPlanningDraft()
     @Query("DELETE FROM planning_draft_tasks") suspend fun clearPlanningTasks()
-    @Query("SELECT strftime('%Y-%m-%d', createdAt / 1000, 'unixepoch', 'localtime') AS day, COUNT(*) AS count FROM assistant_messages WHERE role IN ('user', 'assistant') GROUP BY day ORDER BY day DESC")
+    // 按会话（每天一段）统计，与打开某一天时读取的内容严格一致。
+    @Query("SELECT substr(conversationId, 5) AS day, COUNT(*) AS count FROM assistant_messages WHERE role IN ('user', 'assistant') AND conversationId LIKE 'day-%' GROUP BY conversationId ORDER BY day DESC")
     suspend fun days(): List<AssistantDay>
-    @Query("SELECT * FROM assistant_messages WHERE createdAt >= :start AND createdAt < :end AND role IN ('user', 'assistant') ORDER BY createdAt, rowid")
-    suspend fun messagesInDay(start: Long, end: Long): List<AssistantMessage>
+    @Query("SELECT * FROM assistant_messages WHERE conversationId = :conversationId AND role IN ('user', 'assistant') ORDER BY createdAt, rowid")
+    suspend fun messagesInConversation(conversationId: String): List<AssistantMessage>
+    @Query("SELECT * FROM assistant_messages WHERE conversationId = :conversationId AND role IN ('user', 'assistant') ORDER BY createdAt DESC, rowid DESC LIMIT :limit")
+    suspend fun conversationPage(conversationId: String, limit: Int): List<AssistantMessage>
 
+    @Query("SELECT * FROM assistant_messages WHERE conversationId = :conversationId AND role IN ('user', 'assistant') ORDER BY createdAt DESC, rowid DESC LIMIT 500")
+    suspend fun recentMessages(conversationId: String): List<AssistantMessage>
+    // 调试与测试读取全部日期；应用内始终按天读取上面的重载。
     @Query("SELECT * FROM assistant_messages WHERE role IN ('user', 'assistant') ORDER BY createdAt DESC, rowid DESC LIMIT 500")
     suspend fun recentMessages(): List<AssistantMessage>
+    @Query("SELECT * FROM assistant_messages WHERE role IN ('user', 'assistant') ORDER BY createdAt DESC, rowid DESC LIMIT 1")
+    suspend fun latestMessage(): AssistantMessage?
+    @Query("SELECT m.conversationId AS id, COALESCE((SELECT text FROM assistant_messages opening WHERE opening.conversationId = m.conversationId AND opening.role = 'user' ORDER BY opening.createdAt, opening.rowid LIMIT 1), '对话记录') AS title, MAX(m.createdAt) AS updatedAt, COUNT(*) AS count FROM assistant_messages m WHERE m.role IN ('user', 'assistant') GROUP BY m.conversationId ORDER BY updatedAt DESC")
+    suspend fun conversations(): List<AssistantConversation>
     @Query("SELECT EXISTS(SELECT 1 FROM assistant_messages WHERE id = :id)")
     suspend fun hasMessage(id: String): Boolean
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun addMessages(messages: List<AssistantMessage>)
@@ -149,13 +193,60 @@ interface AssistantDao {
     @Query("SELECT * FROM assistant_draft WHERE id = 1") suspend fun draft(): AssistantDraft?
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun saveDraft(draft: AssistantDraft)
     @Query("DELETE FROM assistant_draft WHERE id = 1") suspend fun clearDraft()
+    @Query("SELECT * FROM assistant_memory WHERE status = 'active' AND (expiresAt = 0 OR expiresAt > :now) ORDER BY updatedAt DESC, id LIMIT :limit")
+    suspend fun memories(limit: Int, now: Long = System.currentTimeMillis()): List<AssistantMemory>
+    @Query("SELECT * FROM assistant_memory WHERE id = :id") suspend fun memoryById(id: String): AssistantMemory?
+    @Query("SELECT * FROM assistant_memory WHERE text = :text LIMIT 1") suspend fun memoryByText(text: String): AssistantMemory?
+    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun addMemory(memory: AssistantMemory)
+    @Update suspend fun updateMemory(memory: AssistantMemory)
+    @Query("SELECT * FROM assistant_memory_state WHERE id = 1") suspend fun memoryState(): AssistantMemoryState?
+    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun initializeMemoryState(state: AssistantMemoryState)
+    @Update suspend fun updateMemoryState(state: AssistantMemoryState)
 }
 
 /** Imports the old preference records exactly once; SQLite is authoritative afterwards. */
 internal class AssistantStore(private val database: TaskDatabase, private val legacy: SharedPreferences) {
     var legacyWarning: Boolean = false
         private set
-    suspend fun load(): Pair<List<ChatLine>, JSONObject?> {
+    val activeConversationId: String get() = legacy.getString("active_conversation_id", "").orEmpty()
+    val memorySessionId: String get() = legacy.getString("memory_session_id", activeConversationId).orEmpty()
+    val memorySessionStartedAt: Long get() = legacy.getLong("memory_session_started_at", 0L)
+
+    private fun persistConversation(id: String, sessionId: String,
+        startedAt: Long = if (id == activeConversationId && sessionId == memorySessionId) memorySessionStartedAt else 0L) {
+        val previousId = legacy.getString("active_conversation_id", null)
+        val previousSession = legacy.getString("memory_session_id", null)
+        val previousStart = legacy.getLong("memory_session_started_at", 0L)
+        val hadStart = legacy.contains("memory_session_started_at")
+        if (!legacy.edit().putString("active_conversation_id", id).putString("memory_session_id", sessionId)
+                .putLong("memory_session_started_at", startedAt).commit()) {
+            // Android updates SharedPreferences' memory even when the disk commit fails.
+            // Restore the old identity before another writer can observe the failed switch.
+            legacy.edit().putString("active_conversation_id", previousId).putString("memory_session_id", previousSession)
+                .apply { if (hadStart) putLong("memory_session_started_at", previousStart) else remove("memory_session_started_at") }
+                .commit()
+            error("对话切换保存失败，当前对话已保留。")
+        }
+    }
+
+    private suspend fun ensureConversation(preferred: String? = null, memorySession: String? = null): String {
+        val existing = activeConversationId
+        val id = database.assistant().draft()?.conversationId
+            ?: preferred?.takeIf(String::isNotBlank) ?: existing.takeIf(String::isNotBlank)
+            ?: database.assistant().latestMessage()?.conversationId ?: "chat-${UUID.randomUUID()}"
+        val requestedSession = memorySession?.takeIf { preferred == id && it.isNotBlank() }
+        if (id != existing || memorySessionId.isBlank() || requestedSession != null)
+            persistConversation(id, requestedSession ?: if (id == existing) memorySessionId.ifBlank { id } else id)
+        return id
+    }
+
+    /** Only the text workspace changes; task, trip and navigation records remain authoritative. */
+    suspend fun activateConversation(id: String) {
+        check(database.assistant().draft() == null) { "请先保存或取消当前待确认建议。" }
+        persistConversation(id, "session-${UUID.randomUUID()}", System.currentTimeMillis())
+    }
+
+    suspend fun load(preferredConversation: String? = null, memorySession: String? = null): Pair<List<ChatLine>, JSONObject?> {
         val rawLines = runCatching { legacy.getString("lines", null) }.getOrNull()
         val legacyLines = rawLines?.let { raw -> runCatching {
             val saved = JSONArray(raw)
@@ -190,7 +281,9 @@ internal class AssistantStore(private val database: TaskDatabase, private val le
             if (legacyLines != null) dao.addMessages(legacyLines.map(AssistantMessage::from))
             if (dao.draft() == null && legacyDraft != null) {
                 if (legacyDraft.action == "create_tasks") {
-                    migratedDraft = runCatching { setDraft(parsedDraft) }.isSuccess
+                    migratedDraft = runCatching {
+                        setDraft(parsedDraft, runCatching { legacy.getLong("proposal_saved_at", 0) }.getOrDefault(0L))
+                    }.isSuccess
                     if (!migratedDraft) legacyWarning = true
                 } else dao.saveDraft(legacyDraft)
             }
@@ -203,8 +296,11 @@ internal class AssistantStore(private val database: TaskDatabase, private val le
         }
         return database.withTransaction {
             val dao = database.assistant()
-            val messages = dao.recentMessages().asReversed().map(AssistantMessage::line)
+            val conversation = ensureConversation(preferredConversation, memorySession)
+            val messages = dao.recentMessages(conversation).asReversed().map(AssistantMessage::line)
             val storedDraft = dao.draft()
+            // A mismatched workspace is never allowed to consume another conversation's draft.
+            check(storedDraft == null || storedDraft.conversationId == conversation) { "待确认建议属于另一段对话。" }
             var draft = storedDraft?.takeIf { it.valid() }
             val storedItems = dao.draftItems()
             if (storedDraft != null && draft == null) legacyWarning = true
@@ -251,14 +347,13 @@ internal class AssistantStore(private val database: TaskDatabase, private val le
         }
     }
     suspend fun days() = database.assistant().days()
-    suspend fun day(day: java.time.LocalDate): List<ChatLine> {
-        val zone = java.time.ZoneId.systemDefault()
-        val start = day.atStartOfDay(zone).toInstant().toEpochMilli()
-        val end = day.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+    suspend fun conversations() = database.assistant().conversations().map { it.copy(title = it.title.take(40)) }
+    suspend fun day(day: LocalDate): List<ChatLine> = conversation(conversationKey(day))
+    suspend fun conversation(conversationId: String, limit: Int = 500): List<ChatLine> {
         return database.withTransaction {
             val sessions = mutableMapOf<String, String?>()
             val outcomes = mutableMapOf<String, String?>()
-            database.assistant().messagesInDay(start, end).map { message ->
+            database.assistant().conversationPage(conversationId, limit).asReversed().map { message ->
                 val id = message.routeHistoryId
                 val session = if (id == null) null else sessions.getOrPut(id) {
                     database.trips().historyById(id)?.sessionId
@@ -269,7 +364,119 @@ internal class AssistantStore(private val database: TaskDatabase, private val le
             }
         }
     }
-    suspend fun add(line: ChatLine) = database.assistant().addMessage(AssistantMessage.from(line))
+    suspend fun add(line: ChatLine, conversationId: String? = null) = database.assistant().addMessage(
+        AssistantMessage.from(line).copy(conversationId = conversationId?.takeIf(String::isNotBlank) ?: ensureConversation()))
+    suspend fun memories(): List<AssistantMemory> = database.assistant().memories(MEMORY_LIMIT)
+
+    private suspend fun memoryState(): AssistantMemoryState {
+        val dao = database.assistant()
+        dao.initializeMemoryState(AssistantMemoryState())
+        return checkNotNull(dao.memoryState())
+    }
+
+    suspend fun memorySnapshot(): MemorySnapshot = database.withTransaction {
+        MemorySnapshot(memoryState(), memories())
+    }
+
+    suspend fun updateMemorySettings(useMemory: Boolean, autoRemember: Boolean): MemorySnapshot = database.withTransaction {
+        val previous = memoryState()
+        val state = if (previous.useMemory == useMemory && previous.autoRemember == autoRemember) previous
+            else previous.copy(revision = previous.revision + 1, useMemory = useMemory, autoRemember = autoRemember)
+        if (state != previous) database.assistant().updateMemoryState(state)
+        MemorySnapshot(state, memories())
+    }
+
+    suspend fun addManualMemory(text: String, scope: String = "general"): Boolean = database.withTransaction {
+        val value = text.trim()
+        if (!memoryTextAllowed(value) || scope !in MEMORY_SCOPES) return@withTransaction false
+        val dao = database.assistant()
+        if (dao.memoryByText(value) != null || memories().size >= MEMORY_LIMIT) return@withTransaction false
+        val state = memoryState()
+        dao.addMemory(AssistantMemory(text = value, scope = scope, sourceType = "manual"))
+        dao.updateMemoryState(state.copy(revision = state.revision + 1))
+        true
+    }
+
+    suspend fun editMemory(id: String, expectedRevision: Long, text: String, scope: String): Boolean = database.withTransaction {
+        val value = text.trim()
+        if (!memoryTextAllowed(value) || scope !in MEMORY_SCOPES) return@withTransaction false
+        val dao = database.assistant()
+        val previous = dao.memoryById(id) ?: return@withTransaction false
+        if (previous.status != "active" || previous.revision != expectedRevision) return@withTransaction false
+        if (previous.text == value && previous.scope == scope) return@withTransaction false
+        if (dao.memoryByText(value)?.id?.let { it != id } == true) return@withTransaction false
+        val state = memoryState()
+        dao.updateMemory(previous.copy(text = value, scope = scope, sourceType = "manual", sourceMessageId = "",
+            sourceQuote = "", updatedAt = System.currentTimeMillis(), revision = previous.revision + 1,
+            expiresAt = 0, replaces = "${previous.id}:${previous.revision}"))
+        dao.updateMemoryState(state.copy(revision = state.revision + 1))
+        true
+    }
+
+    /** Explicit deletion leaves only an identity tombstone; delayed results cannot resurrect the text. */
+    suspend fun forget(id: String): Boolean = database.withTransaction {
+        val dao = database.assistant()
+        val previous = dao.memoryById(id) ?: return@withTransaction false
+        if (previous.status != "active") return@withTransaction false
+        val state = memoryState()
+        dao.updateMemory(erasedMemory(previous))
+        dao.updateMemoryState(state.copy(revision = state.revision + 1))
+        true
+    }
+
+    private fun erasedMemory(previous: AssistantMemory) = previous.copy(
+        text = "deleted:${previous.id}", sourceType = "deleted", sourceMessageId = "", sourceQuote = "",
+        status = "deleted", updatedAt = System.currentTimeMillis(), revision = previous.revision + 1,
+        expiresAt = 0, replaces = "",
+    )
+
+    /** Compatibility for explicit callers; model output must use applyMemoryUpdates with a generation. */
+    suspend fun remember(entries: List<String>) {
+        entries.distinct().forEach { addManualMemory(it) }
+    }
+
+    suspend fun applyMemoryUpdates(
+        updates: List<MemoryUpdate>,
+        expectedRevision: Long,
+        sourceMessageId: String,
+        sourceText: String,
+        allowedItems: List<AssistantMemoryReference>,
+    ): Int = database.withTransaction {
+        val state = memoryState()
+        if (!memoryUpdateGenerationMatches(state, expectedRevision) || sourceMessageId.isBlank()) return@withTransaction 0
+        val dao = database.assistant()
+        var changed = 0
+        for (update in updates.take(3)) {
+            if (!validateMemoryUpdate(update, sourceText, allowedItems)) continue
+            val previous = if (update.op == "add") null else dao.memoryById(update.id)
+            if (update.op != "add") {
+                val reference = allowedItems.singleOrNull { it.id == update.id } ?: continue
+                if (previous == null || !memoryTargetMatches(previous, reference) ||
+                    (previous.expiresAt != 0L && previous.expiresAt <= System.currentTimeMillis())) continue
+                if (update.kind != previous.kind || update.scope != previous.scope) continue
+            }
+            if (update.op == "forget") {
+                dao.updateMemory(erasedMemory(checkNotNull(previous)))
+            } else {
+                val value = update.text.trim()
+                val duplicate = dao.memoryByText(value)
+                if (duplicate != null && duplicate.id != previous?.id) continue
+                if (previous == null) {
+                    if (memories().size >= MEMORY_LIMIT) continue
+                    dao.addMemory(AssistantMemory(text = value, scope = update.scope, sourceType = "conversation",
+                        sourceMessageId = sourceMessageId, sourceQuote = update.quote.trim()))
+                } else {
+                    if (previous.text == value && previous.scope == update.scope) continue
+                    dao.updateMemory(previous.copy(text = value, scope = update.scope, sourceType = "conversation",
+                        sourceMessageId = sourceMessageId, sourceQuote = update.quote.trim(), updatedAt = System.currentTimeMillis(),
+                        revision = previous.revision + 1, replaces = "${previous.id}:${previous.revision}"))
+                }
+            }
+            changed++
+        }
+        if (changed > 0) dao.updateMemoryState(state.copy(revision = state.revision + changed))
+        changed
+    }
     suspend fun pendingTasks(): List<Errand> = database.tasks().observe().first().filter { it.status == "pending" }
     suspend fun responseApplied(requestId: String): Boolean =
         database.assistant().hasMessage(responseMessageId(requestId))
@@ -302,7 +509,7 @@ internal class AssistantStore(private val database: TaskDatabase, private val le
             onCreated(created)
             dao.clearPlanningTasks(); dao.clearPlanningDraft()
             dao.clearPlaceChoices(); dao.clearClarification(); dao.clearDraftItems(); dao.clearDraft()
-            dao.addMessage(AssistantMessage(receiptId, "assistant", successText, now, null))
+            dao.addMessage(AssistantMessage(receiptId, "assistant", successText, now, null, draft.conversationId))
             true
         }
     }
@@ -359,8 +566,8 @@ internal class AssistantStore(private val database: TaskDatabase, private val le
             val replacement = if (remaining.isEmpty()) null else draft.proposal()
                 .put("_draft_id", UUID.randomUUID().toString())
                 .put("tasks", JSONArray(remaining.map(AssistantDraftItem::json)))
-            setDraft(replacement)
-            dao.addMessage(AssistantMessage(receiptId, "assistant", successText, now, null))
+            setDraft(replacement, conversationId = draft.conversationId)
+            dao.addMessage(AssistantMessage(receiptId, "assistant", successText, now, null, draft.conversationId))
             true
         }
     }
@@ -384,7 +591,7 @@ internal class AssistantStore(private val database: TaskDatabase, private val le
         }
         val changed = AssistantDraftItem.fromTask(item.id, item.planId, item.position, item.version + 1, task)
         setDraft(draft.proposal().put("_draft_id", UUID.randomUUID().toString())
-            .put("tasks", JSONArray(items.map { if (it.id == itemId) changed.json() else it.json() })))
+            .put("tasks", JSONArray(items.map { if (it.id == itemId) changed.json() else it.json() })), conversationId = draft.conversationId)
         true
     }
 
@@ -401,19 +608,24 @@ internal class AssistantStore(private val database: TaskDatabase, private val le
         replaceDraft: Boolean,
         expectedTripContext: String? = null,
         expectedContextSnapshot: ContextSnapshot? = null,
+        expectedConversationId: String? = null,
     ): Boolean {
         val responseId = responseMessageId(requestId)
         return database.withTransaction {
             val dao = database.assistant()
             // Check the receipt first: replaying an old response must never clear a newer draft.
             if (dao.hasMessage(responseId)) return@withTransaction false
+            val conversation = ensureConversation()
+            if (expectedConversationId != null && conversation != expectedConversationId) return@withTransaction false
             if (dao.draft()?.draftId != expectedDraftId) return@withTransaction false
             if (expectedTripContext != null && assistantTripContext(database.trips().load()) != expectedTripContext)
                 return@withTransaction false
             expectedContextSnapshot?.requireCurrent(database.tasks().all(), database.trips().load(), System.currentTimeMillis())
-            dao.addMessages(listOf(AssistantMessage.from(userLine)))
-            dao.addMessage(AssistantMessage.from(replyLine.copy(id = responseId, role = "assistant")))
-            if (replaceDraft) setDraft(replacement)
+            // The request's captured identity, never its date, owns both messages and draft.
+            dao.addMessages(listOf(AssistantMessage.from(userLine).copy(conversationId = conversation)))
+            dao.addMessage(AssistantMessage.from(replyLine.copy(id = responseId, role = "assistant"))
+                .copy(conversationId = conversation))
+            if (replaceDraft) setDraft(replacement, conversationId = conversation)
             true
         }
     }
@@ -469,8 +681,8 @@ internal class AssistantStore(private val database: TaskDatabase, private val le
         true
     }
 
-    suspend fun setDraft(value: JSONObject?) {
-        val draft = value?.let(AssistantDraft::from)
+    suspend fun setDraft(value: JSONObject?, savedAt: Long = System.currentTimeMillis(), conversationId: String? = null) {
+        val draft = value?.let { AssistantDraft.from(it, savedAt)?.copy(conversationId = conversationId ?: ensureConversation()) }
         if (value != null && draft == null) error("无效的待确认方案")
         val items = if (draft?.action == "create_tasks") {
             val array = value!!.getJSONArray("tasks")

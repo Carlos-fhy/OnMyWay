@@ -1,51 +1,37 @@
 package com.onmyway.app.feature.settings
 
 import android.content.SharedPreferences
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import com.onmyway.app.R
+import com.onmyway.app.BuildConfig
 import com.onmyway.app.core.format.displayTimestamp
-import com.onmyway.app.core.format.formatDuration
 import com.onmyway.app.core.location.FamiliarPlacesSettings
-import com.onmyway.app.core.model.Place
 import com.onmyway.app.core.state.AppViewModel
 import com.onmyway.app.core.ui.AppCard
 import com.onmyway.app.core.ui.AppConfirmDialog
 import com.onmyway.app.core.ui.AppPrimaryButton
-import com.onmyway.app.core.ui.AppScreenHeader
-import com.onmyway.app.core.ui.AppStatusPill
 import com.onmyway.app.core.ui.SectionLabel
 import com.onmyway.app.core.ui.appTextFieldColors
-import com.onmyway.app.data.local.entity.RouteHistory
-import com.onmyway.app.data.local.entity.SuggestionFeedback
 import com.onmyway.app.data.event.HarnessStatus
 import com.onmyway.app.data.event.HarnessStatusRepository
-import com.onmyway.app.data.sync.BackupCredential
+import com.onmyway.app.data.remote.Api
 import com.onmyway.app.data.sync.BackupCredentials
 import com.onmyway.app.data.sync.PcBackupSync
+import com.onmyway.app.feature.assistant.AssistantViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
-import org.json.JSONObject
 
 @Composable
 private fun SettingsField(
@@ -54,493 +40,227 @@ private fun SettingsField(
     label: String,
     supporting: String? = null,
     keyboardType: KeyboardType = KeyboardType.Text,
+    enabled: Boolean = true,
 ) {
-    OutlinedTextField(
-        value,
-        onValueChange,
-        label = { Text(label) },
+    OutlinedTextField(value, onValueChange, label = { Text(label) },
         supportingText = supporting?.let { { Text(it) } },
-        keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
-        singleLine = true,
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        colors = appTextFieldColors(),
-    )
-}
-
-/** 设置摘要行：默认只显示当前值，点击后再展开对应配置。 */
-@Composable
-private fun SettingsSummaryRow(
-    title: String,
-    value: String,
-    expanded: Boolean,
-    onClick: () -> Unit,
-) {
-    Row(
-        Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
-            .heightIn(min = 56.dp)
-            .padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(title, style = MaterialTheme.typography.titleSmall)
-            Text(value, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Text(
-            if (expanded) "收起" else "修改",
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
-        )
-    }
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType), singleLine = true,
+        modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp),
+        colors = appTextFieldColors(), enabled = enabled)
 }
 
 @Composable
-private fun RecordDialog(
-    title: String,
-    onClose: () -> Unit,
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(
-            Modifier.fillMaxWidth(0.92f),
-            shape = MaterialTheme.shapes.extraLarge,
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        ) {
-            Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 8.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(title, Modifier.weight(1f), style = MaterialTheme.typography.headlineSmall)
-                    IconButton(
-                        onClose,
-                        Modifier.size(36.dp).background(MaterialTheme.colorScheme.surfaceContainerHigh, CircleShape),
-                    ) {
-                        Icon(painterResource(R.drawable.ic_close), "关闭", Modifier.size(18.dp))
-                    }
-                }
-                Spacer(Modifier.height(12.dp))
-                Column(
-                    Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    content = content,
-                )
-                TextButton(onClose, Modifier.align(Alignment.End)) { Text("关闭") }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun SettingsScreen(vm: AppViewModel, repeatRoute: (RouteHistory) -> Unit) {
-    var server by rememberSaveable { mutableStateOf(vm.server) }
-    var city by rememberSaveable { mutableStateOf(vm.city) }
-    var preferredDetour by rememberSaveable { mutableStateOf(vm.preferredDetourMinutes.toString()) }
-    var walkingDetour by rememberSaveable { mutableStateOf(vm.modeDetourOverride("walking")?.toString().orEmpty()) }
-    var cyclingDetour by rememberSaveable { mutableStateOf(vm.modeDetourOverride("cycling")?.toString().orEmpty()) }
-    var confirmClearLearning by remember { mutableStateOf(false) }
-    var budgetExpanded by rememberSaveable { mutableStateOf(false) }
-    var connectionExpanded by rememberSaveable { mutableStateOf(false) }
-    var helpOpen by remember { mutableStateOf(false) }
+internal fun SettingsScreen(vm: AppViewModel, chat: AssistantViewModel) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var server by rememberSaveable(vm.server) { mutableStateOf(vm.server) }
+    var city by rememberSaveable(vm.city) { mutableStateOf(vm.city) }
+    // Credentials never enter saved-state bundles. They are cleared after use or address changes.
     var backupToken by remember { mutableStateOf("") }
     var backupBusy by remember { mutableStateOf(false) }
-    val context = LocalContext.current
-    var backupConfigured by remember { mutableStateOf(BackupCredentials.load(context) != null) }
+    var confirmDisconnect by remember { mutableStateOf(false) }
     val backupPrefs = remember(context) { context.getSharedPreferences("pc_backup", 0) }
-    var lastBackupAt by remember { mutableLongStateOf(backupPrefs.getLong("last_success_at", 0)) }
-    var lastBackupError by remember { mutableStateOf(backupPrefs.getString("last_error", "").orEmpty()) }
-    var syncState by remember { mutableStateOf(backupPrefs.getString("sync_state", "pending")) }
-    var taskProtocol by remember { mutableIntStateOf(backupPrefs.getInt("task_protocol", -1)) }
-    var needsReload by remember { mutableStateOf(backupPrefs.getBoolean("needs_reload", false)) }
+    var backupRevision by remember { mutableIntStateOf(0) }
     DisposableEffect(backupPrefs) {
-        val listener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
-            if (key == "last_success_at") lastBackupAt = prefs.getLong(key, 0)
-            if (key == "last_error") lastBackupError = prefs.getString(key, "").orEmpty()
-            if (key == "sync_state") syncState = prefs.getString(key, "pending")
-            if (key == "task_protocol") taskProtocol = prefs.getInt(key, -1)
-            if (key == "needs_reload") needsReload = prefs.getBoolean(key, false)
-        }
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> backupRevision++ }
         backupPrefs.registerOnSharedPreferenceChangeListener(listener)
         onDispose { backupPrefs.unregisterOnSharedPreferenceChangeListener(listener) }
     }
-    var history by remember { mutableStateOf<List<RouteHistory>?>(null) }
-    var feedback by remember { mutableStateOf<List<SuggestionFeedback>?>(null) }
-    val scope = rememberCoroutineScope()
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).imePadding(),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        AppScreenHeader(
-            "设置",
-            kicker = "ON MY WAY",
-            subtitle = "连接电脑数据服务后，记录自动同步；手机保留离线数据。",
-        )
-        Column(
-            Modifier.padding(start = 20.dp, end = 20.dp, bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            SectionLabel("习惯与预算")
-            Column {
-                SettingsSummaryRow(
-                    "顺路预算",
-                    listOfNotNull(
-                        "${preferredDetour.ifBlank { "未设置" }} 分钟",
-                        if (walkingDetour.isNotBlank()) "步行 $walkingDetour 分钟" else "步行跟随历史",
-                        if (cyclingDetour.isNotBlank()) "骑行 $cyclingDetour 分钟" else "骑行跟随历史",
-                    ).joinToString(" · "),
-                    budgetExpanded,
-                ) { budgetExpanded = !budgetExpanded }
-                if (budgetExpanded) {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        SettingsField(
-                            preferredDetour,
-                            { preferredDetour = it.filter(Char::isDigit).take(3) },
-                            "默认顺路预算（分钟）",
-                            "没有足够历史选择时使用此预算；0 表示不额外绕路。",
-                            KeyboardType.Number,
-                        )
-                        SettingsField(
-                            walkingDetour,
-                            { walkingDetour = it.filter(Char::isDigit).take(3) },
-                            "步行顺路预算（可留空）",
-                            "填写后优先采用你的设定；留空时参考步行历史选择。",
-                            KeyboardType.Number,
-                        )
-                        SettingsField(
-                            cyclingDetour,
-                            { cyclingDetour = it.filter(Char::isDigit).take(3) },
-                            "骑行顺路预算（可留空）",
-                            "填写后优先采用你的设定；留空时参考骑行历史选择。",
-                            KeyboardType.Number,
-                        )
-                        // 保存动作跟随预算区域，避免被误认为同时保存连接设置。
-                        AppPrimaryButton(
-                            "保存预算设置",
-                            onClick = {
-                                val minutes = preferredDetour.toIntOrNull()
-                                val walk = walkingDetour.toIntOrNull()
-                                val cycle = cyclingDetour.toIntOrNull()
-                                if (minutes == null || minutes !in 0..240 ||
-                                    walkingDetour.isNotBlank() && (walk == null || walk !in 0..240) ||
-                                    cyclingDetour.isNotBlank() && (cycle == null || cycle !in 0..240)
-                                ) vm.message = "顺路预算请输入 0–240 分钟，步行和骑行预算也可留空"
-                                else {
-                                    vm.savePreferredDetourMinutes(minutes)
-                                    vm.saveModeDetourOverride("walking", walk)
-                                    vm.saveModeDetourOverride("cycling", cycle)
-                                    vm.message = "预算设置已保存"
-                                }
-                            },
-                            enabled = !vm.busy,
-                        )
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text("根据建议选择调整预算", style = MaterialTheme.typography.titleSmall)
-                                Text(
-                                    "学习记录包含出行方式、时间段、事项数量与额外耗时，开启同步后会保存在电脑。建议仍需你确认。",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            Spacer(Modifier.width(10.dp))
-                            Switch(checked = vm.learningEnabled, onCheckedChange = vm::updateLearningEnabled)
-                        }
-                        TextButton({ confirmClearLearning = true }, contentPadding = PaddingValues(0.dp)) {
-                            Text("清空建议学习记录")
-                        }
-                    }
-                }
-            }
-
-            SectionLabel("常用地点")
-            AppCard(contentPadding = PaddingValues(16.dp)) {
-                FamiliarPlacesSettings(vm)
-            }
-
-            SectionLabel("连接")
-            Column {
-                SettingsSummaryRow(
-                    "规划服务",
-                    "${server.ifBlank { "未设置" }} · ${city.ifBlank { "未设置城市" }}",
-                    connectionExpanded,
-                ) { connectionExpanded = !connectionExpanded }
-                if (connectionExpanded) {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        SettingsField(server, { server = it }, "规划服务地址")
-                        SettingsField(city, { city = it }, "常用搜索城市")
-                        // 保存连接设置只作用于本区域，预算在「习惯与预算」中单独保存。
-                        AppPrimaryButton(
-                            "保存连接设置",
-                            onClick = { vm.settings(server, city) },
-                            enabled = !vm.busy,
-                        )
-                        OutlinedButton(
-                            vm::health,
-                            enabled = !vm.checking && server.trim().trimEnd('/') == vm.server,
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                            shape = RoundedCornerShape(16.dp),
-                        ) { Text(if (vm.checking) "检查中…" else "检查已保存地址的连接") }
-                    }
-                }
-            }
-            HarnessStatusPanel(vm.server, backupConfigured)
-
-            SectionLabel("电脑数据同步")
-            AppCard(contentPadding = PaddingValues(16.dp)) {
+    val configured = remember(vm.server, backupRevision) {
+        BackupCredentials.load(context)?.server == vm.server
+    }
+    val syncState = remember(backupRevision) { backupPrefs.getString("sync_state", "pending").orEmpty() }
+    val lastBackupAt = remember(backupRevision) { backupPrefs.getLong("last_success_at", 0) }
+    val lastBackupError = remember(backupRevision) { backupPrefs.getString("last_error", "").orEmpty() }
+    val taskProtocol = remember(backupRevision) { backupPrefs.getInt("task_protocol", -1) }
+    val needsReload = remember(backupRevision) { backupPrefs.getBoolean("needs_reload", false) }
+    LaunchedEffect(vm.server) { backupToken = "" }
+    val savedAddress = runCatching { Api.validateBase(server) }.getOrNull() == vm.server
+    // The management page refreshes its server-scoped snapshot on entry; a home
+    // summary must not attach an older server's record count to a new address.
+    val memorySummary = if (configured) "查看和管理偏好、临时情境与经历" else "连接个人服务后管理偏好与经历"
+    val syncSummary = when {
+        !configured -> "尚未连接个人数据服务"
+        syncState == "synced" -> "业务数据已同步"
+        syncState == "syncing" -> "业务数据正在同步"
+        syncState == "conflict" -> "同步有冲突，需要检查"
+        else -> "业务数据等待同步"
+    }
+    SettingsNavigation(memorySummary,
+        "顺路预算 ${vm.preferredDetourMinutes} 分钟 · ${vm.familiarPlaces.size} 个常用地点",
+        syncSummary) { page ->
+        when (page) {
+            SettingsPage.MEMORY -> AssistantMemorySettings(chat, vm.server)
+            SettingsPage.TRAVEL -> TravelSettings(vm)
+            SettingsPage.CONNECTION -> {
+                Text("规划、个人记忆与业务同步使用同一个个人服务。", style = MaterialTheme.typography.bodyMedium)
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedTextField(
-                        backupToken,
-                        { backupToken = it },
-                        label = { Text("数据服务口令") },
-                        visualTransformation = PasswordVisualTransformation(),
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = appTextFieldColors(),
-                    )
-                    AppPrimaryButton(
-                        if (backupBusy) "同步中…" else "连接电脑并同步",
-                        onClick = {
+                    SettingsField(server, {
+                        if (server != it) backupToken = ""
+                        server = it
+                    }, "个人服务地址", enabled = !backupBusy)
+                    SettingsField(city, { city = it }, "常用搜索城市", enabled = !backupBusy)
+                    AppPrimaryButton("保存连接设置", onClick = {
+                        if (chat.memoryBusy) vm.message = "记忆更新尚未完成，请稍后修改连接。"
+                        else vm.settings(server, city)
+                    }, enabled = !backupBusy && !vm.busy && !chat.memoryBusy)
+                    if (chat.memoryBusy) Text("记忆更新尚未完成，连接设置暂时不可更改。",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (!savedAddress) Text("地址尚未保存。保存后才能检查连接或使用口令。",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedButton(vm::health, enabled = !backupBusy && !vm.checking && savedAddress,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                        Text(if (vm.checking) "检查中…" else "检查服务连接")
+                    }
+                }
+                SectionLabel("业务数据同步")
+                Text("待办、行程、对话和出行设置会同步到电脑；离线修改先留在手机。",
+                    style = MaterialTheme.typography.bodyMedium)
+                OutlinedTextField(backupToken, { backupToken = it }, label = { Text("数据服务口令") },
+                    supportingText = { Text(if (backupToken.isNotEmpty() && backupToken.length < 32) "口令至少需要 32 个字符。"
+                        else if (configured) "已保存口令；留空继续使用，更换时重新填写。" else "使用个人服务提供的口令。") },
+                    visualTransformation = PasswordVisualTransformation(), singleLine = true,
+                    enabled = !backupBusy && savedAddress, modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp), colors = appTextFieldColors())
+                AppPrimaryButton(if (backupBusy) "同步中…" else if (configured) "立即同步" else "连接并同步",
+                    onClick = {
+                        // Capture and validate the destination before retaining or using a credential.
+                        val destination = vm.server
+                        if (chat.memoryBusy) {
+                            vm.message = "记忆更新尚未完成，请稍后修改连接。"
+                        } else if (runCatching { Api.validateBase(server) }.getOrNull() != destination) {
+                            vm.message = "请先保存当前服务地址。"
+                        } else {
+                            val enteredToken = backupToken
+                            backupBusy = true
                             scope.launch {
-                                backupBusy = true
                                 try {
-                                    val token = backupToken.takeIf { it.length >= 32 }
-                                        ?: BackupCredentials.load(context)?.takeIf { it.server == vm.server }?.token
-                                        ?: error("请输入数据服务口令")
-                                    PcBackupSync.enable(context, vm.server, token)
-                                    backupConfigured = true
-                                    val restored = PcBackupSync.synchronizeNow(context, BackupCredential(vm.server, token))
-                                    vm.message = if (restored) "电脑记录已恢复。请重新打开 App 加载恢复的对话和设置。"
-                                    else if (backupPrefs.getString("sync_state", "pending") != "synced") "本次同步完成，新增修改正在排队保存。"
-                                    else "记录已同步到电脑；后续修改自动同步。"
-                                } catch (cancelled: CancellationException) {
-                                    throw cancelled
-                                } catch (e: Exception) {
-                                    backupPrefs.edit().putString("last_error", e.message ?: "同步失败").apply()
-                                    vm.message = "同步尚未完成：" + (e.message ?: "请检查电脑连接与口令")
-                                } finally {
-                                    backupBusy = false
-                                }
+                                    check(!chat.memoryBusy && vm.server == destination) { "连接或记忆状态已变化，请稍后重试。" }
+                                    val credential = resolveSettingsCredential(server, destination, enteredToken, BackupCredentials.load(context))
+                                    PcBackupSync.enable(context, credential.server, credential.token)
+                                    backupToken = ""
+                                    val restored = PcBackupSync.synchronizeNow(context, credential)
+                                    vm.message = if (restored) "电脑记录已恢复，请重新打开 App 加载。"
+                                        else if (backupPrefs.getString("sync_state", "pending") != "synced") "本次同步完成，新增修改正在排队保存。"
+                                        else "业务数据已同步，后续修改将自动同步。"
+                                    chat.refreshPersonalMemory(destination)
+                                } catch (cancelled: CancellationException) { throw cancelled }
+                                catch (e: Exception) {
+                                    if (vm.server == destination) backupPrefs.edit().putString("last_error", e.message ?: "同步失败").apply()
+                                    vm.message = "同步尚未完成：" + (e.message ?: "请检查连接与口令")
+                                } finally { backupBusy = false }
                             }
-                        },
-                        enabled = !backupBusy && (backupToken.length >= 32 || backupConfigured) && server.trim().trimEnd('/') == vm.server,
-                    )
-                    if (backupConfigured) {
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            AppStatusPill(
-                                when (syncState) {
-                                    "synced" -> "已同步"
-                                    "syncing" -> "同步中"
-                                    "conflict" -> "有冲突"
-                                    else -> "等待同步"
-                                },
-                                container = when (syncState) {
-                                    "synced" -> MaterialTheme.colorScheme.primaryContainer
-                                    "conflict" -> MaterialTheme.colorScheme.errorContainer
-                                    else -> MaterialTheme.colorScheme.secondaryContainer
-                                },
-                                content = when (syncState) {
-                                    "synced" -> MaterialTheme.colorScheme.onPrimaryContainer
-                                    "conflict" -> MaterialTheme.colorScheme.onErrorContainer
-                                    else -> MaterialTheme.colorScheme.onSecondaryContainer
-                                },
-                            )
-                            Text(
-                                if (lastBackupAt > 0) "最近成功同步：${displayTimestamp(lastBackupAt)}" else "已连接数据服务，尚未完成同步",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
                         }
-                        Text(
-                            when (taskProtocol) {
-                                1 -> "待办由电脑保存，手机支持离线使用。"
-                                0 -> "当前连接旧版数据服务，请升级电脑后端以启用待办版本校验。"
-                                else -> "首次同步完成后确认待办保存状态。"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(
-                            when (syncState) {
-                                "synced" -> "已同步到电脑"
-                                "syncing" -> "正在同步"
-                                "conflict" -> "存在版本冲突，双方记录均已保留"
-                                else -> "本地修改等待同步"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        if (lastBackupError.isNotBlank()) Text(
-                            "最近同步失败：$lastBackupError",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                        TextButton(
-                            {
-                                PcBackupSync.disable(context)
-                                backupConfigured = false
-                                vm.message = "自动同步已暂停；电脑记录仍保留。"
-                            },
-                            contentPadding = PaddingValues(0.dp),
-                        ) { Text("暂停自动同步") }
-                    }
-                    if (needsReload) Text(
-                        "已从电脑恢复记录，请关闭并重新打开 App，以加载恢复的对话与设置。",
-                        color = MaterialTheme.colorScheme.primary,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
+                    }, enabled = !backupBusy && !chat.memoryBusy && savedAddress && (backupToken.length >= 32 || backupToken.isEmpty() && configured))
+                if (configured) {
+                    Text(syncSummary, style = MaterialTheme.typography.titleSmall,
+                        color = if (syncState == "conflict") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
+                    if (lastBackupAt > 0) Text("最近成功：${displayTimestamp(lastBackupAt)}", style = MaterialTheme.typography.bodySmall)
+                    if (taskProtocol == 0) Text("当前服务版本较旧，请升级电脑后端以启用待办版本校验。",
+                        color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    if (syncState == "conflict") Text("双方记录均已保留，请核对后再继续。", style = MaterialTheme.typography.bodySmall)
+                    if (lastBackupError.isNotBlank()) Text("最近同步失败：$lastBackupError",
+                        color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    TextButton({ confirmDisconnect = true }, enabled = !backupBusy && !chat.memoryBusy) { Text("断开数据服务") }
                 }
+                if (needsReload) Text("已恢复电脑记录，请关闭并重新打开 App，以加载恢复的对话与设置。",
+                    color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyMedium)
+                HorizontalDivider()
+                Text("个人记忆单独保存", style = MaterialTheme.typography.titleSmall)
+                Text("个人记忆直接保存在服务端，手机保留查看副本。上面的同步成功不代表记忆已有备份；记忆的完整备份与恢复尚未提供。",
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            SettingsPage.HELP -> SettingsHelp(vm.server, configured)
+            SettingsPage.HOME -> Unit
+        }
+    }
+    if (confirmDisconnect) AppConfirmDialog(title = "断开数据服务？",
+        message = "自动同步和个人记忆连接都会停止，电脑上的记录保留。重新连接后可以继续使用。",
+        confirmLabel = "断开", onConfirm = {
+            confirmDisconnect = false
+            if (backupBusy || chat.memoryBusy) vm.message = "数据更新尚未完成，请稍后断开。"
+            else {
+                PcBackupSync.disable(context)
+                backupToken = ""
+                chat.refreshPersonalMemory(vm.server)
+                vm.message = "已断开数据服务，电脑记录仍保留。"
+            }
+        }, onDismiss = { confirmDisconnect = false })
+}
 
-            SectionLabel("记录")
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(
-                    {
-                        scope.launch {
-                            try { history = vm.routeHistory() } catch (_: Exception) { vm.message = "行程记录读取失败" }
-                        }
-                    },
-                    modifier = Modifier.weight(1f),
-                ) { Text("行程记录") }
-                TextButton(
-                    {
-                        scope.launch {
-                            try { feedback = vm.suggestionDecisions() } catch (_: Exception) { vm.message = "建议反馈读取失败" }
-                        }
-                    },
-                    modifier = Modifier.weight(1f),
-                ) { Text("顺路建议反馈") }
-            }
-            // 连接教程、同步机制和隐私说明统一收进帮助入口，主页面只保留设置与状态。
-            TextButton({ helpOpen = true }, contentPadding = PaddingValues(0.dp)) {
-                Text("连接、同步与隐私说明")
-            }
-            Text(
-                "OnMyWay 0.1 · 步行 / 骑行",
-                Modifier.fillMaxWidth().padding(top = 4.dp),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+@Composable
+private fun TravelSettings(vm: AppViewModel) {
+    var preferred by rememberSaveable(vm.preferredDetourMinutes) { mutableStateOf(vm.preferredDetourMinutes.toString()) }
+    var walking by rememberSaveable(vm.modeDetourOverride("walking")) { mutableStateOf(vm.modeDetourOverride("walking")?.toString().orEmpty()) }
+    var cycling by rememberSaveable(vm.modeDetourOverride("cycling")) { mutableStateOf(vm.modeDetourOverride("cycling")?.toString().orEmpty()) }
+    var confirmClear by rememberSaveable { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    SectionLabel("顺路预算")
+    Text("设置愿意为顺路办事多花的时间；0 表示不额外绕路。", style = MaterialTheme.typography.bodyMedium)
+    SettingsField(preferred, { preferred = it.filter(Char::isDigit).take(3) }, "默认预算（分钟）",
+        "没有足够历史选择时使用。", KeyboardType.Number)
+    SettingsField(walking, { walking = it.filter(Char::isDigit).take(3) }, "步行预算（可留空）",
+        "填写后优先使用；留空时跟随自动调整或默认预算。", KeyboardType.Number)
+    SettingsField(cycling, { cycling = it.filter(Char::isDigit).take(3) }, "骑行预算（可留空）",
+        "填写后优先使用；留空时跟随自动调整或默认预算。", KeyboardType.Number)
+    AppPrimaryButton("保存预算", onClick = {
+        val minutes = preferred.toIntOrNull()
+        val walk = walking.toIntOrNull()
+        val cycle = cycling.toIntOrNull()
+        if (minutes == null || minutes !in 0..240 || walking.isNotBlank() && (walk == null || walk !in 0..240) ||
+            cycling.isNotBlank() && (cycle == null || cycle !in 0..240)) vm.message = "预算请输入 0–240 分钟，步行和骑行预算也可留空。"
+        else {
+            vm.savePreferredDetourMinutes(minutes)
+            vm.saveModeDetourOverride("walking", walk)
+            vm.saveModeDetourOverride("cycling", cycle)
+            vm.message = "预算已保存。"
         }
-    }
-    if (helpOpen) {
-        RecordDialog("连接、同步与隐私", { helpOpen = false }) {
-            Text("连接你的电脑", style = MaterialTheme.typography.titleSmall)
-            Text(
-                "USB 调试转发后使用 http://127.0.0.1:8000。Android 模拟器访问电脑可用 http://10.0.2.2:8000。具体启动步骤见项目 README。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
-            Text("电脑数据同步", style = MaterialTheme.typography.titleSmall)
-            Text(
-                "使用同一个数据服务口令连接。新安装会先读取电脑记录；离线修改留在手机，联网后提交。电脑确认保存后才显示同步成功，两端发生冲突时保留双方记录。重装后使用原来的服务地址与口令连接即可恢复。手机尚未同步的修改，卸载后无法从电脑找回。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
-            Text("关于地点与隐私", style = MaterialTheme.typography.titleSmall)
-            Text(
-                "点击「使用当前位置」后才获取手机位置，并通过本地服务交给高德转换坐标与识别地址。室内暂时没有新定位时，会明确提示并使用最近一次的缓存位置，请核对起点。退出导航会结束本次行程，方案留在行程记录；再次出发会重新定位规划。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+    }, enabled = !vm.busy)
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("自动调整顺路预算", style = MaterialTheme.typography.titleSmall)
+            Text("参考你接受、调整或拒绝建议的选择；手动预算优先。这项设置不控制个人记忆。",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        Switch(checked = vm.learningEnabled, onCheckedChange = vm::updateLearningEnabled,
+            modifier = Modifier.semantics { contentDescription = "自动调整顺路预算" })
     }
-    if (confirmClearLearning) {
-        AppConfirmDialog(
-            title = "清空建议学习记录？",
-            message = "这会删除本机的建议选择与事件记录，不删除待办和行程。",
-            confirmLabel = "清空",
-            onConfirm = {
-                confirmClearLearning = false
-                scope.launch {
-                    try { vm.clearLearningHistory(); feedback = emptyList() }
-                    catch (_: Exception) { vm.message = "清空记录失败，请重试" }
-                }
-            },
-            onDismiss = { confirmClearLearning = false },
-        )
-    }
-    feedback?.let { events ->
-        val choices = events.filter { it.decision in setOf("ACCEPTED", "ADJUSTED", "DIRECT", "REJECTED") }
-        val accepted = choices.filter { it.decision in setOf("ACCEPTED", "ADJUSTED") }
-        RecordDialog("顺路建议反馈", { feedback = null }) {
-            Text(
-                if (choices.isEmpty()) "还没有已完成的建议选择。"
-                else "最近 ${choices.size} 次明确选择中，接受 ${accepted.size} 次（${accepted.size * 100 / choices.size}%）。",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            if (accepted.isNotEmpty()) Text(
-                "接受方案平均多花约 ${formatDuration(accepted.sumOf { it.selectedExtraSeconds } / accepted.size)}。",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            Text(
-                "建议选择与事件会随数据同步保存到电脑；这些事件本身不包含对话原文、任务名称或地点。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            events.take(15).forEach { entry ->
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
-                val decision = when (entry.decision) {
-                    "ACCEPTED" -> "接受 ${entry.selectedTaskCount} 件事"
-                    "ADJUSTED" -> "调整后选择 ${entry.selectedTaskCount} 件事"
-                    "DIRECT" -> "选择直达"
-                    "REJECTED" -> "取消建议"
-                    else -> "改为手动调整"
-                }
-                Text(
-                    "${displayTimestamp(entry.decidedAt)} · ${if (entry.mode == "cycling") "骑行" else "步行"} · $decision",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+    TextButton({ confirmClear = true }, contentPadding = PaddingValues(0.dp)) { Text("清空预算学习记录") }
+    HorizontalDivider()
+    SectionLabel("常用地点")
+    FamiliarPlacesSettings(vm)
+    if (confirmClear) AppConfirmDialog(title = "清空预算学习记录？",
+        message = "删除本机用于预算学习的建议选择与事件记录。个人记忆、待办和行程保留。",
+        confirmLabel = "清空", destructive = true, onConfirm = {
+            confirmClear = false
+            scope.launch {
+                try { vm.clearLearningHistory() }
+                catch (_: Exception) { vm.message = "清空记录失败，请重试。" }
             }
-        }
+        }, onDismiss = { confirmClear = false })
+}
+
+@Composable
+private fun SettingsHelp(server: String, connected: Boolean) {
+    var diagnostics by rememberSaveable { mutableStateOf(false) }
+    SectionLabel("连接与恢复")
+    Text("手机通过 USB 调试转发连接电脑时使用 http://127.0.0.1:8000；模拟器使用 http://10.0.2.2:8000。服务启动步骤见项目 README。",
+        style = MaterialTheme.typography.bodyMedium)
+    Text("新安装连接原来的服务地址和口令后，可恢复已同步的业务记录。离线修改先留在手机，电脑确认后才显示同步成功；未同步内容无法在卸载后找回。",
+        style = MaterialTheme.typography.bodyMedium)
+    HorizontalDivider()
+    SectionLabel("记忆与隐私")
+    Text("个人记忆可在记忆页面纠正或忘记。忘记会撤销相关归纳，但不会删除聊天原文；关闭自动保存也不会删除已有记忆。",
+        style = MaterialTheme.typography.bodyMedium)
+    Text("位置用于查找地点和规划路线。使用缓存位置时请核对起点；结束导航后的方案可在助手的路线记录中查看，再次出发会重新规划。",
+        style = MaterialTheme.typography.bodyMedium)
+    HorizontalDivider()
+    OutlinedButton({ diagnostics = !diagnostics }, modifier = Modifier.fillMaxWidth()) {
+        Text(if (diagnostics) "收起运行诊断" else "查看运行诊断")
     }
-    history?.let { events ->
-        RecordDialog("最近行程记录", { history = null }) {
-            if (events.isEmpty()) Text("暂无行程记录")
-            events.distinctBy { it.sessionId }.forEach { event ->
-                val request = runCatching { JSONObject(event.requestJson) }.getOrNull()
-                val destination = request?.optJSONObject("destination")?.let { Place.from(it).name } ?: "行程"
-                val mode = if (request?.optString("mode") == "cycling") "骑行" else "步行"
-                val label = when (event.state) {
-                    "ARRIVED" -> "已到达"
-                    "CANCELLED" -> "已结束导航"
-                    "REPLANNING" -> "已重算"
-                    else -> "已开始导航"
-                }
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("$destination · $mode · $label", style = MaterialTheme.typography.titleSmall)
-                    Text(displayTimestamp(event.timestamp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    val route = runCatching { JSONObject(event.resultJson) }.getOrNull()
-                    val stops = route?.optJSONArray("stops")
-                    if (stops != null && stops.length() > 0) {
-                        Text(
-                            "原方案：" + (0 until stops.length()).joinToString(" → ") {
-                                stops.getJSONObject(it).getJSONObject("place").getString("name")
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    if (event.state in listOf("CANCELLED", "ARRIVED")) {
-                        TextButton(
-                            onClick = { history = null; repeatRoute(event) },
-                            enabled = vm.result == null && !vm.restoringTrip && !vm.busy && !vm.updatingTrip,
-                            contentPadding = PaddingValues(0.dp),
-                        ) { Text("重新规划到这里") }
-                    }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
-                }
-            }
-        }
-    }
+    if (diagnostics) HarnessStatusPanel(server, connected)
+    Text("OnMyWay ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
 @Composable
@@ -581,6 +301,23 @@ private fun HarnessStatusPanel(server: String, connected: Boolean) {
                         MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                 if (queue.terminalConfirmations > 0) Text("存在被拒绝的确认，请重新规划或确认；重复刷新不会重试冲突记录。",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                result.localExecutions.forEach { run ->
+                    val action = when (run.capabilityId) {
+                        "read_tasks" -> "读取任务"
+                        "plan_route" -> "规划路线"
+                        else -> "导航"
+                    }
+                    val state = when (run.state) {
+                        "waiting_confirmation" -> "等待明确开始"
+                        "running" -> "执行中"
+                        "completed" -> if (run.capabilityId == "start_navigation") "已记录到达" else "已完成"
+                        "failed" -> if (run.step in setOf("manual_end", "user_cancelled")) "已手动结束" else "失败"
+                        else -> "结果未知，需核对"
+                    }
+                    Text("本机 $action：$state", style = MaterialTheme.typography.bodySmall)
+                    if (run.state == "unknown") Text("不会自动重复执行。请核对导航实际状态；再次出发需重新规划并确认。",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 result.remote?.let { remote ->
                     Text(if (remote.recordedCount > 0) "服务端已记录 ${remote.recordedCount} 条确认" else "服务端尚未记录本次确认",
                         style = MaterialTheme.typography.bodySmall)

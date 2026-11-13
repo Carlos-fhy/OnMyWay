@@ -1,0 +1,397 @@
+{
+  "snapshot": {
+    "agent_task_id": "a4358e89-b517-48d4-a7d2-718e16d2254f",
+    "revision": 1,
+    "goal": "取快递 + 打印论文 + 回宿舍。按给定公开测试地点步行，先读取正式待办与版本，调用本地路线规划工具得到真实地图路线，再发布route成果；保持待办不变，不启动导航。",
+    "constraints": {
+      "city": "成都",
+      "delivery_contract": {
+        "content_schema": {
+          "properties": {
+            "arrival": {
+              "minLength": 10,
+              "type": "string"
+            },
+            "departure": {
+              "minLength": 10,
+              "type": "string"
+            },
+            "legs": {
+              "items": {
+                "required": [
+                  "meters",
+                  "seconds"
+                ],
+                "type": "object"
+              },
+              "maxItems": 3,
+              "minItems": 3,
+              "type": "array"
+            },
+            "navigation_started": {
+              "const": false
+            },
+            "stops": {
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "plan_id",
+            "origin",
+            "destination",
+            "mode",
+            "departure",
+            "arrival",
+            "stops",
+            "legs",
+            "total_meters",
+            "travel_seconds",
+            "service_seconds",
+            "total_seconds",
+            "coordinate_system",
+            "warnings",
+            "navigation_started"
+          ],
+          "type": "object"
+        },
+        "kind": "route",
+        "max_artifacts": 1
+      },
+      "departure": "2026-11-11T00:32:17.763831+08:00",
+      "destination": {
+        "address": "大慈寺路21-23号(春熙路地铁站C口步行360米)",
+        "id": "B001C00869",
+        "latitude": 30.654243,
+        "longitude": 104.083791,
+        "name": "宿舍（合成角色：大慈寺公开地点）"
+      },
+      "max_extra_minutes": 120,
+      "mode": "walking",
+      "origin": {
+        "address": "2号线;3号线",
+        "id": "BV10069531",
+        "latitude": 30.653389,
+        "longitude": 104.080019,
+        "name": "春熙路(地铁站)"
+      },
+      "selected_task_ids": [
+        "parcel",
+        "print"
+      ],
+      "synthetic_roles": "快递/打印/宿舍均为公开地点对应的测试角色，无真实取件码或住宅"
+    },
+    "success_criteria": [
+      "路线来源为生产规划工具",
+      "快递和打印都保留，最终到宿舍",
+      "未开始导航"
+    ],
+    "artifacts": [
+      {
+        "artifact_id": "0e74b3f4-3ee8-4c41-921f-5a3dbdabf5de",
+        "version": 1,
+        "agent_run_id": "0dcf3374-beba-450a-a304-dfd464e0dfc8",
+        "kind": "route",
+        "content": {
+          "content": {
+            "arrival": "2026-11-10T17:01:37.000966Z",
+            "coordinate_system": "GCJ-02",
+            "departure": "2026-11-10T16:32:26.000966Z",
+            "destination": {
+              "address": "大慈寺路21-23号(春熙路地铁站C口步行360米)",
+              "id": "B001C00869",
+              "latitude": 30.654243,
+              "longitude": 104.083791,
+              "name": "宿舍（合成角色：大慈寺公开地点）"
+            },
+            "legs": [
+              {
+                "meters": 566,
+                "seconds": 453
+              },
+              {
+                "meters": 428,
+                "seconds": 342
+              },
+              {
+                "meters": 445,
+                "seconds": 356
+              }
+            ],
+            "mode": "walking",
+            "navigation_started": false,
+            "origin": {
+              "address": "2号线;3号线",
+              "id": "BV10069531",
+              "latitude": 30.653389,
+              "longitude": 104.080019,
+              "name": "春熙路(地铁站)"
+            },
+            "plan_id": "3a393cc5-5dba-48b5-a55c-471b173ce2ae",
+            "service_seconds": 600,
+            "stops": [
+              {
+                "arrival": "2026-11-10T16:39:59.000966Z",
+                "departure": "2026-11-10T16:44:59.000966Z",
+                "place": {
+                  "address": "红星路三段1号(春熙路地铁站出入口旁)",
+                  "id": "B0L2RCN7OZ",
+                  "latitude": 30.654764,
+                  "longitude": 104.081503,
+                  "name": "成都国际金融中心"
+                },
+                "service_seconds": 300,
+                "task_ids": [
+                  "parcel"
+                ],
+                "task_titles": [
+                  "取快递"
+                ]
+              },
+              {
+                "arrival": "2026-11-10T16:50:41.000966Z",
+                "departure": "2026-11-10T16:55:41.000966Z",
+                "place": {
+                  "address": "中纱帽街8号",
+                  "id": "B0FFF6X49V",
+                  "latitude": 30.653358,
+                  "longitude": 104.083809,
+                  "name": "成都太古里"
+                },
+                "service_seconds": 300,
+                "task_ids": [
+                  "print"
+                ],
+                "task_titles": [
+                  "打印论文"
+                ]
+              }
+            ],
+            "total_meters": 1439,
+            "total_seconds": 1751,
+            "travel_seconds": 1151,
+            "warnings": [
+              "办事时长为估算，未包含未知排队时间；营业时间尚未校验。",
+              "仅在已搜索到的候选地点中规划，不保证全城最优。"
+            ]
+          },
+          "title": "步行路线：春熙路→取快递→打印论文→宿舍"
+        },
+        "sources": [
+          {
+            "observed_at": "2026-11-10T16:32:23.033779+00:00",
+            "source_links": {
+              "omitted": 0,
+              "urls": []
+            },
+            "tool_call_id": "3a393cc5-5dba-48b5-a55c-471b173ce2ae",
+            "tool_id": "onmyway.plan_route",
+            "tool_version": "b7d807ff65063470520f304424189318f87a1eff9e3daab2e6bcd8e27d035762"
+          }
+        ],
+        "created_at": 1794328345.5774965
+      }
+    ],
+    "completion_summary": "已完成：读取正式待办（版本已核对，待办未改动），调用生产路线规划工具 onmyway.plan_route 生成真实步行路线，并已发布 route 成果（artifact 0e74b3f4-3ee8-4c41-921f-5a3dbdabf5de v1）。路线：春熙路(地铁站) → 取快递（成都国际金融中心，停留5分钟）→ 打印论文（成都太古里，停留5分钟）→ 宿舍（大慈寺路21-23号），3段步行共1439米，步行1151秒+服务600秒=总计1751秒，坐标系GCJ-02。未启动导航（navigation_started=false）。注意事项：办事时长为估算，未含排队与营业时间校验；仅在地图候选点中规划，不保证全城最优。所有地点为公开测试地点，不含真实取件码或住宅。",
+    "observations": [],
+    "tool_calls": [
+      {
+        "tool_call_id": "831168b0-253d-4737-82fb-6e152689324f",
+        "tool_id": "onmyway.read_tasks",
+        "state": "succeeded",
+        "effect": "read"
+      },
+      {
+        "tool_call_id": "3a393cc5-5dba-48b5-a55c-471b173ce2ae",
+        "tool_id": "onmyway.plan_route",
+        "state": "succeeded",
+        "effect": "read"
+      }
+    ]
+  },
+  "sources": [
+    {
+      "tool_call_id": "831168b0-253d-4737-82fb-6e152689324f",
+      "tool_id": "onmyway.read_tasks",
+      "state": "succeeded",
+      "result": {
+        "data": {
+          "revision": 1,
+          "store_id": "5daefc61-9db2-4252-8445-f62e789dc610",
+          "task_protocol": 1,
+          "task_versions": {
+            "parcel": 1,
+            "print": 1
+          },
+          "tasks": [
+            {
+              "deleted": false,
+              "task": {
+                "completedAt": 0,
+                "createdAt": 100,
+                "deadline": "",
+                "id": "parcel",
+                "lastRemindedAt": 0,
+                "placeJson": "{\"id\": \"B0L2RCN7OZ\", \"name\": \"成都国际金融中心\", \"longitude\": 104.081503, \"latitude\": 30.654764, \"address\": \"红星路三段1号(春熙路地铁站出入口旁)\"}",
+                "placeType": "PARCEL",
+                "plannedDate": "",
+                "priority": 2,
+                "reminderAt": 0,
+                "reminderCount": 0,
+                "reminderPending": 0,
+                "serviceMinutes": 5,
+                "status": "pending",
+                "title": "取快递",
+                "updatedAt": 100
+              },
+              "task_id": "parcel",
+              "version": 1
+            },
+            {
+              "deleted": false,
+              "task": {
+                "completedAt": 0,
+                "createdAt": 100,
+                "deadline": "",
+                "id": "print",
+                "lastRemindedAt": 0,
+                "placeJson": "{\"id\": \"B0FFF6X49V\", \"name\": \"成都太古里\", \"longitude\": 104.083809, \"latitude\": 30.653358, \"address\": \"中纱帽街8号\"}",
+                "placeType": "PRINT_SHOP",
+                "plannedDate": "",
+                "priority": 2,
+                "reminderAt": 0,
+                "reminderCount": 0,
+                "reminderPending": 0,
+                "serviceMinutes": 5,
+                "status": "pending",
+                "title": "打印论文",
+                "updatedAt": 100
+              },
+              "task_id": "print",
+              "version": 1
+            }
+          ]
+        },
+        "observed_at": "2026-11-10T16:32:18.874379+00:00",
+        "source": "builtin:onmyway",
+        "tool_id": "onmyway.read_tasks",
+        "version": "740532325abad02ccab00f94042d3b828a3bb235983e06336716281ddc1f81be"
+      }
+    },
+    {
+      "tool_call_id": "3a393cc5-5dba-48b5-a55c-471b173ce2ae",
+      "tool_id": "onmyway.plan_route",
+      "state": "succeeded",
+      "result": {
+        "data": {
+          "correlation_id": "0dcf3374-beba-450a-a304-dfd464e0dfc8",
+          "legacy_run_id": "3a393cc5-5dba-48b5-a55c-471b173ce2ae",
+          "plan": {
+            "arrival": "2026-11-10T17:01:37.000966Z",
+            "baseline_meters": 722,
+            "baseline_seconds": 578,
+            "coordinate_system": "GCJ-02",
+            "departure": "2026-11-10T16:32:26.000966Z",
+            "destination": {
+              "address": "大慈寺路21-23号(春熙路地铁站C口步行360米)",
+              "id": "B001C00869",
+              "latitude": 30.654243,
+              "longitude": 104.083791,
+              "name": "宿舍（合成角色：大慈寺公开地点）"
+            },
+            "extra_meters": 717,
+            "extra_seconds": 1173,
+            "extra_travel_seconds": 573,
+            "legs": [
+              {
+                "meters": 566,
+                "polyline": "104.080035,30.653381;104.080169,30.653602;104.080169,30.653602;104.080438,30.653472;104.08049,30.653455;104.08049,30.653455;104.08089,30.653286;104.08089,30.653286;104.081315,30.653103;104.081315,30.653103;104.081497,30.653043;104.081545,30.653051;104.081714,30.653129;104.081719,30.653129;104.081797,30.65326;104.081797,30.65326;104.081918,30.653455;104.082257,30.65395;104.082257,30.65395;104.082283,30.653976;104.082283,30.653976;104.082374,30.654097;104.082374,30.654097;104.082244,30.654158;104.08224,30.654158;104.081975,30.653885;104.081771,30.653676;104.081632,30.653559;104.081502,30.653524;104.081367,30.653576;104.081289,30.653628;104.08125,30.653694;104.081259,30.653785;104.081311,30.653876;104.081311,30.653876;104.081341,30.654097;104.081359,30.654128;104.081359,30.654128;104.081376,30.654175;104.081506,30.654362;104.081506,30.654362;104.081636,30.654579;104.081636,30.654579;104.081636,30.654579",
+                "seconds": 453
+              },
+              {
+                "meters": 428,
+                "polyline": "104.081636,30.654579;104.08151,30.654366;104.08151,30.654366;104.08138,30.65418;104.081363,30.654132;104.081363,30.654132;104.081345,30.654102;104.081315,30.65388;104.081315,30.65388;104.081263,30.653789;104.08125,30.653698;104.081285,30.653633;104.081363,30.653581;104.081497,30.653524;104.081628,30.653555;104.081766,30.653672;104.08197,30.65388;104.08224,30.654158;104.08224,30.654158;104.082374,30.654102;104.082374,30.654097;104.082287,30.65398;104.082279,30.65398;104.082322,30.653945;104.082322,30.653945;104.082326,30.653941;104.082383,30.653911;104.082383,30.653911;104.082773,30.653737;104.082773,30.653737;104.082999,30.653628;104.082999,30.653628;104.083086,30.653585;104.083212,30.653481;104.083212,30.653481;104.083212,30.653481;104.083268,30.653459;104.083268,30.653459;104.083355,30.653416;104.083498,30.653364;104.083576,30.653346;104.083759,30.653273",
+                "seconds": 342
+              },
+              {
+                "meters": 445,
+                "polyline": "104.083759,30.653268;104.083763,30.653268;104.083845,30.65322;104.083845,30.653216;104.084223,30.65378;104.084223,30.65378;104.08454,30.654258;104.08454,30.654258;104.084614,30.654379;104.084614,30.654379;104.084505,30.654431;104.084505,30.654431;104.084475,30.654449;104.084366,30.654497;104.084362,30.654531;104.08447,30.654718;104.084614,30.654948;104.084614,30.654948;104.084644,30.655013;104.084618,30.655035;104.084505,30.655074;104.084501,30.655074;104.084536,30.655126;104.084536,30.655126;104.084475,30.655152;104.084132,30.655313;104.084128,30.655313;104.08408,30.655239;104.08408,30.655239;104.084023,30.655169;104.084023,30.655169;104.083837,30.654839;104.083837,30.654839;104.083763,30.654692;104.083741,30.654635;104.083741,30.654596;104.08378,30.654575;104.08378,30.65457;104.083668,30.654375;104.083663,30.654371;104.083802,30.654323;104.083802,30.654323;104.083819,30.654314",
+                "seconds": 356
+              }
+            ],
+            "mode": "walking",
+            "omitted": [],
+            "origin": {
+              "address": "2号线;3号线",
+              "id": "BV10069531",
+              "latitude": 30.653389,
+              "longitude": 104.080019,
+              "name": "春熙路(地铁站)"
+            },
+            "requested_departure": "2026-11-11T00:32:17.763831+08:00",
+            "service_seconds": 600,
+            "solver_status": "OPTIMAL",
+            "stops": [
+              {
+                "arrival": "2026-11-10T16:39:59.000966Z",
+                "departure": "2026-11-10T16:44:59.000966Z",
+                "place": {
+                  "address": "红星路三段1号(春熙路地铁站出入口旁)",
+                  "id": "B0L2RCN7OZ",
+                  "latitude": 30.654764,
+                  "longitude": 104.081503,
+                  "name": "成都国际金融中心"
+                },
+                "service_seconds": 300,
+                "task_ids": [
+                  "parcel"
+                ],
+                "task_titles": [
+                  "取快递"
+                ]
+              },
+              {
+                "arrival": "2026-11-10T16:50:41.000966Z",
+                "departure": "2026-11-10T16:55:41.000966Z",
+                "place": {
+                  "address": "中纱帽街8号",
+                  "id": "B0FFF6X49V",
+                  "latitude": 30.653358,
+                  "longitude": 104.083809,
+                  "name": "成都太古里"
+                },
+                "service_seconds": 300,
+                "task_ids": [
+                  "print"
+                ],
+                "task_titles": [
+                  "打印论文"
+                ]
+              }
+            ],
+            "total_meters": 1439,
+            "total_seconds": 1751,
+            "travel_seconds": 1151,
+            "warnings": [
+              "办事时长为估算，未包含未知排队时间；营业时间尚未校验。",
+              "仅在已搜索到的候选地点中规划，不保证全城最优。"
+            ]
+          },
+          "plan_id": "3a393cc5-5dba-48b5-a55c-471b173ce2ae",
+          "plan_version": 1,
+          "snapshot_id": "agent-call:3a393cc5-5dba-48b5-a55c-471b173ce2ae"
+        },
+        "observed_at": "2026-11-10T16:32:23.025552+00:00",
+        "source": "builtin:onmyway",
+        "tool_id": "onmyway.plan_route",
+        "version": "b7d807ff65063470520f304424189318f87a1eff9e3daab2e6bcd8e27d035762"
+      }
+    }
+  ],
+  "provenance": {
+    "report": "app\\build\\reports\\agent-a1-20261111\\errands\\live-20261110T163212Z-d730e01a\\report.json",
+    "sha256": "facb55d37ddfb41397dcc12aba57c4070620de0180f46854f8e48f1cbf7e5eec",
+    "purpose": "Lossless reconstruction of inputs at first completion review; synthetic public errands only."
+  }
+}

@@ -23,11 +23,7 @@ internal fun assistantDraftContext(draft: JSONObject): String? = if (!assistantC
 internal fun assistantContextLines(lines: List<ChatLine>, maxCharacters: Int = 6_000): List<ChatLine> {
     val selected = mutableListOf<ChatLine>()
     var remaining = maxCharacters
-    var newerAt: Long? = null
     for (line in lines.asReversed()) {
-        val newer = newerAt
-        if (newer != null && (newer - line.createdAt > 30 * 60_000L || line.createdAt > newer)) break
-        newerAt = line.createdAt
         // Old route events are available in the archive, not instructions for this request.
         if (line.routeHistoryId != null) continue
         val text = line.text.take(4_000)

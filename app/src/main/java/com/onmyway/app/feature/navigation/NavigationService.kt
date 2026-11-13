@@ -19,6 +19,9 @@ import com.onmyway.app.R
 import com.onmyway.app.core.model.Place
 import com.onmyway.app.core.model.TripMetrics
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 
 /** Only live, user-started navigation is retained. Never restarts a route after process death. */
 class NavigationService : Service() {
@@ -28,10 +31,13 @@ class NavigationService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val current = NavigationRuntime.current
-        if (current == null || current.runId != intent?.getStringExtra("run_id") || !current.needsService || current.serviceLease != intent.getLongExtra("lease", -1)) {
-            stopSelf(startId)
-            return START_NOT_STICKY
+        when (navigationServiceCommand(current?.runId, current?.serviceLease ?: -1L,
+            current?.needsService == true, intent?.getStringExtra("run_id"), intent?.getLongExtra("lease", -1L) ?: -1L)) {
+            NavigationServiceCommand.STOP -> { stopSelf(startId); return START_NOT_STICKY }
+            NavigationServiceCommand.IGNORE -> return START_NOT_STICKY
+            NavigationServiceCommand.ACCEPT -> Unit
         }
+        checkNotNull(current)
         run = current
         lease = current.serviceLease
         try {
@@ -64,6 +70,10 @@ class NavigationService : Service() {
 
 /** Process-owned engine; Activity/map views attach and detach without ending the trip. */
 internal object NavigationRuntime {
+    // SDK observations belong to the process. Detaching a page or replacing a controller
+    // must not cancel a Room commit already queued for its immutable execution identity.
+    val receipts = NavigationReceiptQueue(CoroutineScope(SupervisorJob() + Dispatchers.IO))
+
     var current: NavigationController? by mutableStateOf(null)
         private set
 

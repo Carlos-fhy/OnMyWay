@@ -71,6 +71,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 internal fun EmbeddedNavigationScreen(
@@ -188,7 +189,15 @@ internal class NavigationController(
         private set
     private var engineStartIssued = false
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private var startCommit: Job? = null
+    private var claimCommit: Job? = null
+    private var startReceiptAttempt: String? = null
+    private var executionAttemptId = java.util.UUID.randomUUID().toString()
+    private var executionUncertain by mutableStateOf(false)
+    private var callbackGeneration = 0L
+    private val executionRecorder by lazy {
+        NavigationExecutionRecorder(RoomNavigationExecutionStore(TaskDatabase.get(context)),
+            EventCorrelation(context).forSession(sessionId))
+    }
     private var originRequest: Job? = null
     private var originMeasuredAt = 0L
     private var onStarted: () -> Unit = {}
@@ -238,45 +247,61 @@ internal class NavigationController(
     private val timeout = Runnable {
         if (calculating || phase == NavigationPhase.STARTING) serviceFailed("导航准备超时，请检查网络后重试")
     }
-    private val listener = object : SimpleNaviListener() {
+    private var listener = createListener(callbackGeneration)
+    private fun acceptsCallback(generation: Long) = !disposed && generation == callbackGeneration
+    private fun createListener(generation: Long) = object : SimpleNaviListener() {
         override fun onInitNaviSuccess() {
             NavigationRuntime.naviInitialized = true
-            if (!disposed) { initialized = true; handler.post { if (!disposed) calculate() } }
+            if (acceptsCallback(generation)) { initialized = true; handler.post { if (acceptsCallback(generation)) calculate() } }
         }
-        override fun onInitNaviFailure() { if (!disposed) serviceFailed("导航初始化失败，请检查 Android Key") }
+        override fun onInitNaviFailure() { if (acceptsCallback(generation)) serviceFailed("导航初始化失败，请检查 Android Key") }
         override fun onStartNavi(type: Int) {
-            if (disposed || phase != NavigationPhase.STARTING) return
-            if (startCommit != null) return
+            if (!acceptsCallback(generation) || (phase != NavigationPhase.STARTING && !executionUncertain)) return
+            val attemptId = executionAttemptId
+            if (startReceiptAttempt == attemptId) return
+            startReceiptAttempt = attemptId
             meter.start(System.currentTimeMillis(), android.os.SystemClock.elapsedRealtime())
-            val attemptId = "$runId:$serviceLease"
             val observedAt = System.currentTimeMillis()
-            startCommit = scope.launch {
-                try {
-                    val database = TaskDatabase.get(context)
-                    NavigationStartRecorder(RoomNavigationStartStore(database),
-                        EventCorrelation(context).forSession(sessionId))
-                        .record(executionIdentity, observedAt, attemptId)
-                    // A scheduling failure leaves a durable row for the next app start.
-                    runCatching { EventOutboxSync.schedule(context) }
-                    if (!disposed && phase == NavigationPhase.STARTING) {
+            val recorder = executionRecorder
+            NavigationRuntime.receipts.submit {
+                val saved = recorder.recordStarted(executionIdentity, attemptId, observedAt)
+                if (saved == null) {
+                    withContext(Dispatchers.Main.immediate) {
+                        if (acceptsCallback(generation) && executionAttemptId == attemptId && phase == NavigationPhase.STARTING) {
+                            serviceFailed("导航方案已变化，已停止导航，请重新确认", recordReceipt = false)
+                        }
+                    }
+                    return@submit
+                }
+                val stopped = withContext(Dispatchers.Main.immediate) {
+                    shouldPauseRecordedNavigationStart(phase,
+                        ownsAttempt = acceptsCallback(generation) && executionAttemptId == attemptId,
+                        uncertain = executionUncertain)
+                }
+                if (stopped) recorder.recordPaused(executionIdentity, attemptId, System.currentTimeMillis())
+                runCatching { EventOutboxSync.schedule(context) }
+                withContext(Dispatchers.Main.immediate) {
+                    if (acceptsCallback(generation) && executionAttemptId == attemptId && stopped && executionUncertain) {
+                        executionUncertain = false
+                        status = "已核对上次导航已停止，请重新定位后继续"
+                    } else if (acceptsCallback(generation) && executionAttemptId == attemptId && phase == NavigationPhase.STARTING) {
                         handler.removeCallbacks(timeout)
                         transition(NavigationEvent.SDK_STARTED)
                         gpsWeak = false
                         status = "导航中 · 请留意实际道路"
                         onStarted()
                     }
-                } catch (cancelled: CancellationException) { throw cancelled }
-                catch (_: Exception) { serviceFailed("导航状态保存失败，已停止导航，请重试") }
+                }
             }
         }
         @Deprecated("SDK compatibility callback")
-        override fun onCalculateRouteSuccess(ids: IntArray?) { routeReady() }
-        override fun onCalculateRouteSuccess(result: AMapCalcRouteResult?) { routeReady() }
+        override fun onCalculateRouteSuccess(ids: IntArray?) { if (acceptsCallback(generation)) routeReady() }
+        override fun onCalculateRouteSuccess(result: AMapCalcRouteResult?) { if (acceptsCallback(generation)) routeReady() }
         @Deprecated("SDK compatibility callback")
-        override fun onCalculateRouteFailure(code: Int) { routeFailed(code) }
-        override fun onCalculateRouteFailure(result: AMapCalcRouteResult?) { routeFailed(result?.errorCode ?: -1) }
+        override fun onCalculateRouteFailure(code: Int) { if (acceptsCallback(generation)) routeFailed(code) }
+        override fun onCalculateRouteFailure(result: AMapCalcRouteResult?) { if (acceptsCallback(generation)) routeFailed(result?.errorCode ?: -1) }
         override fun onNaviInfoUpdate(info: NaviInfo?) {
-            if (running && info != null) {
+            if (acceptsCallback(generation) && running && info != null) {
                 meter.sample(info.pathRetainDistance)
                 routeRetainDistance = info.pathRetainDistance
                 routeRetainTime = info.pathRetainTime
@@ -309,31 +334,42 @@ internal class NavigationController(
                 }
             }
         }
-        override fun onGetNavigationText(text: String?) { if (!text.isNullOrBlank()) { instruction = text; spokenInstruction = true } }
+        override fun onGetNavigationText(text: String?) { if (acceptsCallback(generation) && !text.isNullOrBlank()) { instruction = text; spokenInstruction = true } }
         @Deprecated("SDK compatibility callback")
-        override fun onGetNavigationText(type: Int, text: String?) { if (!text.isNullOrBlank()) { instruction = text; spokenInstruction = true } }
-        override fun onManeuverInfoUpdate(type: Int, bitmap: android.graphics.Bitmap?) { turnIcon = bitmap }
+        override fun onGetNavigationText(type: Int, text: String?) { if (acceptsCallback(generation) && !text.isNullOrBlank()) { instruction = text; spokenInstruction = true } }
+        override fun onManeuverInfoUpdate(type: Int, bitmap: android.graphics.Bitmap?) { if (acceptsCallback(generation)) turnIcon = bitmap }
         override fun onArriveDestination() {
-            if (disposed || !running) return
+            if (!acceptsCallback(generation) || !acceptsNavigationArrival(phase, startReceiptAttempt == executionAttemptId)) return
+            val observedAt = System.currentTimeMillis()
+            val attemptId = executionAttemptId
             currentStopIndex = stops.lastIndex.coerceAtLeast(0)
             gpsWeak = false
-            meter.finish(System.currentTimeMillis(), android.os.SystemClock.elapsedRealtime())
+            meter.finish(observedAt, android.os.SystemClock.elapsedRealtime())
+            val metrics = meter.snapshot(observedAt, android.os.SystemClock.elapsedRealtime())
+            if (phase == NavigationPhase.STARTING) transition(NavigationEvent.SDK_STARTED)
             transition(NavigationEvent.ARRIVE)
+            if (!arrivalReported) {
+                arrivalReported = true
+                val recorder = executionRecorder
+                NavigationRuntime.receipts.submit {
+                    recorder.recordArrived(executionIdentity, attemptId, observedAt, metrics)
+                    runCatching { EventOutboxSync.schedule(context) }
+                    withContext(Dispatchers.Main.immediate) {
+                        if (acceptsCallback(generation) && executionAttemptId == attemptId) onArrived()
+                    }
+                }
+            }
             stopEngine()
             stopService()
             status = "已到达终点，请确认到达"
-            if (!arrivalReported) {
-                arrivalReported = true
-                onArrived()
-            }
         }
         override fun onArrivedWayPoint(wayID: Int) {
-            if (disposed || !running) return
+            if (!acceptsCallback(generation) || !running) return
             currentStopIndex = (wayID + 1).coerceIn(0, stops.lastIndex.coerceAtLeast(0))
         }
-        override fun onGpsSignalWeak(weak: Boolean) { if (running) gpsWeak = weak }
+        override fun onGpsSignalWeak(weak: Boolean) { if (acceptsCallback(generation) && running) gpsWeak = weak }
         override fun onReCalculateRouteForYaw() {
-            if (disposed || !running) return
+            if (!acceptsCallback(generation) || !running) return
             transition(NavigationEvent.REPLAN)
             status = "正在重新计算路线"
             handler.removeCallbacks(timeout); handler.postDelayed(timeout, 30_000)
@@ -930,6 +966,7 @@ internal class NavigationController(
                         text = primaryLabel(),
                         onClick = ::primaryAction,
                         enabled = !calculating &&
+                            !executionUncertain &&
                             phase != NavigationPhase.STARTING &&
                             phase != NavigationPhase.PREPARING,
                         modifier = Modifier.fillMaxWidth(),
@@ -983,6 +1020,7 @@ internal class NavigationController(
     }
 
     private fun primaryLabel(): String = when {
+        executionUncertain -> "等待执行结果核对"
         phase == NavigationPhase.PREPARING -> "正在准备…"
         phase == NavigationPhase.STARTING -> "正在启动…"
         arrived -> "确认到达"
@@ -994,6 +1032,7 @@ internal class NavigationController(
 
     private fun primaryAction() {
         when {
+            executionUncertain -> Unit
             arrived -> onExit()
             calculating || phase == NavigationPhase.STARTING -> Unit
             ready -> startNavigation()
@@ -1044,8 +1083,14 @@ internal class NavigationController(
     private fun calculate() {
         val navi = engine ?: return
         if (calculating) return
-        if (needsService || disposed) return
+        if (needsService || disposed || arrived || executionUncertain) return
         stopEngine()
+        navi.removeAMapNaviListener(listener)
+        callbackGeneration++
+        listener = createListener(callbackGeneration)
+        navi.addAMapNaviListener(listener)
+        executionAttemptId = java.util.UUID.randomUUID().toString()
+        startReceiptAttempt = null
         failureReported = false
         arrivalReported = false
         startRequested = true
@@ -1061,7 +1106,23 @@ internal class NavigationController(
         sawViaInfo = false
         transition(NavigationEvent.CALCULATE)
         status = "正在获取当前位置"
+        val attemptId = executionAttemptId
+        val generation = callbackGeneration
         originRequest = scope.launch {
+            try {
+                NavigationRuntime.receipts.drain()
+                if (!acceptsCallback(generation) || executionAttemptId != attemptId) return@launch
+                if (!executionRecorder.prepareAttempt(executionIdentity, attemptId, System.currentTimeMillis())) {
+                    serviceFailed("上次导航执行记录需要核对，请返回行程查看", outcomeUnknown = true, recordReceipt = false)
+                    return@launch
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                serviceFailed(error.message ?: "当前方案无法核对，请重新规划", outcomeUnknown = false, recordReceipt = false)
+                return@launch
+            }
+            if (!acceptsCallback(generation) || executionAttemptId != attemptId || phase != NavigationPhase.CALCULATING) return@launch
             val origin = try {
                 val fix = readCurrentLocation(context, allowCached = false).location
                 originMeasuredAt = fix.elapsedRealtimeNanos / 1_000_000L
@@ -1142,7 +1203,7 @@ internal class NavigationController(
     }
 
     private fun startNavigation(checkFreshness: Boolean = true) {
-        if (!ready || !foreground || disposed) return
+        if (!ready || !foreground || disposed || executionUncertain) return
         failureReported = false
         requireExplicitStart = false
         if (checkFreshness && requiresFreshNavigationRoute(phase,
@@ -1159,7 +1220,8 @@ internal class NavigationController(
         transition(NavigationEvent.START)
         serviceLease++
         engineStartIssued = false
-        startCommit = null
+        claimCommit = null
+        startReceiptAttempt = null
         status = "正在启动导航"
         handler.removeCallbacks(timeout); handler.postDelayed(timeout, 15_000)
         try {
@@ -1169,16 +1231,70 @@ internal class NavigationController(
     }
 
     fun serviceReady() {
-        if (disposed || phase != NavigationPhase.STARTING || engineStartIssued) return
-        engineStartIssued = true
-        val accepted = runCatching { engine?.startNavi(NaviType.GPS) == true }.getOrDefault(false)
-        if (!accepted) serviceFailed("导航启动失败，请重试")
-        // Only onStartNavi confirms that navigation actually began.
+        if (disposed || phase != NavigationPhase.STARTING || engineStartIssued || claimCommit != null) return
+        val attemptId = executionAttemptId
+        val generation = callbackGeneration
+        val recorder = executionRecorder
+        claimCommit = scope.launch {
+            var claimed = false
+            var issued = false
+            try {
+                // A pause or failed attempt must be committed before a new explicit start.
+                NavigationRuntime.receipts.drain()
+                if (!acceptsCallback(generation) || executionAttemptId != attemptId || phase != NavigationPhase.STARTING) return@launch
+                val decision = recorder.claim(executionIdentity, attemptId, System.currentTimeMillis())
+                claimed = decision == NavigationClaimResult.CLAIMED
+                if (!acceptsCallback(generation) || executionAttemptId != attemptId || phase != NavigationPhase.STARTING) return@launch
+                when (decision) {
+                    NavigationClaimResult.CLAIMED -> {
+                        engineStartIssued = true
+                        issued = true
+                        val accepted = try { engine?.startNavi(NaviType.GPS) == true }
+                        catch (_: Exception) {
+                            serviceFailed("导航调用结果尚未核对，暂不重复启动", outcomeUnknown = true)
+                            return@launch
+                        }
+                        if (!accepted) serviceFailed("导航启动失败，请重试", outcomeUnknown = false)
+                    }
+                    NavigationClaimResult.COMPLETED -> {
+                        phase = NavigationPhase.ARRIVED
+                        stopEngine(); stopService()
+                        status = "已记录到达，请确认行程"
+                        onArrived()
+                    }
+                    NavigationClaimResult.FAILED -> serviceFailed("本次尝试已失败，请重新算路后再开始", outcomeUnknown = false, recordReceipt = false)
+                    NavigationClaimResult.ALREADY_RUNNING, NavigationClaimResult.UNKNOWN ->
+                        serviceFailed("上次导航执行结果需要核对，暂不重复启动；可返回行程查看记录", outcomeUnknown = true, recordReceipt = false)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                if (acceptsCallback(generation) && executionAttemptId == attemptId) {
+                    serviceFailed(error.message ?: "无法核对当前方案，请返回行程重新确认", outcomeUnknown = false, recordReceipt = false)
+                }
+            } finally {
+                if (claimed && !issued) {
+                    val cancelledAt = System.currentTimeMillis()
+                    NavigationRuntime.receipts.submit {
+                        recorder.recordFailed(executionIdentity, attemptId, cancelledAt, "cancelled_before_sdk_start")
+                        runCatching { EventOutboxSync.schedule(context) }
+                    }
+                }
+            }
+        }
+        // Accepting startNavi still requires a matching SDK callback to record actual execution.
     }
-    fun serviceFailed(reason: String) {
-        if (disposed) return
+    fun serviceFailed(
+        reason: String,
+        outcomeUnknown: Boolean = phase == NavigationPhase.STARTING && engineStartIssued,
+        recordReceipt: Boolean = true,
+    ) {
+        if (disposed || phase in setOf(NavigationPhase.ARRIVED, NavigationPhase.CLOSED, NavigationPhase.PAUSED)) return
+        val attemptId = executionAttemptId
+        val observedAt = System.currentTimeMillis()
         handler.removeCallbacks(timeout)
         transition(NavigationEvent.FAIL)
+        executionUncertain = executionUncertain || outcomeUnknown
         startRequested = false
         gpsWeak = false
         stopEngine()
@@ -1186,10 +1302,23 @@ internal class NavigationController(
         status = reason
         if (!failureReported) {
             failureReported = true
+            if (recordReceipt) {
+                val recorder = executionRecorder
+                NavigationRuntime.receipts.submit {
+                    if (outcomeUnknown) recorder.markUnknown(executionIdentity, attemptId, observedAt, reason.take(300))
+                    else recorder.recordFailed(executionIdentity, attemptId, observedAt, reason.take(300))
+                    runCatching { EventOutboxSync.schedule(context) }
+                }
+            }
             onFailed(reason)
         }
     }
     private fun pauseNavigation() {
+        if (!running) return
+        val attemptId = executionAttemptId
+        val observedAt = System.currentTimeMillis()
+        val recorder = executionRecorder
+        NavigationRuntime.receipts.submit { recorder.recordPaused(executionIdentity, attemptId, observedAt) }
         transition(NavigationEvent.PAUSE)
         startRequested = false
         gpsWeak = false
@@ -1200,11 +1329,14 @@ internal class NavigationController(
     }
     private fun stopEngine() {
         originRequest?.cancel(); originRequest = null
-        startCommit?.cancel(); startCommit = null
+        claimCommit?.cancel(); claimCommit = null
         runCatching { engine?.stopNavi() }
         runCatching { engine?.stopGPS() }
     }
-    private fun stopService() { serviceLease++; context.stopService(Intent(context, NavigationService::class.java)) }
+    private fun stopService() {
+        serviceLease++
+        if (NavigationRuntime.current === this) context.stopService(Intent(context, NavigationService::class.java))
+    }
 
     fun attach(
         activityContext: Context,

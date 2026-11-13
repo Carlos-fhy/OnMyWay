@@ -9,11 +9,14 @@ import com.onmyway.app.data.event.EventAcknowledgement
 import com.onmyway.app.data.event.EventProtocolException
 import com.onmyway.app.data.event.HarnessState
 import com.onmyway.app.data.event.toRequestJson
+import com.onmyway.app.data.execution.PlanningRunProtocolException
+import com.onmyway.app.data.execution.PlanningRunStatus
 import com.onmyway.app.data.local.entity.BusinessEventOutbox
 import com.onmyway.app.data.local.entity.ConfirmationOutbox
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URLEncoder
+import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -32,19 +35,20 @@ class Api(private val base: String) {
             return value.trim().trimEnd('/')
         }
     }
-    private suspend fun request(path: String, body: JSONObject? = null, method: String = if (body == null) "GET" else "POST", backupToken: String? = null, timeoutMillis: Int? = null): String {
+    private suspend fun request(path: String, body: JSONObject? = null, method: String = if (body == null) "GET" else "POST", backupToken: String? = null, timeoutMillis: Int? = null, executionId: String? = null): String {
         try {
-            return requestOnce(path, body, method, backupToken, timeoutMillis)
+            return requestOnce(path, body, method, backupToken, timeoutMillis, executionId)
         } catch (error: java.io.IOException) {
             // Retry only durable proposal requests, preserving the exact body and request ID.
             // Explicit HTTP failures (including in-progress 409) require user action.
             if (error is ApiHttpException || path !in setOf("/assistant/chat", "/assistant/navigation") ||
                 body?.optString("request_id").isNullOrBlank()) throw error
             kotlinx.coroutines.delay(500)
-            return requestOnce(path, body, method, backupToken, timeoutMillis)
+            return requestOnce(path, body, method, backupToken, timeoutMillis, executionId)
         }
     }
-    private suspend fun requestOnce(path: String, body: JSONObject?, method: String, backupToken: String?, timeoutMillis: Int?): String = withContext(Dispatchers.IO) {
+    private suspend fun requestOnce(path: String, body: JSONObject?, method: String, backupToken: String?, timeoutMillis: Int?, executionId: String? = null): String = withContext(Dispatchers.IO) {
+        if (executionId != null) require(UUID.fromString(executionId).toString() == executionId) { "执行编号无效" }
         val startedAt = android.os.SystemClock.elapsedRealtime()
         val connection = URI(validateBase(base) + path).toURL().openConnection() as HttpURLConnection
         try {
@@ -59,6 +63,7 @@ class Api(private val base: String) {
             connection.setRequestProperty("Accept", "application/json")
             connection.requestMethod = method
             if (backupToken != null) connection.setRequestProperty("X-Backup-Token", backupToken)
+            if (executionId != null) connection.setRequestProperty("X-Execution-Id", executionId)
             if (body != null) {
                 connection.doOutput = true
                 connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
@@ -127,8 +132,22 @@ class Api(private val base: String) {
     suspend fun health() = JSONObject(request("/health"))
     suspend fun navigationRequest(body: JSONObject) = JSONObject(request("/assistant/navigation", body))
     suspend fun navigationStatus(body: JSONObject) = JSONObject(request("/assistant/navigation/status", body))
-    suspend fun assistant(body: JSONObject) = JSONObject(request("/assistant/chat", body))
-    suspend fun assistantStatus(body: JSONObject) = JSONObject(request("/assistant/chat/status", body))
+    suspend fun assistant(body: JSONObject, token: String? = null): JSONObject {
+        if (token != null) requirePrivateBackupTransport()
+        return JSONObject(request("/assistant/chat", body, backupToken = token))
+    }
+    suspend fun assistantStatus(body: JSONObject, token: String? = null): JSONObject {
+        if (token != null) requirePrivateBackupTransport()
+        return JSONObject(request("/assistant/chat/status", body, backupToken = token))
+    }
+    internal suspend fun personalMemory(token: String): JSONObject {
+        requirePrivateBackupTransport()
+        return JSONObject(request("/memory", backupToken = token, timeoutMillis = 15_000))
+    }
+    internal suspend fun personalMemoryCommand(token: String, body: JSONObject): JSONObject {
+        requirePrivateBackupTransport()
+        return JSONObject(request("/memory/commands", body, backupToken = token, timeoutMillis = 20_000))
+    }
     suspend fun transcribe(audio: ByteArray) = JSONObject(request("/assistant/transcribe",
         JSONObject().put("audio", android.util.Base64.encodeToString(audio, android.util.Base64.NO_WRAP)))).getString("text")
     suspend fun currentPlace(longitude: Double, latitude: Double, timeoutMillis: Int? = null): Place = Place.from(JSONObject(request(
@@ -139,8 +158,15 @@ class Api(private val base: String) {
         val result = JSONArray(request("/places?q=${URLEncoder.encode(keyword, "UTF-8")}&city=${URLEncoder.encode(city, "UTF-8")}"))
         return (0 until result.length()).map { Place.from(result.getJSONObject(it)) }
     }
-    suspend fun plan(body: JSONObject) = JSONObject(request("/plans", body))
-    suspend fun recommend(body: JSONObject) = JSONObject(request("/recommendations", body))
+    suspend fun plan(body: JSONObject, runId: String? = null) = JSONObject(request("/plans", body, executionId = runId))
+    suspend fun recommend(body: JSONObject, runId: String? = null) = JSONObject(request("/recommendations", body, executionId = runId))
+    internal suspend fun planningStatus(body: JSONObject, runId: String, operation: String): PlanningRunStatus {
+        require(operation in setOf("plan", "recommend")) { "规划操作未登记" }
+        val path = if (operation == "plan") "/plans/status" else "/recommendations/status"
+        val content = request(path, body, timeoutMillis = 15_000, executionId = runId)
+        val response = try { JSONObject(content) } catch (_: org.json.JSONException) { throw PlanningRunProtocolException() }
+        return PlanningRunStatus.fromJson(response, runId, operation)
+    }
     suspend fun routeCandidates(body: JSONObject): RouteCandidatesResult {
         val result = JSONObject(request("/tasks/route-candidates", body))
         fun states(key: String) = result.getJSONArray(key).let { array ->

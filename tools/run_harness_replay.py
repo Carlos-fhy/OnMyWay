@@ -144,7 +144,7 @@ def main(argv=None):
                "live_model_verified": False, "device_execution_verified": False,
                "reports": {}, "regression": {}, "commands": [], "errors": []}
     commands = summary["commands"]
-    commands.append(run_command("backend-replay", [sys.executable, "-m", "backend.replay", "--output",
+    commands.append(run_command("backend-replay", [sys.executable, "-m", "backend.evaluation.replay", "--output",
                                                    str(output / "backend-cases.json")], output, env))
     if args.full_regression:
         commands.append(run_command("backend-tests", [sys.executable, "-m", "pytest", "backend/tests", "-q",

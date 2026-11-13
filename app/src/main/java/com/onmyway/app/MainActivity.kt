@@ -8,7 +8,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -21,7 +20,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -93,8 +91,19 @@ private fun OnMyWay(vm: AppViewModel = viewModel()) {
     }
     var deleting by rememberSaveable(stateSaver = DeleteHostSaver) { mutableStateOf<DeleteHost?>(null) }
     var navigationRequested by rememberSaveable { mutableStateOf(NavigationRuntime.current != null) }
+    var historyVisible by remember { mutableStateOf(false) }
+    var lastPlanningRecoveryHistoryId by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(chat.ready, vm.planningRecoveryCompletion?.historyId) {
+        val completed = vm.planningRecoveryCompletion ?: return@LaunchedEffect
+        if (chat.ready && lastPlanningRecoveryHistoryId != completed.historyId) {
+            chat.completeRoute(completed.draftId, completed.result, completed.historyId, completed.message)
+            lastPlanningRecoveryHistoryId = completed.historyId
+            vm.consumePlanningRecoveryCompletion(completed.historyId)
+        }
+    }
     val navigationVisible = navigationRequested && vm.result != null && !vm.editingPlan && !vm.restoringTrip
-    LaunchedEffect(vm.result, vm.navigationState, vm.navigationEndEvent?.id) {
+    LaunchedEffect(chat.ready, vm.result, vm.navigationState, vm.navigationEndEvent?.id) {
+        if (!chat.ready) return@LaunchedEffect
         if (vm.result == null) {
             chat.routeResult = null
             if (vm.navigationState in listOf(NavigationState.CANCELLED, NavigationState.ARRIVED)) {
@@ -114,7 +123,7 @@ private fun OnMyWay(vm: AppViewModel = viewModel()) {
     Scaffold(
         modifier = Modifier.imePadding(),
         containerColor = MaterialTheme.colorScheme.background,
-        snackbarHost = { if (!navigationVisible) SnackbarHost(snackbar) },
+        snackbarHost = { if (!navigationVisible && !historyVisible) SnackbarHost(snackbar) },
         bottomBar = {
             if (!navigationVisible && !keyboardVisible) {
                 AppBottomBar(tab) { tab = it }
@@ -122,22 +131,8 @@ private fun OnMyWay(vm: AppViewModel = viewModel()) {
         },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
-            // 页面顶部一层极淡的绿色晨雾，给素色背景一点空间感，不干扰阅读。
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(210.dp)
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
-                                MaterialTheme.colorScheme.background.copy(alpha = 0f),
-                            ),
-                        ),
-                    ),
-            )
             Column(Modifier.fillMaxSize()) {
-                if (!navigationVisible && tab != 3) SyncStatusNotice { tab = 3 }
+                if (!navigationVisible && !keyboardVisible && tab != 3) SyncStatusNotice { tab = 3 }
                 Crossfade(
                     targetState = if (navigationVisible) 2 else tab,
                     animationSpec = tween(220),
@@ -147,11 +142,10 @@ private fun OnMyWay(vm: AppViewModel = viewModel()) {
                         0 -> TaskScreen(tasks, { editor = TaskEditorHost.New },
                             { editor = TaskEditorHost.Edit(it.id, it.editorSnapshot()) },
                             { deleting = DeleteHost(it.id, it.title) }, vm::save, vm::snoozeReminder, vm::dismissReminder)
-                        1 -> AssistantScreen(vm, tasks, { tab = 3 }, { tab = 2 }, { navigationRequested = true }, chat)
+                        1 -> AssistantScreen(vm, tasks, { tab = 3 }, { tab = 2 }, { navigationRequested = true }, chat,
+                            historyVisibilityChanged = { historyVisible = it })
                         2 -> PlanScreen(vm, tasks, navigationVisible) { navigationRequested = it }
-                        else -> SettingsScreen(vm) { event ->
-                            if (vm.result == null && chat.repeatRoute(event, vm)) tab = 1
-                        }
+                        else -> SettingsScreen(vm, chat)
                     }
                 }
             }
@@ -199,30 +193,22 @@ private fun OnMyWay(vm: AppViewModel = viewModel()) {
 @Composable
 private fun AppBottomBar(selected: Int, onSelect: (Int) -> Unit) {
     Surface(color = MaterialTheme.colorScheme.background) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-        ) {
-            Surface(
-                Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(24.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
-                shadowElevation = 2.dp,
+        Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
+            HorizontalDivider(
+                thickness = 0.5.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f),
+            )
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 4.dp),
             ) {
-                Row(Modifier.fillMaxWidth().height(62.dp).padding(horizontal = 6.dp)) {
-                    homeTabs.forEachIndexed { index, item ->
-                        AppNavItem(
-                            label = item.label,
-                            icon = item.icon,
-                            selected = selected == index,
-                            center = index == 1,
-                            modifier = Modifier.weight(1f),
-                            onClick = { onSelect(index) },
-                        )
-                    }
+                homeTabs.forEachIndexed { index, item ->
+                    AppNavItem(
+                        label = item.label,
+                        icon = item.icon,
+                        selected = selected == index,
+                        modifier = Modifier.weight(1f),
+                        onClick = { onSelect(index) },
+                    )
                 }
             }
         }
@@ -234,26 +220,16 @@ private fun RowScope.AppNavItem(
     label: String,
     icon: Int,
     selected: Boolean,
-    center: Boolean,
     modifier: Modifier,
     onClick: () -> Unit,
 ) {
     val indicator by animateColorAsState(
-        when {
-            selected && center -> MaterialTheme.colorScheme.primary
-            selected -> MaterialTheme.colorScheme.primaryContainer
-            else -> Color.Transparent
-        },
+        if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
         animationSpec = tween(220),
         label = "nav-indicator",
     )
-    // 图标底色与标签底色不同：选中时标签在浅色底栏上，不能再沿用 onPrimary。
     val iconTint by animateColorAsState(
-        when {
-            selected && center -> MaterialTheme.colorScheme.onPrimary
-            selected -> MaterialTheme.colorScheme.onPrimaryContainer
-            else -> MaterialTheme.colorScheme.onSurfaceVariant
-        },
+        if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
         animationSpec = tween(220),
         label = "nav-icon-tint",
     )
@@ -264,7 +240,7 @@ private fun RowScope.AppNavItem(
     )
     Column(
         modifier
-            .fillMaxHeight()
+            .heightIn(min = 56.dp)
             .clip(RoundedCornerShape(18.dp))
             .selectable(selected = selected, role = Role.Tab, onClick = onClick)
             .semantics { this.selected = selected },
@@ -274,7 +250,7 @@ private fun RowScope.AppNavItem(
         Box(
             Modifier
                 .height(28.dp)
-                .widthIn(min = 46.dp)
+                .widthIn(min = 52.dp)
                 .clip(CircleShape)
                 .background(indicator),
             contentAlignment = Alignment.Center,
@@ -315,8 +291,9 @@ private fun SyncStatusNotice(openSettings: () -> Unit) {
         Surface(
             onClick = openSettings,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
-            shape = RoundedCornerShape(14.dp),
-            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.75f),
+            shape = RoundedCornerShape(10.dp),
+            color = if (state == "conflict") MaterialTheme.colorScheme.errorContainer
+                else MaterialTheme.colorScheme.surfaceContainer,
         ) {
             Row(
                 Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
@@ -328,7 +305,8 @@ private fun SyncStatusNotice(openSettings: () -> Unit) {
                     text,
                     Modifier.weight(1f),
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    color = if (state == "conflict") MaterialTheme.colorScheme.onErrorContainer
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
                     if (!connected) "去连接" else "查看",

@@ -105,6 +105,7 @@ internal object BusinessEventFactory {
         occurredAt: Long,
         planVersion: Int = 0,
         attemptId: String = "",
+        executionId: String = "",
     ) = navigationEvent(
         eventId = navigationEventId("NAVIGATION_STARTED", sessionId, planId, planVersion, attemptId),
         kind = "NAVIGATION_STARTED",
@@ -115,6 +116,8 @@ internal object BusinessEventFactory {
         metrics = null,
         occurredAt = occurredAt,
         planVersion = planVersion,
+        executionId = executionId,
+        attemptId = attemptId,
     )
 
     fun navigationArrived(
@@ -125,6 +128,8 @@ internal object BusinessEventFactory {
         correlationId: String,
         occurredAt: Long = metrics?.endedAt?.takeIf { it > 0 } ?: System.currentTimeMillis(),
         planVersion: Int = 0,
+        executionId: String = "",
+        attemptId: String = "",
     ) = navigationEvent(
         eventId = navigationEventId("NAVIGATION_ARRIVED", sessionId, planId, planVersion),
         kind = "NAVIGATION_ARRIVED",
@@ -135,6 +140,8 @@ internal object BusinessEventFactory {
         metrics = metrics,
         occurredAt = occurredAt,
         planVersion = planVersion,
+        executionId = executionId,
+        attemptId = attemptId,
     )
 
     fun navigationCancelled(
@@ -146,6 +153,8 @@ internal object BusinessEventFactory {
         correlationId: String,
         occurredAt: Long = System.currentTimeMillis(),
         planVersion: Int = 0,
+        executionId: String = "",
+        attemptId: String = "",
     ) = navigationEvent(
         eventId = navigationEventId("NAVIGATION_CANCELLED", sessionId, planId, planVersion),
         kind = "NAVIGATION_CANCELLED",
@@ -157,6 +166,8 @@ internal object BusinessEventFactory {
         occurredAt = occurredAt,
         reason = reason,
         planVersion = planVersion,
+        executionId = executionId,
+        attemptId = attemptId,
     )
 
     fun navigationFailed(
@@ -167,9 +178,12 @@ internal object BusinessEventFactory {
         correlationId: String,
         occurredAt: Long = System.currentTimeMillis(),
         planVersion: Int = 0,
+        executionId: String = "",
+        attemptId: String = "",
     ) = navigationEvent(
-        // Every failed attempt is a distinct observation, even in one session.
-        eventId = BusinessEventIds.newObservation(),
+        // New attempts are distinct; a retry of a captured attempt is the same observation.
+        eventId = if (attemptId.isBlank()) BusinessEventIds.newObservation()
+            else navigationEventId("NAVIGATION_FAILED", sessionId, planId, planVersion, attemptId),
         kind = "NAVIGATION_FAILED",
         correlationId = correlationId,
         sessionId = sessionId,
@@ -179,6 +193,8 @@ internal object BusinessEventFactory {
         occurredAt = occurredAt,
         reason = reason,
         planVersion = planVersion,
+        executionId = executionId,
+        attemptId = attemptId,
     )
 
     private fun navigationEventId(kind: String, sessionId: String, planId: String, version: Int, attemptId: String = ""): String {
@@ -198,6 +214,8 @@ internal object BusinessEventFactory {
         occurredAt: Long,
         reason: String = "",
         planVersion: Int = 0,
+        executionId: String = "",
+        attemptId: String = "",
     ) = BusinessEventOutbox(
         eventId = eventId,
         correlationId = correlationId,
@@ -214,6 +232,8 @@ internal object BusinessEventFactory {
             .put("selected_task_count", request.optJSONArray("tasks")?.length() ?: 0)
             .put("selected_task_ids", taskIds(request))
             .apply {
+                if (executionId.isNotBlank()) put("execution_id", executionId)
+                if (attemptId.isNotBlank()) put("attempt_id", attemptId)
                 if (metrics != null) {
                     put("actual_seconds", metrics.actualSeconds)
                     put("actual_meters", metrics.actualMeters ?: JSONObject.NULL)

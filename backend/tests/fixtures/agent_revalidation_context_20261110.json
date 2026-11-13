@@ -1,0 +1,1132 @@
+{
+  "report_sha256": "af50713188ec0ac4341958689d6b9325bae23e1258a9a1e0cbd801a300e9ffd6",
+  "snapshot": {
+    "agent_task_id": "11c21c89-163a-4e0c-b485-34059aacf504",
+    "conversation_id": "a1-synthetic-7a17f8fcb2404df8982cbe78b6f5c94d",
+    "message_id": "da5a43e3-91d9-4db5-a437-71b130c6ba85",
+    "revision": 1,
+    "goal": "取快递 + 打印论文 + 回宿舍。按给定公开测试地点步行，先读取正式待办与版本，调用本地路线规划工具得到真实地图路线，再发布route成果；保持待办不变，不启动导航。",
+    "constraints": {
+      "city": "成都",
+      "delivery_contract": {
+        "content_schema": {
+          "type": "object"
+        },
+        "kind": "route",
+        "max_artifacts": 1
+      },
+      "departure": "2026-11-10T16:04:45.834650+08:00",
+      "destination": {
+        "address": "大慈寺路21-23号(春熙路地铁站C口步行360米)",
+        "id": "B001C00869",
+        "latitude": 30.654243,
+        "longitude": 104.083791,
+        "name": "宿舍（合成角色：大慈寺公开地点）"
+      },
+      "max_extra_minutes": 120,
+      "mode": "walking",
+      "origin": {
+        "address": "2号线;3号线",
+        "id": "BV10069531",
+        "latitude": 30.653389,
+        "longitude": 104.080019,
+        "name": "春熙路(地铁站)"
+      },
+      "selected_task_ids": [
+        "parcel",
+        "print"
+      ],
+      "synthetic_roles": "快递/打印/宿舍均为公开地点对应的测试角色，无真实取件码或住宅"
+    },
+    "success_criteria": [
+      "路线来源为生产规划工具",
+      "快递和打印都保留，最终到宿舍",
+      "未开始导航"
+    ],
+    "current_run_id": "09a2dd2f-a4c1-451a-9637-622522112ea7",
+    "created_at": 1794297885.8371356,
+    "updated_at": 1794297885.8371356,
+    "run": {
+      "agent_run_id": "09a2dd2f-a4c1-451a-9637-622522112ea7",
+      "agent_task_id": "11c21c89-163a-4e0c-b485-34059aacf504",
+      "revision": 1,
+      "state": "paused",
+      "reason": "context_budget_exceeded",
+      "budget": {
+        "max_duration_seconds": 900,
+        "max_steps": 24,
+        "max_tool_calls": 20
+      },
+      "steps_used": 10,
+      "tool_calls_used": 9,
+      "lease_until": null,
+      "started_at": 1794297885.8502126,
+      "active_elapsed": 24.72517418861389,
+      "active_since": null,
+      "created_at": 1794297885.8371356,
+      "updated_at": 1794297910.5753868,
+      "active_used_seconds": 24.72517418861389
+    },
+    "tool_calls": [
+      {
+        "tool_call_id": "a653fe3f-281b-4457-bc7d-e8c6774f0328",
+        "agent_run_id": "09a2dd2f-a4c1-451a-9637-622522112ea7",
+        "tool_id": "onmyway.read_tasks",
+        "tool_version": "740532325abad02ccab00f94042d3b828a3bb235983e06336716281ddc1f81be",
+        "arguments": {},
+        "effect": "read",
+        "requires_approval": false,
+        "approved": false,
+        "state": "succeeded",
+        "result": {
+          "data": {
+            "revision": 1,
+            "store_id": "66214ef9-3750-402a-97ea-96dca9204dbf",
+            "task_protocol": 1,
+            "task_versions": {
+              "parcel": 1,
+              "print": 1
+            },
+            "tasks": [
+              {
+                "deleted": false,
+                "task": {
+                  "completedAt": 0,
+                  "createdAt": 100,
+                  "deadline": "",
+                  "id": "parcel",
+                  "lastRemindedAt": 0,
+                  "placeJson": "{\"id\": \"B0L2RCN7OZ\", \"name\": \"成都国际金融中心\", \"longitude\": 104.081503, \"latitude\": 30.654764, \"address\": \"红星路三段1号(春熙路地铁站出入口旁)\"}",
+                  "placeType": "PARCEL",
+                  "plannedDate": "",
+                  "priority": 2,
+                  "reminderAt": 0,
+                  "reminderCount": 0,
+                  "reminderPending": 0,
+                  "serviceMinutes": 5,
+                  "status": "pending",
+                  "title": "取快递",
+                  "updatedAt": 100
+                },
+                "task_id": "parcel",
+                "version": 1
+              },
+              {
+                "deleted": false,
+                "task": {
+                  "completedAt": 0,
+                  "createdAt": 100,
+                  "deadline": "",
+                  "id": "print",
+                  "lastRemindedAt": 0,
+                  "placeJson": "{\"id\": \"B0FFF6X49V\", \"name\": \"成都太古里\", \"longitude\": 104.083809, \"latitude\": 30.653358, \"address\": \"中纱帽街8号\"}",
+                  "placeType": "PRINT_SHOP",
+                  "plannedDate": "",
+                  "priority": 2,
+                  "reminderAt": 0,
+                  "reminderCount": 0,
+                  "reminderPending": 0,
+                  "serviceMinutes": 5,
+                  "status": "pending",
+                  "title": "打印论文",
+                  "updatedAt": 100
+                },
+                "task_id": "print",
+                "version": 1
+              }
+            ]
+          },
+          "observed_at": "2026-11-10T08:04:47.290897+00:00",
+          "source": "builtin:onmyway",
+          "tool_id": "onmyway.read_tasks",
+          "version": "740532325abad02ccab00f94042d3b828a3bb235983e06336716281ddc1f81be"
+        },
+        "error": null,
+        "legacy_run_id": "a653fe3f-281b-4457-bc7d-e8c6774f0328",
+        "created_at": 1794297887.2707098,
+        "updated_at": 1794297887.298405
+      },
+      {
+        "tool_call_id": "6b47c121-c261-41eb-af70-c298ff437bfe",
+        "agent_run_id": "09a2dd2f-a4c1-451a-9637-622522112ea7",
+        "tool_id": "onmyway.plan_route",
+        "tool_version": "71a916e73e62f8172e6d95c33e3b39ae1de2a60ee7add0c20f8f3c0a52942120",
+        "arguments": {
+          "request": {
+            "allow_partial": false,
+            "arrive_by": null,
+            "departure": "2026-11-10T16:04:45.834650+08:00",
+            "destination": {
+              "address": "大慈寺路21-23号(春熙路地铁站C口步行360米)",
+              "id": "B001C00869",
+              "latitude": 30.654243,
+              "longitude": 104.083791,
+              "name": "宿舍（合成角色：大慈寺公开地点）"
+            },
+            "max_extra_minutes": 120,
+            "mode": "walking",
+            "origin": {
+              "address": "2号线;3号线",
+              "id": "BV10069531",
+              "latitude": 30.653389,
+              "longitude": 104.080019,
+              "name": "春熙路(地铁站)"
+            },
+            "preference": "fastest",
+            "tasks": [
+              {
+                "id": "parcel",
+                "place": {
+                  "address": "红星路三段1号(春熙路地铁站出入口旁)",
+                  "id": "B0L2RCN7OZ",
+                  "latitude": 30.654764,
+                  "longitude": 104.081503,
+                  "name": "成都国际金融中心"
+                },
+                "priority": 2,
+                "service_minutes": 5,
+                "title": "取快递"
+              },
+              {
+                "id": "print",
+                "place": {
+                  "address": "中纱帽街8号",
+                  "id": "B0FFF6X49V",
+                  "latitude": 30.653358,
+                  "longitude": 104.083809,
+                  "name": "成都太古里"
+                },
+                "priority": 2,
+                "service_minutes": 5,
+                "title": "打印论文"
+              }
+            ]
+          },
+          "store_id": "66214ef9-3750-402a-97ea-96dca9204dbf",
+          "task_versions": {
+            "parcel": 1,
+            "print": 1
+          }
+        },
+        "effect": "read",
+        "requires_approval": false,
+        "approved": false,
+        "state": "succeeded",
+        "result": {
+          "data": {
+            "correlation_id": "09a2dd2f-a4c1-451a-9637-622522112ea7",
+            "legacy_run_id": "6b47c121-c261-41eb-af70-c298ff437bfe",
+            "plan": {
+              "arrival": "2026-11-10T08:34:07.350045Z",
+              "baseline_meters": 722,
+              "baseline_seconds": 578,
+              "coordinate_system": "GCJ-02",
+              "departure": "2026-11-10T08:04:56.350045Z",
+              "destination": {
+                "address": "大慈寺路21-23号(春熙路地铁站C口步行360米)",
+                "id": "B001C00869",
+                "latitude": 30.654243,
+                "longitude": 104.083791,
+                "name": "宿舍（合成角色：大慈寺公开地点）"
+              },
+              "extra_meters": 717,
+              "extra_seconds": 1173,
+              "extra_travel_seconds": 573,
+              "legs": [
+                {
+                  "meters": 566,
+                  "polyline": "104.080035,30.653381;104.080169,30.653602;104.080169,30.653602;104.080438,30.653472;104.08049,30.653455;104.08049,30.653455;104.08089,30.653286;104.08089,30.653286;104.081315,30.653103;104.081315,30.653103;104.081497,30.653043;104.081545,30.653051;104.081714,30.653129;104.081719,30.653129;104.081797,30.65326;104.081797,30.65326;104.081918,30.653455;104.082257,30.65395;104.082257,30.65395;104.082283,30.653976;104.082283,30.653976;104.082374,30.654097;104.082374,30.654097;104.082244,30.654158;104.08224,30.654158;104.081975,30.653885;104.081771,30.653676;104.081632,30.653559;104.081502,30.653524;104.081367,30.653576;104.081289,30.653628;104.08125,30.653694;104.081259,30.653785;104.081311,30.653876;104.081311,30.653876;104.081341,30.654097;104.081359,30.654128;104.081359,30.654128;104.081376,30.654175;104.081506,30.654362;104.081506,30.654362;104.081636,30.654579;104.081636,30.654579;104.081636,30.654579",
+                  "seconds": 453
+                },
+                {
+                  "meters": 428,
+                  "polyline": "104.081636,30.654579;104.08151,30.654366;104.08151,30.654366;104.08138,30.65418;104.081363,30.654132;104.081363,30.654132;104.081345,30.654102;104.081315,30.65388;104.081315,30.65388;104.081263,30.653789;104.08125,30.653698;104.081285,30.653633;104.081363,30.653581;104.081497,30.653524;104.081628,30.653555;104.081766,30.653672;104.08197,30.65388;104.08224,30.654158;104.08224,30.654158;104.082374,30.654102;104.082374,30.654097;104.082287,30.65398;104.082279,30.65398;104.082322,30.653945;104.082322,30.653945;104.082326,30.653941;104.082383,30.653911;104.082383,30.653911;104.082773,30.653737;104.082773,30.653737;104.082999,30.653628;104.082999,30.653628;104.083086,30.653585;104.083212,30.653481;104.083212,30.653481;104.083212,30.653481;104.083268,30.653459;104.083268,30.653459;104.083355,30.653416;104.083498,30.653364;104.083576,30.653346;104.083759,30.653273",
+                  "seconds": 342
+                },
+                {
+                  "meters": 445,
+                  "polyline": "104.083759,30.653268;104.083763,30.653268;104.083845,30.65322;104.083845,30.653216;104.084223,30.65378;104.084223,30.65378;104.08454,30.654258;104.08454,30.654258;104.084614,30.654379;104.084614,30.654379;104.084505,30.654431;104.084505,30.654431;104.084475,30.654449;104.084366,30.654497;104.084362,30.654531;104.08447,30.654718;104.084614,30.654948;104.084614,30.654948;104.084644,30.655013;104.084618,30.655035;104.084505,30.655074;104.084501,30.655074;104.084536,30.655126;104.084536,30.655126;104.084475,30.655152;104.084132,30.655313;104.084128,30.655313;104.08408,30.655239;104.08408,30.655239;104.084023,30.655169;104.084023,30.655169;104.083837,30.654839;104.083837,30.654839;104.083763,30.654692;104.083741,30.654635;104.083741,30.654596;104.08378,30.654575;104.08378,30.65457;104.083668,30.654375;104.083663,30.654371;104.083802,30.654323;104.083802,30.654323;104.083819,30.654314",
+                  "seconds": 356
+                }
+              ],
+              "mode": "walking",
+              "omitted": [],
+              "origin": {
+                "address": "2号线;3号线",
+                "id": "BV10069531",
+                "latitude": 30.653389,
+                "longitude": 104.080019,
+                "name": "春熙路(地铁站)"
+              },
+              "requested_departure": "2026-11-10T16:04:45.834650+08:00",
+              "service_seconds": 600,
+              "solver_status": "OPTIMAL",
+              "stops": [
+                {
+                  "arrival": "2026-11-10T08:12:29.350045Z",
+                  "departure": "2026-11-10T08:17:29.350045Z",
+                  "place": {
+                    "address": "红星路三段1号(春熙路地铁站出入口旁)",
+                    "id": "B0L2RCN7OZ",
+                    "latitude": 30.654764,
+                    "longitude": 104.081503,
+                    "name": "成都国际金融中心"
+                  },
+                  "service_seconds": 300,
+                  "task_ids": [
+                    "parcel"
+                  ],
+                  "task_titles": [
+                    "取快递"
+                  ]
+                },
+                {
+                  "arrival": "2026-11-10T08:23:11.350045Z",
+                  "departure": "2026-11-10T08:28:11.350045Z",
+                  "place": {
+                    "address": "中纱帽街8号",
+                    "id": "B0FFF6X49V",
+                    "latitude": 30.653358,
+                    "longitude": 104.083809,
+                    "name": "成都太古里"
+                  },
+                  "service_seconds": 300,
+                  "task_ids": [
+                    "print"
+                  ],
+                  "task_titles": [
+                    "打印论文"
+                  ]
+                }
+              ],
+              "total_meters": 1439,
+              "total_seconds": 1751,
+              "travel_seconds": 1151,
+              "warnings": [
+                "办事时长为估算，未包含未知排队时间；营业时间尚未校验。",
+                "仅在已搜索到的候选地点中规划，不保证全城最优。"
+              ]
+            },
+            "plan_id": "6b47c121-c261-41eb-af70-c298ff437bfe",
+            "plan_version": 1,
+            "snapshot_id": "agent-call:6b47c121-c261-41eb-af70-c298ff437bfe"
+          },
+          "observed_at": "2026-11-10T08:04:53.379894+00:00",
+          "source": "builtin:onmyway",
+          "tool_id": "onmyway.plan_route",
+          "version": "71a916e73e62f8172e6d95c33e3b39ae1de2a60ee7add0c20f8f3c0a52942120"
+        },
+        "error": null,
+        "legacy_run_id": "6b47c121-c261-41eb-af70-c298ff437bfe",
+        "created_at": 1794297891.0087771,
+        "updated_at": 1794297893.3878539
+      },
+      {
+        "tool_call_id": "f5a02761-d620-4d24-bae2-e61e2829322a",
+        "agent_run_id": "09a2dd2f-a4c1-451a-9637-622522112ea7",
+        "tool_id": "agent.read_result",
+        "tool_version": "96acab23d3499837716b8e1a39087fecf884c93cc09d482bec434a77076311b0",
+        "arguments": {
+          "tool_call_id": "a653fe3f-281b-4457-bc7d-e8c6774f0328"
+        },
+        "effect": "read",
+        "requires_approval": false,
+        "approved": false,
+        "state": "succeeded",
+        "result": {
+          "data": {
+            "has_more": false,
+            "next_offset": 1333,
+            "observed_at": "2026-11-10T08:04:47.298405+00:00",
+            "offset": 0,
+            "source_kind": "result",
+            "source_links": {
+              "omitted": 0,
+              "urls": []
+            },
+            "source_ref": "a653fe3f-281b-4457-bc7d-e8c6774f0328",
+            "source_state": "succeeded",
+            "source_tool_id": "onmyway.read_tasks",
+            "text": "{\"tool_call_id\":\"a653fe3f-281b-4457-bc7d-e8c6774f0328\",\"state\":\"succeeded\",\"result\":{\"data\":{\"revision\":1,\"store_id\":\"66214ef9-3750-402a-97ea-96dca9204dbf\",\"task_protocol\":1,\"task_versions\":{\"parcel\":1,\"print\":1},\"tasks\":[{\"deleted\":false,\"task\":{\"completedAt\":0,\"createdAt\":100,\"deadline\":\"\",\"id\":\"parcel\",\"lastRemindedAt\":0,\"placeJson\":\"{\\\"id\\\": \\\"B0L2RCN7OZ\\\", \\\"name\\\": \\\"成都国际金融中心\\\", \\\"longitude\\\": 104.081503, \\\"latitude\\\": 30.654764, \\\"address\\\": \\\"红星路三段1号(春熙路地铁站出入口旁)\\\"}\",\"placeType\":\"PARCEL\",\"plannedDate\":\"\",\"priority\":2,\"reminderAt\":0,\"reminderCount\":0,\"reminderPending\":0,\"serviceMinutes\":5,\"status\":\"pending\",\"title\":\"取快递\",\"updatedAt\":100},\"task_id\":\"parcel\",\"version\":1},{\"deleted\":false,\"task\":{\"completedAt\":0,\"createdAt\":100,\"deadline\":\"\",\"id\":\"print\",\"lastRemindedAt\":0,\"placeJson\":\"{\\\"id\\\": \\\"B0FFF6X49V\\\", \\\"name\\\": \\\"成都太古里\\\", \\\"longitude\\\": 104.083809, \\\"latitude\\\": 30.653358, \\\"address\\\": \\\"中纱帽街8号\\\"}\",\"placeType\":\"PRINT_SHOP\",\"plannedDate\":\"\",\"priority\":2,\"reminderAt\":0,\"reminderCount\":0,\"reminderPending\":0,\"serviceMinutes\":5,\"status\":\"pending\",\"title\":\"打印论文\",\"updatedAt\":100},\"task_id\":\"print\",\"version\":1}]},\"observed_at\":\"2026-11-10T08:04:47.290897+00:00\",\"source\":\"builtin:onmyway\",\"tool_id\":\"onmyway.read_tasks\",\"version\":\"740532325abad02ccab00f94042d3b828a3bb235983e06336716281ddc1f81be\"},\"error\":null}",
+            "total_chars": 1333
+          },
+          "observed_at": "2026-11-10T08:04:56.000903+00:00",
+          "source": "builtin:agent",
+          "tool_id": "agent.read_result",
+          "version": "96acab23d3499837716b8e1a39087fecf884c93cc09d482bec434a77076311b0"
+        },
+        "error": null,
+        "legacy_run_id": null,
+        "created_at": 1794297895.9778638,
+        "updated_at": 1794297896.008409
+      },
+      {
+        "tool_call_id": "5339e971-24e7-4a57-85de-34a4d77d494d",
+        "agent_run_id": "09a2dd2f-a4c1-451a-9637-622522112ea7",
+        "tool_id": "agent.read_result",
+        "tool_version": "96acab23d3499837716b8e1a39087fecf884c93cc09d482bec434a77076311b0",
+        "arguments": {
+          "max_chars": 3000,
+          "tool_call_id": "6b47c121-c261-41eb-af70-c298ff437bfe"
+        },
+        "effect": "read",
+        "requires_approval": false,
+        "approved": false,
+        "state": "succeeded",
+        "result": {
+          "data": {
+            "has_more": true,
+            "next_offset": 2338,
+            "observed_at": "2026-11-10T08:04:53.387854+00:00",
+            "offset": 0,
+            "source_kind": "result",
+            "source_links": {
+              "omitted": 0,
+              "urls": []
+            },
+            "source_ref": "6b47c121-c261-41eb-af70-c298ff437bfe",
+            "source_state": "succeeded",
+            "source_tool_id": "onmyway.plan_route",
+            "text": "{\"tool_call_id\":\"6b47c121-c261-41eb-af70-c298ff437bfe\",\"state\":\"succeeded\",\"result\":{\"data\":{\"correlation_id\":\"09a2dd2f-a4c1-451a-9637-622522112ea7\",\"legacy_run_id\":\"6b47c121-c261-41eb-af70-c298ff437bfe\",\"plan\":{\"arrival\":\"2026-11-10T08:34:07.350045Z\",\"baseline_meters\":722,\"baseline_seconds\":578,\"coordinate_system\":\"GCJ-02\",\"departure\":\"2026-11-10T08:04:56.350045Z\",\"destination\":{\"address\":\"大慈寺路21-23号(春熙路地铁站C口步行360米)\",\"id\":\"B001C00869\",\"latitude\":30.654243,\"longitude\":104.083791,\"name\":\"宿舍（合成角色：大慈寺公开地点）\"},\"extra_meters\":717,\"extra_seconds\":1173,\"extra_travel_seconds\":573,\"legs\":[{\"meters\":566,\"polyline\":\"104.080035,30.653381;104.080169,30.653602;104.080169,30.653602;104.080438,30.653472;104.08049,30.653455;104.08049,30.653455;104.08089,30.653286;104.08089,30.653286;104.081315,30.653103;104.081315,30.653103;104.081497,30.653043;104.081545,30.653051;104.081714,30.653129;104.081719,30.653129;104.081797,30.65326;104.081797,30.65326;104.081918,30.653455;104.082257,30.65395;104.082257,30.65395;104.082283,30.653976;104.082283,30.653976;104.082374,30.654097;104.082374,30.654097;104.082244,30.654158;104.08224,30.654158;104.081975,30.653885;104.081771,30.653676;104.081632,30.653559;104.081502,30.653524;104.081367,30.653576;104.081289,30.653628;104.08125,30.653694;104.081259,30.653785;104.081311,30.653876;104.081311,30.653876;104.081341,30.654097;104.081359,30.654128;104.081359,30.654128;104.081376,30.654175;104.081506,30.654362;104.081506,30.654362;104.081636,30.654579;104.081636,30.654579;104.081636,30.654579\",\"seconds\":453},{\"meters\":428,\"polyline\":\"104.081636,30.654579;104.08151,30.654366;104.08151,30.654366;104.08138,30.65418;104.081363,30.654132;104.081363,30.654132;104.081345,30.654102;104.081315,30.65388;104.081315,30.65388;104.081263,30.653789;104.08125,30.653698;104.081285,30.653633;104.081363,30.653581;104.081497,30.653524;104.081628,30.653555;104.081766,30.653672;104.08197,30.65388;104.08224,30.654158;104.08224,30.654158;104.082374,30.654102;104.082374,30.654097;104.082287,30.65398;104.082279,30.65398;104.082322,30.653945;104.082322,30.653945;104.082326,30.653941;104.082383,30.653911;104.082383,30.653911;104.082773,30.653737;104.082773,30.653737;104.082999,30.653628;104.082999,30.653628;104.083086,30.653585;104.083212,30.653481;104.083212,30.653481;104.083212,30.653481;104.083268,30.653459;104.08",
+            "total_chars": 4634
+          },
+          "observed_at": "2026-11-10T08:04:59.655814+00:00",
+          "source": "builtin:agent",
+          "tool_id": "agent.read_result",
+          "version": "96acab23d3499837716b8e1a39087fecf884c93cc09d482bec434a77076311b0"
+        },
+        "error": null,
+        "legacy_run_id": null,
+        "created_at": 1794297899.6322753,
+        "updated_at": 1794297899.6637297
+      },
+      {
+        "tool_call_id": "da99467c-9874-4648-98ba-794d47cc2cfd",
+        "agent_run_id": "09a2dd2f-a4c1-451a-9637-622522112ea7",
+        "tool_id": "agent.read_result",
+        "tool_version": "96acab23d3499837716b8e1a39087fecf884c93cc09d482bec434a77076311b0",
+        "arguments": {
+          "tool_call_id": "a653fe3f-281b-4457-bc7d-e8c6774f0328"
+        },
+        "effect": "read",
+        "requires_approval": false,
+        "approved": false,
+        "state": "succeeded",
+        "result": {
+          "data": {
+            "has_more": false,
+            "next_offset": 1333,
+            "observed_at": "2026-11-10T08:04:47.298405+00:00",
+            "offset": 0,
+            "source_kind": "result",
+            "source_links": {
+              "omitted": 0,
+              "urls": []
+            },
+            "source_ref": "a653fe3f-281b-4457-bc7d-e8c6774f0328",
+            "source_state": "succeeded",
+            "source_tool_id": "onmyway.read_tasks",
+            "text": "{\"tool_call_id\":\"a653fe3f-281b-4457-bc7d-e8c6774f0328\",\"state\":\"succeeded\",\"result\":{\"data\":{\"revision\":1,\"store_id\":\"66214ef9-3750-402a-97ea-96dca9204dbf\",\"task_protocol\":1,\"task_versions\":{\"parcel\":1,\"print\":1},\"tasks\":[{\"deleted\":false,\"task\":{\"completedAt\":0,\"createdAt\":100,\"deadline\":\"\",\"id\":\"parcel\",\"lastRemindedAt\":0,\"placeJson\":\"{\\\"id\\\": \\\"B0L2RCN7OZ\\\", \\\"name\\\": \\\"成都国际金融中心\\\", \\\"longitude\\\": 104.081503, \\\"latitude\\\": 30.654764, \\\"address\\\": \\\"红星路三段1号(春熙路地铁站出入口旁)\\\"}\",\"placeType\":\"PARCEL\",\"plannedDate\":\"\",\"priority\":2,\"reminderAt\":0,\"reminderCount\":0,\"reminderPending\":0,\"serviceMinutes\":5,\"status\":\"pending\",\"title\":\"取快递\",\"updatedAt\":100},\"task_id\":\"parcel\",\"version\":1},{\"deleted\":false,\"task\":{\"completedAt\":0,\"createdAt\":100,\"deadline\":\"\",\"id\":\"print\",\"lastRemindedAt\":0,\"placeJson\":\"{\\\"id\\\": \\\"B0FFF6X49V\\\", \\\"name\\\": \\\"成都太古里\\\", \\\"longitude\\\": 104.083809, \\\"latitude\\\": 30.653358, \\\"address\\\": \\\"中纱帽街8号\\\"}\",\"placeType\":\"PRINT_SHOP\",\"plannedDate\":\"\",\"priority\":2,\"reminderAt\":0,\"reminderCount\":0,\"reminderPending\":0,\"serviceMinutes\":5,\"status\":\"pending\",\"title\":\"打印论文\",\"updatedAt\":100},\"task_id\":\"print\",\"version\":1}]},\"observed_at\":\"2026-11-10T08:04:47.290897+00:00\",\"source\":\"builtin:onmyway\",\"tool_id\":\"onmyway.read_tasks\",\"version\":\"740532325abad02ccab00f94042d3b828a3bb235983e06336716281ddc1f81be\"},\"error\":null}",
+            "total_chars": 1333
+          },
+          "observed_at": "2026-11-10T08:05:02.064029+00:00",
+          "source": "builtin:agent",
+          "tool_id": "agent.read_result",
+          "version": "96acab23d3499837716b8e1a39087fecf884c93cc09d482bec434a77076311b0"
+        },
+        "error": null,
+        "legacy_run_id": null,
+        "created_at": 1794297902.03652,
+        "updated_at": 1794297902.0781631
+      },
+      {
+        "tool_call_id": "381ae031-09fe-48f8-8747-0a20e66953e2",
+        "agent_run_id": "09a2dd2f-a4c1-451a-9637-622522112ea7",
+        "tool_id": "agent.read_result",
+        "tool_version": "96acab23d3499837716b8e1a39087fecf884c93cc09d482bec434a77076311b0",
+        "arguments": {
+          "max_chars": 2400,
+          "offset": 2338,
+          "tool_call_id": "6b47c121-c261-41eb-af70-c298ff437bfe"
+        },
+        "effect": "read",
+        "requires_approval": false,
+        "approved": false,
+        "state": "succeeded",
+        "result": {
+          "data": {
+            "has_more": true,
+            "next_offset": 4536,
+            "observed_at": "2026-11-10T08:04:53.387854+00:00",
+            "offset": 2338,
+            "source_kind": "result",
+            "source_links": {
+              "omitted": 0,
+              "urls": []
+            },
+            "source_ref": "6b47c121-c261-41eb-af70-c298ff437bfe",
+            "source_state": "succeeded",
+            "source_tool_id": "onmyway.plan_route",
+            "text": "3268,30.653459;104.083355,30.653416;104.083498,30.653364;104.083576,30.653346;104.083759,30.653273\",\"seconds\":342},{\"meters\":445,\"polyline\":\"104.083759,30.653268;104.083763,30.653268;104.083845,30.65322;104.083845,30.653216;104.084223,30.65378;104.084223,30.65378;104.08454,30.654258;104.08454,30.654258;104.084614,30.654379;104.084614,30.654379;104.084505,30.654431;104.084505,30.654431;104.084475,30.654449;104.084366,30.654497;104.084362,30.654531;104.08447,30.654718;104.084614,30.654948;104.084614,30.654948;104.084644,30.655013;104.084618,30.655035;104.084505,30.655074;104.084501,30.655074;104.084536,30.655126;104.084536,30.655126;104.084475,30.655152;104.084132,30.655313;104.084128,30.655313;104.08408,30.655239;104.08408,30.655239;104.084023,30.655169;104.084023,30.655169;104.083837,30.654839;104.083837,30.654839;104.083763,30.654692;104.083741,30.654635;104.083741,30.654596;104.08378,30.654575;104.08378,30.65457;104.083668,30.654375;104.083663,30.654371;104.083802,30.654323;104.083802,30.654323;104.083819,30.654314\",\"seconds\":356}],\"mode\":\"walking\",\"omitted\":[],\"origin\":{\"address\":\"2号线;3号线\",\"id\":\"BV10069531\",\"latitude\":30.653389,\"longitude\":104.080019,\"name\":\"春熙路(地铁站)\"},\"requested_departure\":\"2026-11-10T16:04:45.834650+08:00\",\"service_seconds\":600,\"solver_status\":\"OPTIMAL\",\"stops\":[{\"arrival\":\"2026-11-10T08:12:29.350045Z\",\"departure\":\"2026-11-10T08:17:29.350045Z\",\"place\":{\"address\":\"红星路三段1号(春熙路地铁站出入口旁)\",\"id\":\"B0L2RCN7OZ\",\"latitude\":30.654764,\"longitude\":104.081503,\"name\":\"成都国际金融中心\"},\"service_seconds\":300,\"task_ids\":[\"parcel\"],\"task_titles\":[\"取快递\"]},{\"arrival\":\"2026-11-10T08:23:11.350045Z\",\"departure\":\"2026-11-10T08:28:11.350045Z\",\"place\":{\"address\":\"中纱帽街8号\",\"id\":\"B0FFF6X49V\",\"latitude\":30.653358,\"longitude\":104.083809,\"name\":\"成都太古里\"},\"service_seconds\":300,\"task_ids\":[\"print\"],\"task_titles\":[\"打印论文\"]}],\"total_meters\":1439,\"total_seconds\":1751,\"travel_seconds\":1151,\"warnings\":[\"办事时长为估算，未包含未知排队时间；营业时间尚未校验。\",\"仅在已搜索到的候选地点中规划，不保证全城最优。\"]},\"plan_id\":\"6b47c121-c261-41eb-af70-c298ff437bfe\",\"plan_version\":1,\"snapshot_id\":\"agent-call:6b47c121-c261-41eb-af70-c298ff437bfe\"},\"observed_at\":\"2026-11-10T08:04:53.379894+00:00\",\"source\":\"builtin:onmyway\",\"tool_id\":\"onmyway.plan_",
+            "total_chars": 4634
+          },
+          "observed_at": "2026-11-10T08:05:04.571721+00:00",
+          "source": "builtin:agent",
+          "tool_id": "agent.read_result",
+          "version": "96acab23d3499837716b8e1a39087fecf884c93cc09d482bec434a77076311b0"
+        },
+        "error": null,
+        "legacy_run_id": null,
+        "created_at": 1794297904.5478263,
+        "updated_at": 1794297904.5805762
+      },
+      {
+        "tool_call_id": "1649bdcc-aaca-4ee0-ab30-4ffc9486fe52",
+        "agent_run_id": "09a2dd2f-a4c1-451a-9637-622522112ea7",
+        "tool_id": "agent.read_result",
+        "tool_version": "96acab23d3499837716b8e1a39087fecf884c93cc09d482bec434a77076311b0",
+        "arguments": {
+          "paths": [
+            "/data/tasks",
+            "/data/version",
+            "/data/task_version"
+          ],
+          "tool_call_id": "a653fe3f-281b-4457-bc7d-e8c6774f0328"
+        },
+        "effect": "read",
+        "requires_approval": false,
+        "approved": false,
+        "state": "failed",
+        "result": null,
+        "error": {
+          "code": "selection_path_not_found",
+          "details": {
+            "requested_paths": [
+              "/data/tasks",
+              "/data/version",
+              "/data/task_version"
+            ],
+            "selections": [
+              {
+                "bytes": 1124,
+                "children": [
+                  {
+                    "bytes": 1,
+                    "path": "/data/revision",
+                    "type": "scalar"
+                  },
+                  {
+                    "bytes": 38,
+                    "path": "/data/store_id",
+                    "type": "scalar"
+                  },
+                  {
+                    "bytes": 1,
+                    "path": "/data/task_protocol",
+                    "type": "scalar"
+                  },
+                  {
+                    "bytes": 22,
+                    "path": "/data/task_versions",
+                    "type": "object"
+                  },
+                  {
+                    "bytes": 994,
+                    "path": "/data/tasks",
+                    "type": "array"
+                  }
+                ],
+                "omitted_children": 0,
+                "path": "/data",
+                "type": "object"
+              }
+            ]
+          },
+          "message": "路径不在原始result中；details给出最近有效父路径及真实子路径，不使用decoded_path或分页包装路径。"
+        },
+        "legacy_run_id": null,
+        "created_at": 1794297906.2746084,
+        "updated_at": 1794297906.306369
+      },
+      {
+        "tool_call_id": "1dbc612d-69e6-4cfc-9ddf-a04efcab7a48",
+        "agent_run_id": "09a2dd2f-a4c1-451a-9637-622522112ea7",
+        "tool_id": "agent.read_result",
+        "tool_version": "96acab23d3499837716b8e1a39087fecf884c93cc09d482bec434a77076311b0",
+        "arguments": {
+          "max_chars": 2400,
+          "offset": 0,
+          "tool_call_id": "6b47c121-c261-41eb-af70-c298ff437bfe"
+        },
+        "effect": "read",
+        "requires_approval": false,
+        "approved": false,
+        "state": "succeeded",
+        "result": {
+          "data": {
+            "has_more": true,
+            "next_offset": 2338,
+            "observed_at": "2026-11-10T08:04:53.387854+00:00",
+            "offset": 0,
+            "source_kind": "result",
+            "source_links": {
+              "omitted": 0,
+              "urls": []
+            },
+            "source_ref": "6b47c121-c261-41eb-af70-c298ff437bfe",
+            "source_state": "succeeded",
+            "source_tool_id": "onmyway.plan_route",
+            "text": "{\"tool_call_id\":\"6b47c121-c261-41eb-af70-c298ff437bfe\",\"state\":\"succeeded\",\"result\":{\"data\":{\"correlation_id\":\"09a2dd2f-a4c1-451a-9637-622522112ea7\",\"legacy_run_id\":\"6b47c121-c261-41eb-af70-c298ff437bfe\",\"plan\":{\"arrival\":\"2026-11-10T08:34:07.350045Z\",\"baseline_meters\":722,\"baseline_seconds\":578,\"coordinate_system\":\"GCJ-02\",\"departure\":\"2026-11-10T08:04:56.350045Z\",\"destination\":{\"address\":\"大慈寺路21-23号(春熙路地铁站C口步行360米)\",\"id\":\"B001C00869\",\"latitude\":30.654243,\"longitude\":104.083791,\"name\":\"宿舍（合成角色：大慈寺公开地点）\"},\"extra_meters\":717,\"extra_seconds\":1173,\"extra_travel_seconds\":573,\"legs\":[{\"meters\":566,\"polyline\":\"104.080035,30.653381;104.080169,30.653602;104.080169,30.653602;104.080438,30.653472;104.08049,30.653455;104.08049,30.653455;104.08089,30.653286;104.08089,30.653286;104.081315,30.653103;104.081315,30.653103;104.081497,30.653043;104.081545,30.653051;104.081714,30.653129;104.081719,30.653129;104.081797,30.65326;104.081797,30.65326;104.081918,30.653455;104.082257,30.65395;104.082257,30.65395;104.082283,30.653976;104.082283,30.653976;104.082374,30.654097;104.082374,30.654097;104.082244,30.654158;104.08224,30.654158;104.081975,30.653885;104.081771,30.653676;104.081632,30.653559;104.081502,30.653524;104.081367,30.653576;104.081289,30.653628;104.08125,30.653694;104.081259,30.653785;104.081311,30.653876;104.081311,30.653876;104.081341,30.654097;104.081359,30.654128;104.081359,30.654128;104.081376,30.654175;104.081506,30.654362;104.081506,30.654362;104.081636,30.654579;104.081636,30.654579;104.081636,30.654579\",\"seconds\":453},{\"meters\":428,\"polyline\":\"104.081636,30.654579;104.08151,30.654366;104.08151,30.654366;104.08138,30.65418;104.081363,30.654132;104.081363,30.654132;104.081345,30.654102;104.081315,30.65388;104.081315,30.65388;104.081263,30.653789;104.08125,30.653698;104.081285,30.653633;104.081363,30.653581;104.081497,30.653524;104.081628,30.653555;104.081766,30.653672;104.08197,30.65388;104.08224,30.654158;104.08224,30.654158;104.082374,30.654102;104.082374,30.654097;104.082287,30.65398;104.082279,30.65398;104.082322,30.653945;104.082322,30.653945;104.082326,30.653941;104.082383,30.653911;104.082383,30.653911;104.082773,30.653737;104.082773,30.653737;104.082999,30.653628;104.082999,30.653628;104.083086,30.653585;104.083212,30.653481;104.083212,30.653481;104.083212,30.653481;104.083268,30.653459;104.08",
+            "total_chars": 4634
+          },
+          "observed_at": "2026-11-10T08:05:08.006259+00:00",
+          "source": "builtin:agent",
+          "tool_id": "agent.read_result",
+          "version": "96acab23d3499837716b8e1a39087fecf884c93cc09d482bec434a77076311b0"
+        },
+        "error": null,
+        "legacy_run_id": null,
+        "created_at": 1794297907.9721227,
+        "updated_at": 1794297908.0167813
+      },
+      {
+        "tool_call_id": "e3dcb0f6-5f74-4c31-93aa-c579ee7788cf",
+        "agent_run_id": "09a2dd2f-a4c1-451a-9637-622522112ea7",
+        "tool_id": "agent.read_result",
+        "tool_version": "96acab23d3499837716b8e1a39087fecf884c93cc09d482bec434a77076311b0",
+        "arguments": {
+          "paths": [
+            "/data/tasks",
+            "/data/revision",
+            "/data/task_versions"
+          ],
+          "tool_call_id": "a653fe3f-281b-4457-bc7d-e8c6774f0328"
+        },
+        "effect": "read",
+        "requires_approval": false,
+        "approved": false,
+        "state": "succeeded",
+        "result": {
+          "data": {
+            "observed_at": "2026-11-10T08:04:47.298405+00:00",
+            "representation": "json_selection",
+            "source_kind": "result",
+            "source_ref": "a653fe3f-281b-4457-bc7d-e8c6774f0328",
+            "source_sha256": "92b90122ed8328cbeb629662a2968a1b18ca44a9713764a7f0c509a0421ab024",
+            "source_state": "succeeded",
+            "source_tool_id": "onmyway.read_tasks",
+            "values": {
+              "/data/revision": 1,
+              "/data/task_versions": {
+                "parcel": 1,
+                "print": 1
+              },
+              "/data/tasks": [
+                {
+                  "deleted": false,
+                  "task": {
+                    "completedAt": 0,
+                    "createdAt": 100,
+                    "deadline": "",
+                    "id": "parcel",
+                    "lastRemindedAt": 0,
+                    "placeJson": "{\"id\": \"B0L2RCN7OZ\", \"name\": \"成都国际金融中心\", \"longitude\": 104.081503, \"latitude\": 30.654764, \"address\": \"红星路三段1号(春熙路地铁站出入口旁)\"}",
+                    "placeType": "PARCEL",
+                    "plannedDate": "",
+                    "priority": 2,
+                    "reminderAt": 0,
+                    "reminderCount": 0,
+                    "reminderPending": 0,
+                    "serviceMinutes": 5,
+                    "status": "pending",
+                    "title": "取快递",
+                    "updatedAt": 100
+                  },
+                  "task_id": "parcel",
+                  "version": 1
+                },
+                {
+                  "deleted": false,
+                  "task": {
+                    "completedAt": 0,
+                    "createdAt": 100,
+                    "deadline": "",
+                    "id": "print",
+                    "lastRemindedAt": 0,
+                    "placeJson": "{\"id\": \"B0FFF6X49V\", \"name\": \"成都太古里\", \"longitude\": 104.083809, \"latitude\": 30.653358, \"address\": \"中纱帽街8号\"}",
+                    "placeType": "PRINT_SHOP",
+                    "plannedDate": "",
+                    "priority": 2,
+                    "reminderAt": 0,
+                    "reminderCount": 0,
+                    "reminderPending": 0,
+                    "serviceMinutes": 5,
+                    "status": "pending",
+                    "title": "打印论文",
+                    "updatedAt": 100
+                  },
+                  "task_id": "print",
+                  "version": 1
+                }
+              ]
+            }
+          },
+          "observed_at": "2026-11-10T08:05:10.540382+00:00",
+          "source": "builtin:agent",
+          "tool_id": "agent.read_result",
+          "version": "96acab23d3499837716b8e1a39087fecf884c93cc09d482bec434a77076311b0"
+        },
+        "error": null,
+        "legacy_run_id": null,
+        "created_at": 1794297910.5159287,
+        "updated_at": 1794297910.5489037
+      }
+    ],
+    "artifacts": [],
+    "prior_artifacts": [],
+    "working_notes": [],
+    "observations": [],
+    "unresolved_calls": []
+  },
+  "descriptors": [
+    {
+      "tool_id": "onmyway.plan_route",
+      "description": "服务端根据已读取的待办内容、服务身份和精确版本，结合当前地点、目的地与地图路线计算步行/骑行办事方案；不接收客户端观察快照。任务有指定place时省略place_type或置null；仅按类型找地点时省略place或置null。保留read_tasks中的priority及完整place/address，不得擅改。task_versions的键必须恰好对应request.tasks的id；版本沿用read_tasks，移除停靠只移除本次对应版本项，不自行递增版本。仅生成方案，不确认行程、不删除或完成待办、不启动导航。从本次路线移除打印时保留正式打印待办。",
+      "version": "71a916e73e62f8172e6d95c33e3b39ae1de2a60ee7add0c20f8f3c0a52942120",
+      "effect": "read",
+      "executor": "server",
+      "source": "builtin:onmyway",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "store_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "task_versions": {
+            "additionalProperties": {
+              "maximum": 2147483646,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "maxProperties": 6,
+            "type": "object"
+          },
+          "request": {
+            "$ref": "#/$defs/PlanRequest"
+          }
+        },
+        "required": [
+          "store_id",
+          "task_versions",
+          "request"
+        ],
+        "type": "object",
+        "$defs": {
+          "Place": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              "name": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "longitude": {
+                "maximum": 180.0,
+                "minimum": -180.0,
+                "type": "number"
+              },
+              "latitude": {
+                "maximum": 90.0,
+                "minimum": -90.0,
+                "type": "number"
+              },
+              "address": {
+                "maxLength": 500,
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "longitude",
+              "latitude"
+            ],
+            "type": "object"
+          },
+          "PlanRequest": {
+            "additionalProperties": false,
+            "properties": {
+              "origin": {
+                "$ref": "#/$defs/Place"
+              },
+              "destination": {
+                "$ref": "#/$defs/Place"
+              },
+              "tasks": {
+                "items": {
+                  "$ref": "#/$defs/Task"
+                },
+                "maxItems": 6,
+                "type": "array"
+              },
+              "mode": {
+                "enum": [
+                  "walking",
+                  "cycling"
+                ],
+                "type": "string"
+              },
+              "preference": {
+                "enum": [
+                  "fastest",
+                  "most_tasks",
+                  "priority"
+                ],
+                "type": "string"
+              },
+              "departure": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "arrive_by": {
+                "anyOf": [
+                  {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "max_extra_minutes": {
+                "anyOf": [
+                  {
+                    "maximum": 240,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "allow_partial": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "origin",
+              "destination",
+              "departure"
+            ],
+            "type": "object"
+          },
+          "Task": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              "priority": {
+                "maximum": 3,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "service_minutes": {
+                "maximum": 240,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "deadline": {
+                "anyOf": [
+                  {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "place": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/Place"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "place_type": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "PRINT_SHOP",
+                      "SUPERMARKET",
+                      "PHARMACY",
+                      "PARCEL",
+                      "TAKEOUT",
+                      "INDOOR",
+                      "OTHER"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "title"
+            ],
+            "type": "object",
+            "oneOf": [
+              {
+                "required": [
+                  "place"
+                ],
+                "properties": {
+                  "place": {
+                    "type": "object"
+                  },
+                  "place_type": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "required": [
+                  "place_type"
+                ],
+                "properties": {
+                  "place": {
+                    "type": "null"
+                  },
+                  "place_type": {
+                    "type": "string"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "output_schema": null
+    },
+    {
+      "tool_id": "agent.read_artifact",
+      "description": "按 content_ref/version 读取成果缺失段；旧成果仅供参考。offset 为字符，页最多 2400 UTF-8 字节，用 next_offset 续读。",
+      "version": "d97ab12ec31675e7525c386db7accab6c836c6509ac8797f12c6ee1c38a7719a",
+      "effect": "read",
+      "executor": "server",
+      "source": "builtin:agent",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "artifact_id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_chars": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3000
+          }
+        },
+        "required": [
+          "artifact_id"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": null
+    },
+    {
+      "tool_id": "onmyway.read_tasks",
+      "description": "读取个人待办的当前内容、服务身份和版本；规划取快递、打印等事项前使用，不能据此声称待办已完成。",
+      "version": "740532325abad02ccab00f94042d3b828a3bb235983e06336716281ddc1f81be",
+      "effect": "read",
+      "executor": "server",
+      "source": "builtin:onmyway",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "output_schema": null
+    },
+    {
+      "tool_id": "onmyway.read_execution",
+      "description": "只读查询原能力执行编号 run_id 的当前状态和已核实设备回执。请求已记录或已确认不代表设备已执行；仅 device_execution_observed=true 且匹配 result 回执可证明设备行为。不会确认、派发、重试、核实新回执或启动导航。",
+      "version": "0b5b41901ef1448aa6b8f7c142a3e507b18e003e525c7698bf36bf8a5655c818",
+      "effect": "read",
+      "executor": "server",
+      "source": "builtin:onmyway",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": null
+    },
+    {
+      "tool_id": "onmyway.search_places",
+      "description": "按城市搜索真实地点、门店或旅行景点，返回地点身份和坐标。先搜索再使用地点；结果不证明营业时间或预约可用性。",
+      "version": "d76f8e5261082bd9535ecebe16e9bc2f79d0a7e0b6d60269247d7ecb5beee65d",
+      "effect": "read",
+      "executor": "server",
+      "source": "builtin:onmyway",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "city": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50
+          }
+        },
+        "required": [
+          "query",
+          "city"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": null
+    },
+    {
+      "tool_id": "agent.read_result",
+      "description": "按result_ref读缺失事实：结构字段优先用paths（原result的JSON Pointer，非decoded_path）；否则offset/max_chars字符分页，按next_offset续读。最多2400 UTF-8字节，勿重读。",
+      "version": "96acab23d3499837716b8e1a39087fecf884c93cc09d482bec434a77076311b0",
+      "effect": "read",
+      "executor": "server",
+      "source": "builtin:agent",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "tool_call_id": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_chars": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3000
+          },
+          "paths": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "maxLength": 512
+            }
+          }
+        },
+        "required": [
+          "tool_call_id"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "paths"
+              ]
+            },
+            "then": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "offset"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "max_chars"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "output_schema": null
+    }
+  ],
+  "namespace_index": {
+    "items": [
+      {
+        "namespace": "agent",
+        "tool_count": 2
+      },
+      {
+        "namespace": "amap",
+        "tool_count": 6,
+        "display_name": "高德地图",
+        "aliases": [
+          "高德",
+          "Amap"
+        ]
+      },
+      {
+        "namespace": "exa",
+        "tool_count": 2,
+        "display_name": "Exa 搜索",
+        "aliases": [
+          "Exa"
+        ]
+      },
+      {
+        "namespace": "onmyway",
+        "tool_count": 4
+      }
+    ],
+    "omitted": 0
+  },
+  "active_tool_ids": [
+    "agent.read_result"
+  ]
+}

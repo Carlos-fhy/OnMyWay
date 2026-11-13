@@ -1,25 +1,32 @@
-from pathlib import Path
+from backend.paths import BACKEND_ROOT
+
 from ipaddress import ip_address
 import threading
+from uuid import UUID
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
-from .amap import MapError, from_environment
-from .models import LocationRequest, Place, PlanRequest, PlanResult
-from .planner import PlanningError, plan, recommend
-from .assistant import router as assistant_router
-from .backup import router as backup_router
-from .candidates import router as candidates_router
-from .confirmations import router as confirmations_router
-from .events import router as events_router
-from .sync import router as sync_router
-from .tasks import router as tasks_router
-from .context import require_fresh_context
+from backend.planning.amap import MapError, from_environment
+from backend.planning.models import LocationRequest, Place, PlanRequest, PlanResult
+from backend.planning.planner import PlanningError, plan, recommend
+from backend.assistant.api import router as assistant_router
+from backend.data_services.backup import router as backup_router
+from backend.planning.candidates import router as candidates_router
+from backend.execution.confirmations import router as confirmations_router
+from backend.execution.events import router as events_router
+from backend.data_services.sync import router as sync_router
+from backend.data_services.tasks import router as tasks_router
+from backend.execution.runtime import router as execution_router
+from backend.memory.personal import router as personal_memory_router
+from backend.agent.api import router as agent_router
+from backend.agent.service import agent_lifespan
+from backend.planning.context import require_fresh_context
+from backend.planning import execution as planning_execution
 
-load_dotenv(Path(__file__).with_name(".env"))
-app = FastAPI(title="OnMyWay local planner", version="0.1.0")
+load_dotenv(BACKEND_ROOT / ".env")
+app = FastAPI(title="OnMyWay local planner", version="0.1.0", lifespan=agent_lifespan)
 app.include_router(assistant_router)
 app.include_router(backup_router)
 app.include_router(candidates_router)
@@ -27,6 +34,9 @@ app.include_router(confirmations_router)
 app.include_router(events_router)
 app.include_router(sync_router)
 app.include_router(tasks_router)
+app.include_router(execution_router)
+app.include_router(personal_memory_router)
+app.include_router(agent_router)
 app.state.provider = from_environment()
 planning_slot = threading.BoundedSemaphore(1)
 
@@ -71,26 +81,41 @@ def places(q: str = Query(min_length=1, max_length=100), city: str = Query(min_l
     return app.state.provider.search(q, city)
 
 
-@app.post("/plans", response_model=PlanResult)
-def plans(body: PlanRequest):
-    require_fresh_context(body.context_snapshot)
+def _planning_worker(body, worker):
     if not planning_slot.acquire(blocking=False):
-        return JSONResponse(status_code=429, content={"detail": "已有规划正在运行，请稍后重试。"})
+        raise HTTPException(429, "已有规划正在运行，请稍后重试。")
     try:
-        return plan(body, app.state.provider)
+        return worker(body, app.state.provider)
     finally:
         planning_slot.release()
+
+
+@app.post("/plans", response_model=PlanResult)
+def plans(body: PlanRequest, x_execution_id: UUID | None = Header(default=None)):
+    if x_execution_id is not None:
+        # The adapter has validated the response, including computed distances.
+        return JSONResponse(content=planning_execution.run(
+            body, x_execution_id, "plan", lambda: _planning_worker(body, plan)))
+    require_fresh_context(body.context_snapshot)
+    return _planning_worker(body, plan)
 
 
 @app.post("/recommendations")
-def recommendations(body: PlanRequest):
+def recommendations(body: PlanRequest, x_execution_id: UUID | None = Header(default=None)):
+    if x_execution_id is not None:
+        return planning_execution.run(body, x_execution_id, "recommend", lambda: _planning_worker(body, recommend))
     require_fresh_context(body.context_snapshot)
-    if not planning_slot.acquire(blocking=False):
-        return JSONResponse(status_code=429, content={"detail": "已有规划正在运行，请稍后重试。"})
-    try:
-        return recommend(body, app.state.provider)
-    finally:
-        planning_slot.release()
+    return _planning_worker(body, recommend)
+
+
+@app.post("/plans/status")
+def plan_status(body: PlanRequest, x_execution_id: UUID = Header()):
+    return planning_execution.status(body, x_execution_id, "plan")
+
+
+@app.post("/recommendations/status")
+def recommendation_status(body: PlanRequest, x_execution_id: UUID = Header()):
+    return planning_execution.status(body, x_execution_id, "recommend")
 
 
 @app.post("/location", response_model=Place)

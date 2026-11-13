@@ -1,0 +1,2418 @@
+{
+  "source_report": "app/build/reports/agent-a1-20261111/errands-protocol-retry/live-20261110T173830Z-316406c0/report.json",
+  "source_report_sha256": "745b20a36c8f9b92a14b2c1609fb07d5fd3457f056066626805e213db30061f0",
+  "data_scope": "Synthetic acceptance tasks and public places; original report already redacted.",
+  "input_token_limit": 12000,
+  "snapshot": {
+    "agent_task_id": "f3b7a916-64a5-4acf-b167-f7052cce0966",
+    "conversation_id": "a1-synthetic-136f571de12b4f119ffe514c04f83523",
+    "message_id": "14fb0843-95ca-4994-a7dd-e2b204514853",
+    "revision": 2,
+    "goal": "本次不去打印，只取快递再回宿舍。只移除路线停靠，正式打印待办保留未完成。重新读取任务版本并规划，保持其余条件；不启动导航。",
+    "constraints": {
+      "city": "成都",
+      "delivery_contract": {
+        "content_schema": {
+          "properties": {
+            "arrival": {
+              "minLength": 10,
+              "type": "string"
+            },
+            "departure": {
+              "minLength": 10,
+              "type": "string"
+            },
+            "legs": {
+              "items": {
+                "required": [
+                  "meters",
+                  "seconds"
+                ],
+                "type": "object"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            },
+            "navigation_started": {
+              "const": false
+            },
+            "stops": {
+              "maxItems": 1,
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [
+            "plan_id",
+            "origin",
+            "destination",
+            "mode",
+            "departure",
+            "arrival",
+            "stops",
+            "legs",
+            "total_meters",
+            "travel_seconds",
+            "service_seconds",
+            "total_seconds",
+            "coordinate_system",
+            "warnings",
+            "navigation_started"
+          ],
+          "type": "object"
+        },
+        "kind": "route",
+        "max_artifacts": 1
+      },
+      "departure": "2026-11-11T01:38:34.523530+08:00",
+      "destination": {
+        "address": "大慈寺路21-23号(春熙路地铁站C口步行360米)",
+        "id": "B001C00869",
+        "latitude": 30.654243,
+        "longitude": 104.083791,
+        "name": "宿舍（合成角色：大慈寺公开地点）"
+      },
+      "max_extra_minutes": 120,
+      "mode": "walking",
+      "origin": {
+        "address": "2号线;3号线",
+        "id": "BV10069531",
+        "latitude": 30.653389,
+        "longitude": 104.080019,
+        "name": "春熙路(地铁站)"
+      },
+      "selected_task_ids": [
+        "parcel"
+      ],
+      "synthetic_roles": "快递/打印/宿舍均为公开地点对应的测试角色，无真实取件码或住宅"
+    },
+    "success_criteria": [
+      "快递和宿舍保留",
+      "正式打印待办未删除或完成",
+      "无导航执行"
+    ],
+    "current_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+    "created_at": 1794332314.5275385,
+    "updated_at": 1794332326.9896023,
+    "run": {
+      "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+      "agent_task_id": "f3b7a916-64a5-4acf-b167-f7052cce0966",
+      "revision": 2,
+      "state": "paused",
+      "reason": "budget_steps",
+      "budget": {
+        "max_duration_seconds": 900,
+        "max_steps": 24,
+        "max_tool_calls": 20
+      },
+      "steps_used": 24,
+      "tool_calls_used": 5,
+      "lease_until": null,
+      "started_at": 1794332327.0173032,
+      "active_elapsed": 39.26711702346802,
+      "active_since": null,
+      "created_at": 1794332326.9896023,
+      "updated_at": 1794332366.2844203,
+      "active_used_seconds": 39.26711702346802
+    },
+    "task_revision_receipt": {
+      "scope": "task_definition_only",
+      "from_revision": 1,
+      "to_revision": 2,
+      "before_sha256": "b4b900c65b6613e2bc8a84de7ed9456a859bfeb4f77251cd225a81abdd4fb8aa",
+      "after_sha256": "3a62763e1c8a69746cd6a94666d6fb3bc3719de25ceeb8ab4d48c9e6b6d69837",
+      "changes": [
+        {
+          "path": "/constraints/delivery_contract/content_schema/properties/legs/maxItems",
+          "before_present": true,
+          "after_present": true,
+          "before": 3,
+          "after": 2
+        },
+        {
+          "path": "/constraints/delivery_contract/content_schema/properties/legs/minItems",
+          "before_present": true,
+          "after_present": true,
+          "before": 3,
+          "after": 2
+        },
+        {
+          "path": "/constraints/delivery_contract/content_schema/properties/stops/maxItems",
+          "before_present": true,
+          "after_present": true,
+          "before": 2,
+          "after": 1
+        },
+        {
+          "path": "/constraints/delivery_contract/content_schema/properties/stops/minItems",
+          "before_present": true,
+          "after_present": true,
+          "before": 2,
+          "after": 1
+        },
+        {
+          "path": "/constraints/selected_task_ids",
+          "before_present": true,
+          "after_present": true,
+          "before": [
+            "parcel",
+            "print"
+          ],
+          "after": [
+            "parcel"
+          ]
+        },
+        {
+          "path": "/goal",
+          "before_present": true,
+          "after_present": true,
+          "before": "取快递 + 打印论文 + 回宿舍。按给定公开测试地点步行，先读取正式待办与版本，调用本地路线规划工具得到真实地图路线，再发布route成果；保持待办不变，不启动导航。",
+          "after": "本次不去打印，只取快递再回宿舍。只移除路线停靠，正式打印待办保留未完成。重新读取任务版本并规划，保持其余条件；不启动导航。"
+        },
+        {
+          "path": "/success_criteria",
+          "before_present": true,
+          "after_present": true,
+          "before": [
+            "路线来源为生产规划工具",
+            "快递和打印都保留，最终到宿舍",
+            "未开始导航"
+          ],
+          "after": [
+            "快递和宿舍保留",
+            "正式打印待办未删除或完成",
+            "无导航执行"
+          ]
+        }
+      ],
+      "omitted_changes": 0
+    },
+    "tool_calls": [
+      {
+        "tool_call_id": "e7d41bff-6ec8-4beb-a9c3-c57953da42b1",
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "tool_id": "onmyway.read_tasks",
+        "tool_version": "150ddb6f150cb95af64e07840c2511885652ef6889bdc31c8e13652d42dd1327",
+        "arguments": {},
+        "effect": "read",
+        "requires_approval": false,
+        "approved": false,
+        "state": "succeeded",
+        "result": {
+          "data": {
+            "revision": 1,
+            "store_id": "048ae384-7c7f-4148-ae7f-302e6b159437",
+            "task_protocol": 1,
+            "task_versions": {
+              "parcel": 1,
+              "print": 1
+            },
+            "tasks": [
+              {
+                "deleted": false,
+                "task": {
+                  "completedAt": 0,
+                  "createdAt": 100,
+                  "deadline": "",
+                  "id": "parcel",
+                  "lastRemindedAt": 0,
+                  "placeJson": "{\"id\": \"B0L2RCN7OZ\", \"name\": \"成都国际金融中心\", \"longitude\": 104.081503, \"latitude\": 30.654764, \"address\": \"红星路三段1号(春熙路地铁站出入口旁)\"}",
+                  "placeType": "PARCEL",
+                  "plannedDate": "",
+                  "priority": 2,
+                  "reminderAt": 0,
+                  "reminderCount": 0,
+                  "reminderPending": 0,
+                  "serviceMinutes": 5,
+                  "status": "pending",
+                  "title": "取快递",
+                  "updatedAt": 100
+                },
+                "task_id": "parcel",
+                "version": 1
+              },
+              {
+                "deleted": false,
+                "task": {
+                  "completedAt": 0,
+                  "createdAt": 100,
+                  "deadline": "",
+                  "id": "print",
+                  "lastRemindedAt": 0,
+                  "placeJson": "{\"id\": \"B0FFF6X49V\", \"name\": \"成都太古里\", \"longitude\": 104.083809, \"latitude\": 30.653358, \"address\": \"中纱帽街8号\"}",
+                  "placeType": "PRINT_SHOP",
+                  "plannedDate": "",
+                  "priority": 2,
+                  "reminderAt": 0,
+                  "reminderCount": 0,
+                  "reminderPending": 0,
+                  "serviceMinutes": 5,
+                  "status": "pending",
+                  "title": "打印论文",
+                  "updatedAt": 100
+                },
+                "task_id": "print",
+                "version": 1
+              }
+            ]
+          },
+          "observed_at": "2026-11-10T17:38:58.195626+00:00",
+          "source": "builtin:onmyway",
+          "tool_id": "onmyway.read_tasks",
+          "version": "150ddb6f150cb95af64e07840c2511885652ef6889bdc31c8e13652d42dd1327"
+        },
+        "error": null,
+        "legacy_run_id": "e7d41bff-6ec8-4beb-a9c3-c57953da42b1",
+        "created_at": 1794332338.1658173,
+        "updated_at": 1794332338.2103007
+      },
+      {
+        "tool_call_id": "5734c54b-9270-4a88-a4d0-0ef0204c9287",
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "tool_id": "amap.maps_direction_walking",
+        "tool_version": "0355e8964df2ea1222f019f8eda98004573b0e67e8faf96215b0cdaba49d2d91",
+        "arguments": {
+          "destination": "104.081503,30.654764",
+          "origin": "104.080019,30.653389"
+        },
+        "effect": "read",
+        "requires_approval": false,
+        "approved": false,
+        "state": "succeeded",
+        "result": {
+          "data": {
+            "content": [
+              {
+                "text": "{\"route\":{\"origin\":\"104.080019,30.653389\",\"destination\":\"104.081503,30.654764\",\"paths\":[{\"distance\":566,\"duration\":453,\"steps\":[{\"instruction\":\"向东北步行27米右转\",\"road\":\"\",\"distance\":27,\"orientation\":\"东北\",\"duration\":22},{\"instruction\":\"向东步行164米向左前方行走\",\"road\":\"\",\"distance\":164,\"orientation\":\"东\",\"duration\":131},{\"instruction\":\"沿中纱帽街向东北步行122米左转\",\"road\":\"中纱帽街\",\"distance\":122,\"orientation\":\"东北\",\"duration\":98},{\"instruction\":\"向西北步行14米左转\",\"road\":\"\",\"distance\":14,\"orientation\":\"西北\",\"duration\":11},{\"instruction\":\"向西步行155米向左前方行走\",\"road\":\"\",\"distance\":155,\"orientation\":\"西\",\"duration\":124},{\"instruction\":\"向北步行84米到达目的地\",\"road\":\"\",\"distance\":84,\"orientation\":\"北\",\"duration\":67}]}]}}",
+                "type": "text"
+              }
+            ],
+            "isError": false
+          },
+          "observed_at": "2026-11-10T17:39:00.498294+00:00",
+          "source": "mcp:official:amap",
+          "tool_id": "amap.maps_direction_walking",
+          "version": "0355e8964df2ea1222f019f8eda98004573b0e67e8faf96215b0cdaba49d2d91"
+        },
+        "error": null,
+        "legacy_run_id": null,
+        "created_at": 1794332340.3757417,
+        "updated_at": 1794332340.515172
+      },
+      {
+        "tool_call_id": "630d4d74-94cf-4574-8c54-7e48a9614600",
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "tool_id": "amap.maps_direction_walking",
+        "tool_version": "0355e8964df2ea1222f019f8eda98004573b0e67e8faf96215b0cdaba49d2d91",
+        "arguments": {
+          "destination": "104.083791,30.654243",
+          "origin": "104.081503,30.654764"
+        },
+        "effect": "read",
+        "requires_approval": false,
+        "approved": false,
+        "state": "succeeded",
+        "result": {
+          "data": {
+            "content": [
+              {
+                "text": "{\"route\":{\"origin\":\"104.081503,30.654764\",\"destination\":\"104.083791,30.654243\",\"paths\":[{\"distance\":660,\"duration\":528,\"steps\":[{\"instruction\":\"向东南步行239米右转\",\"road\":\"\",\"distance\":239,\"orientation\":\"东南\",\"duration\":191},{\"instruction\":\"向东南步行19米左转\",\"road\":\"\",\"distance\":19,\"orientation\":\"东南\",\"duration\":15},{\"instruction\":\"沿北纱帽街向东北步行206米右转\",\"road\":\"北纱帽街\",\"distance\":206,\"orientation\":\"东北\",\"duration\":165},{\"instruction\":\"沿大慈寺路辅路向东南步行65米右转\",\"road\":\"大慈寺路辅路\",\"distance\":65,\"orientation\":\"东南\",\"duration\":52},{\"instruction\":\"向西南步行92米右转\",\"road\":\"\",\"distance\":92,\"orientation\":\"西南\",\"duration\":74},{\"instruction\":\"向西南步行24米左转\",\"road\":\"\",\"distance\":24,\"orientation\":\"西南\",\"duration\":19},{\"instruction\":\"向东步行15米到达目的地\",\"road\":\"\",\"distance\":15,\"orientation\":\"东\",\"duration\":12}]}]}}",
+                "type": "text"
+              }
+            ],
+            "isError": false
+          },
+          "observed_at": "2026-11-10T17:39:07.621372+00:00",
+          "source": "mcp:official:amap",
+          "tool_id": "amap.maps_direction_walking",
+          "version": "0355e8964df2ea1222f019f8eda98004573b0e67e8faf96215b0cdaba49d2d91"
+        },
+        "error": null,
+        "legacy_run_id": null,
+        "created_at": 1794332347.4660406,
+        "updated_at": 1794332347.6398335
+      },
+      {
+        "tool_call_id": "291b1f65-2897-4c14-b60a-d8ef35c904c0",
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "tool_id": "agent.read_result",
+        "tool_version": "96acab23d3499837716b8e1a39087fecf884c93cc09d482bec434a77076311b0",
+        "arguments": {
+          "tool_call_id": "e7d41bff-6ec8-4beb-a9c3-c57953da42b1"
+        },
+        "effect": "read",
+        "requires_approval": false,
+        "approved": false,
+        "state": "succeeded",
+        "result": {
+          "data": {
+            "has_more": false,
+            "next_offset": 1333,
+            "observed_at": "2026-11-10T17:38:58.210301+00:00",
+            "offset": 0,
+            "source_kind": "result",
+            "source_links": {
+              "omitted": 0,
+              "urls": []
+            },
+            "source_ref": "e7d41bff-6ec8-4beb-a9c3-c57953da42b1",
+            "source_state": "succeeded",
+            "source_tool_id": "onmyway.read_tasks",
+            "text": "{\"tool_call_id\":\"e7d41bff-6ec8-4beb-a9c3-c57953da42b1\",\"state\":\"succeeded\",\"result\":{\"data\":{\"revision\":1,\"store_id\":\"048ae384-7c7f-4148-ae7f-302e6b159437\",\"task_protocol\":1,\"task_versions\":{\"parcel\":1,\"print\":1},\"tasks\":[{\"deleted\":false,\"task\":{\"completedAt\":0,\"createdAt\":100,\"deadline\":\"\",\"id\":\"parcel\",\"lastRemindedAt\":0,\"placeJson\":\"{\\\"id\\\": \\\"B0L2RCN7OZ\\\", \\\"name\\\": \\\"成都国际金融中心\\\", \\\"longitude\\\": 104.081503, \\\"latitude\\\": 30.654764, \\\"address\\\": \\\"红星路三段1号(春熙路地铁站出入口旁)\\\"}\",\"placeType\":\"PARCEL\",\"plannedDate\":\"\",\"priority\":2,\"reminderAt\":0,\"reminderCount\":0,\"reminderPending\":0,\"serviceMinutes\":5,\"status\":\"pending\",\"title\":\"取快递\",\"updatedAt\":100},\"task_id\":\"parcel\",\"version\":1},{\"deleted\":false,\"task\":{\"completedAt\":0,\"createdAt\":100,\"deadline\":\"\",\"id\":\"print\",\"lastRemindedAt\":0,\"placeJson\":\"{\\\"id\\\": \\\"B0FFF6X49V\\\", \\\"name\\\": \\\"成都太古里\\\", \\\"longitude\\\": 104.083809, \\\"latitude\\\": 30.653358, \\\"address\\\": \\\"中纱帽街8号\\\"}\",\"placeType\":\"PRINT_SHOP\",\"plannedDate\":\"\",\"priority\":2,\"reminderAt\":0,\"reminderCount\":0,\"reminderPending\":0,\"serviceMinutes\":5,\"status\":\"pending\",\"title\":\"打印论文\",\"updatedAt\":100},\"task_id\":\"print\",\"version\":1}]},\"observed_at\":\"2026-11-10T17:38:58.195626+00:00\",\"source\":\"builtin:onmyway\",\"tool_id\":\"onmyway.read_tasks\",\"version\":\"150ddb6f150cb95af64e07840c2511885652ef6889bdc31c8e13652d42dd1327\"},\"error\":null}",
+            "total_chars": 1333
+          },
+          "observed_at": "2026-11-10T17:39:13.079410+00:00",
+          "source": "builtin:agent",
+          "tool_id": "agent.read_result",
+          "version": "96acab23d3499837716b8e1a39087fecf884c93cc09d482bec434a77076311b0"
+        },
+        "error": null,
+        "legacy_run_id": null,
+        "created_at": 1794332353.0443244,
+        "updated_at": 1794332353.095411
+      },
+      {
+        "tool_call_id": "7992adea-fae8-46aa-87f3-d3d803045e7c",
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "tool_id": "onmyway.read_tasks",
+        "tool_version": "150ddb6f150cb95af64e07840c2511885652ef6889bdc31c8e13652d42dd1327",
+        "arguments": {},
+        "effect": "read",
+        "requires_approval": false,
+        "approved": false,
+        "state": "succeeded",
+        "result": {
+          "data": {
+            "revision": 1,
+            "store_id": "048ae384-7c7f-4148-ae7f-302e6b159437",
+            "task_protocol": 1,
+            "task_versions": {
+              "parcel": 1,
+              "print": 1
+            },
+            "tasks": [
+              {
+                "deleted": false,
+                "task": {
+                  "completedAt": 0,
+                  "createdAt": 100,
+                  "deadline": "",
+                  "id": "parcel",
+                  "lastRemindedAt": 0,
+                  "placeJson": "{\"id\": \"B0L2RCN7OZ\", \"name\": \"成都国际金融中心\", \"longitude\": 104.081503, \"latitude\": 30.654764, \"address\": \"红星路三段1号(春熙路地铁站出入口旁)\"}",
+                  "placeType": "PARCEL",
+                  "plannedDate": "",
+                  "priority": 2,
+                  "reminderAt": 0,
+                  "reminderCount": 0,
+                  "reminderPending": 0,
+                  "serviceMinutes": 5,
+                  "status": "pending",
+                  "title": "取快递",
+                  "updatedAt": 100
+                },
+                "task_id": "parcel",
+                "version": 1
+              },
+              {
+                "deleted": false,
+                "task": {
+                  "completedAt": 0,
+                  "createdAt": 100,
+                  "deadline": "",
+                  "id": "print",
+                  "lastRemindedAt": 0,
+                  "placeJson": "{\"id\": \"B0FFF6X49V\", \"name\": \"成都太古里\", \"longitude\": 104.083809, \"latitude\": 30.653358, \"address\": \"中纱帽街8号\"}",
+                  "placeType": "PRINT_SHOP",
+                  "plannedDate": "",
+                  "priority": 2,
+                  "reminderAt": 0,
+                  "reminderCount": 0,
+                  "reminderPending": 0,
+                  "serviceMinutes": 5,
+                  "status": "pending",
+                  "title": "打印论文",
+                  "updatedAt": 100
+                },
+                "task_id": "print",
+                "version": 1
+              }
+            ]
+          },
+          "observed_at": "2026-11-10T17:39:19.816555+00:00",
+          "source": "builtin:onmyway",
+          "tool_id": "onmyway.read_tasks",
+          "version": "150ddb6f150cb95af64e07840c2511885652ef6889bdc31c8e13652d42dd1327"
+        },
+        "error": null,
+        "legacy_run_id": "7992adea-fae8-46aa-87f3-d3d803045e7c",
+        "created_at": 1794332359.7758255,
+        "updated_at": 1794332359.8383327
+      }
+    ],
+    "artifacts": [],
+    "prior_artifacts": [
+      {
+        "artifact_id": "33e0bdd2-d9e5-4e73-a81a-130a22b27553",
+        "version": 1,
+        "agent_run_id": "294635a3-156d-4a73-908a-bcdaabf756e7",
+        "kind": "route",
+        "content": {
+          "content": {
+            "arrival": "2026-11-10T18:07:54.388451Z",
+            "coordinate_system": "GCJ-02",
+            "departure": "2026-11-10T17:38:43.388451Z",
+            "destination": {
+              "address": "大慈寺路21-23号(春熙路地铁站C口步行360米)",
+              "id": "B001C00869",
+              "latitude": 30.654243,
+              "longitude": 104.083791,
+              "name": "宿舍（合成角色：大慈寺公开地点）"
+            },
+            "legs": [
+              {
+                "meters": 566,
+                "seconds": 453
+              },
+              {
+                "meters": 428,
+                "seconds": 342
+              },
+              {
+                "meters": 445,
+                "seconds": 356
+              }
+            ],
+            "mode": "walking",
+            "navigation_started": false,
+            "origin": {
+              "address": "2号线;3号线",
+              "id": "BV10069531",
+              "latitude": 30.653389,
+              "longitude": 104.080019,
+              "name": "春熙路(地铁站)"
+            },
+            "plan_id": "41a71f49-0a25-48ab-8fee-c349b1cd1ec3",
+            "service_seconds": 600,
+            "stops": [
+              {
+                "arrival": "2026-11-10T17:46:16.388451Z",
+                "departure": "2026-11-10T17:51:16.388451Z",
+                "place": {
+                  "address": "红星路三段1号(春熙路地铁站出入口旁)",
+                  "id": "B0L2RCN7OZ",
+                  "latitude": 30.654764,
+                  "longitude": 104.081503,
+                  "name": "成都国际金融中心"
+                },
+                "service_seconds": 300,
+                "task_ids": [
+                  "parcel"
+                ],
+                "task_titles": [
+                  "取快递"
+                ]
+              },
+              {
+                "arrival": "2026-11-10T17:56:58.388451Z",
+                "departure": "2026-11-10T18:01:58.388451Z",
+                "place": {
+                  "address": "中纱帽街8号",
+                  "id": "B0FFF6X49V",
+                  "latitude": 30.653358,
+                  "longitude": 104.083809,
+                  "name": "成都太古里"
+                },
+                "service_seconds": 300,
+                "task_ids": [
+                  "print"
+                ],
+                "task_titles": [
+                  "打印论文"
+                ]
+              }
+            ],
+            "total_meters": 1439,
+            "total_seconds": 1751,
+            "travel_seconds": 1151,
+            "warnings": [
+              "办事时长为估算，未包含未知排队时间；营业时间尚未校验。",
+              "仅在已搜索到的候选地点中规划，不保证全城最优。"
+            ]
+          },
+          "title": "步行路线：春熙路→取快递→打印论文→宿舍"
+        },
+        "sources": [
+          {
+            "observed_at": "2026-11-10T17:38:40.423296+00:00",
+            "source_links": {
+              "omitted": 0,
+              "urls": []
+            },
+            "tool_call_id": "41a71f49-0a25-48ab-8fee-c349b1cd1ec3",
+            "tool_id": "onmyway.plan_route",
+            "tool_version": "155f58eae646b22bc4904239f3a89b33980479062fd83c1b99c41e0eb4448183"
+          },
+          {
+            "observed_at": "2026-11-10T17:38:35.822943+00:00",
+            "source_links": {
+              "omitted": 0,
+              "urls": []
+            },
+            "tool_call_id": "756ff980-a2a8-4066-a44e-a8d5a994d822",
+            "tool_id": "onmyway.read_tasks",
+            "tool_version": "150ddb6f150cb95af64e07840c2511885652ef6889bdc31c8e13652d42dd1327"
+          }
+        ],
+        "created_at": 1794332323.5277095,
+        "agent_task_id": "f3b7a916-64a5-4acf-b167-f7052cce0966",
+        "revision": 1,
+        "reference_only": true
+      }
+    ],
+    "working_notes": [],
+    "observations": [
+      {
+        "cursor": 21,
+        "agent_task_id": "f3b7a916-64a5-4acf-b167-f7052cce0966",
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "revision": 2,
+        "kind": "tools_discovered",
+        "payload": {
+          "directory_version": "b7495fd16ce948457470bc0a9eee40075f4d4a7cb44a251780bd08f8841fc164",
+          "namespace": null,
+          "next_offset": 5,
+          "offset": 0,
+          "query": "task todo read list",
+          "tools": [
+            {
+              "description": "步行/骑行办事路线规划。 read_tasks supplies store_id/versions and exact task fields incl.priority/place/address. task_versions keys=request.tasks IDs",
+              "description_truncated": true,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:onmyway",
+              "tool_id": "onmyway.plan_route",
+              "version": "155f58eae646b22bc4904239f3a89b33980479062fd83c1b99c41e0eb4448183"
+            },
+            {
+              "description": "读取正式待办。store_id/revision/task_versions identify business state, independent of Agent revisions; preserve exact task fields/versions. Read-only, no",
+              "description_truncated": true,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:onmyway",
+              "tool_id": "onmyway.read_tasks",
+              "version": "150ddb6f150cb95af64e07840c2511885652ef6889bdc31c8e13652d42dd1327"
+            },
+            {
+              "description": "按 content_ref/version 读取成果缺失段；旧成果仅供参考。offset 为字符，页最多 2400 UTF-8 字节，用 next_offset 续读。",
+              "description_truncated": false,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:agent",
+              "tool_id": "agent.read_artifact",
+              "version": "d97ab12ec31675e7525c386db7accab6c836c6509ac8797f12c6ee1c38a7719a"
+            },
+            {
+              "description": "按result_ref读缺失事实：结构字段优先用paths（原result的JSON Pointer，非decoded_path）；否则offset/max_chars字符分页，按next_offset",
+              "description_truncated": true,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:agent",
+              "tool_id": "agent.read_result",
+              "version": "96acab23d3499837716b8e1a39087fecf884c93cc09d482bec434a77076311b0"
+            },
+            {
+              "description": "Read a webpage's full content as clean markdown. Use after web_search_exa when highlights are insufficient or to read any URL.\n\nBest for: Extracting full conten",
+              "description_truncated": true,
+              "effect": "read",
+              "executor": "server",
+              "source": "mcp:official:exa",
+              "tool_id": "exa.web_fetch_exa",
+              "version": "eb8d7b8aeeacdfe54065fcfb23af1baf03d3a6edf12839534d88d8c1c1f7c48e"
+            }
+          ],
+          "total": 6
+        },
+        "created_at": 1794332328.8017995
+      },
+      {
+        "cursor": 23,
+        "agent_task_id": "f3b7a916-64a5-4acf-b167-f7052cce0966",
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "revision": 2,
+        "kind": "tools_discovered",
+        "payload": {
+          "directory_version": "5ef77545b84e72e796228f6dd49f333fe7970fff42f6ed69d3db5ca3f97b6d42",
+          "namespace": null,
+          "next_offset": 5,
+          "offset": 0,
+          "query": "onmyway read_tasks task versions",
+          "tools": [
+            {
+              "description": "步行/骑行办事路线规划。 read_tasks supplies store_id/versions and exact task fields incl.priority/place/address. task_versions keys=request.tasks IDs",
+              "description_truncated": true,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:onmyway",
+              "tool_id": "onmyway.plan_route",
+              "version": "155f58eae646b22bc4904239f3a89b33980479062fd83c1b99c41e0eb4448183"
+            },
+            {
+              "description": "读取正式待办。store_id/revision/task_versions identify business state, independent of Agent revisions; preserve exact task fields/versions. Read-only, no",
+              "description_truncated": true,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:onmyway",
+              "tool_id": "onmyway.read_tasks",
+              "version": "150ddb6f150cb95af64e07840c2511885652ef6889bdc31c8e13652d42dd1327"
+            },
+            {
+              "description": "只读查询原能力执行编号 run_id 的当前状态和已核实设备回执。请求已记录或已确认不代表设备已执行；仅 device_execution_ob",
+              "description_truncated": true,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:onmyway",
+              "tool_id": "onmyway.read_execution",
+              "version": "0b5b41901ef1448aa6b8f7c142a3e507b18e003e525c7698bf36bf8a5655c818"
+            },
+            {
+              "description": "按城市搜索真实地点、门店或旅行景点，返回地点身份和坐标。先搜索再使用地点；结果不证明营业时间或预约可用性。",
+              "description_truncated": false,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:onmyway",
+              "tool_id": "onmyway.search_places",
+              "version": "d76f8e5261082bd9535ecebe16e9bc2f79d0a7e0b6d60269247d7ecb5beee65d"
+            },
+            {
+              "description": "按 content_ref/version 读取成果缺失段；旧成果仅供参考。offset 为字符，页最多 2400 UTF-8 字节，用 next_offset 续读。",
+              "description_truncated": false,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:agent",
+              "tool_id": "agent.read_artifact",
+              "version": "d97ab12ec31675e7525c386db7accab6c836c6509ac8797f12c6ee1c38a7719a"
+            }
+          ],
+          "total": 7
+        },
+        "created_at": 1794332330.1671312
+      },
+      {
+        "cursor": 25,
+        "agent_task_id": "f3b7a916-64a5-4acf-b167-f7052cce0966",
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "revision": 2,
+        "kind": "decision_error",
+        "payload": {
+          "code": "invalid_decision",
+          "diagnostic": {
+            "rule": "json_extra_data"
+          },
+          "message": "Return exactly one JSON object; no second action or trailing text."
+        },
+        "created_at": 1794332333.264883
+      },
+      {
+        "cursor": 27,
+        "agent_task_id": "f3b7a916-64a5-4acf-b167-f7052cce0966",
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "revision": 2,
+        "kind": "tools_discovered",
+        "payload": {
+          "directory_version": "b7495fd16ce948457470bc0a9eee40075f4d4a7cb44a251780bd08f8841fc164",
+          "namespace": null,
+          "next_offset": 5,
+          "offset": 0,
+          "query": "task todo read list",
+          "tools": [
+            {
+              "description": "步行/骑行办事路线规划。 read_tasks supplies store_id/versions and exact task fields incl.priority/place/address. task_versions keys=request.tasks IDs",
+              "description_truncated": true,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:onmyway",
+              "tool_id": "onmyway.plan_route",
+              "version": "155f58eae646b22bc4904239f3a89b33980479062fd83c1b99c41e0eb4448183"
+            },
+            {
+              "description": "读取正式待办。store_id/revision/task_versions identify business state, independent of Agent revisions; preserve exact task fields/versions. Read-only, no",
+              "description_truncated": true,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:onmyway",
+              "tool_id": "onmyway.read_tasks",
+              "version": "150ddb6f150cb95af64e07840c2511885652ef6889bdc31c8e13652d42dd1327"
+            },
+            {
+              "description": "按 content_ref/version 读取成果缺失段；旧成果仅供参考。offset 为字符，页最多 2400 UTF-8 字节，用 next_offset 续读。",
+              "description_truncated": false,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:agent",
+              "tool_id": "agent.read_artifact",
+              "version": "d97ab12ec31675e7525c386db7accab6c836c6509ac8797f12c6ee1c38a7719a"
+            },
+            {
+              "description": "按result_ref读缺失事实：结构字段优先用paths（原result的JSON Pointer，非decoded_path）；否则offset/max_chars字符分页，按next_offset",
+              "description_truncated": true,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:agent",
+              "tool_id": "agent.read_result",
+              "version": "96acab23d3499837716b8e1a39087fecf884c93cc09d482bec434a77076311b0"
+            },
+            {
+              "description": "Read a webpage's full content as clean markdown. Use after web_search_exa when highlights are insufficient or to read any URL.\n\nBest for: Extracting full conten",
+              "description_truncated": true,
+              "effect": "read",
+              "executor": "server",
+              "source": "mcp:official:exa",
+              "tool_id": "exa.web_fetch_exa",
+              "version": "eb8d7b8aeeacdfe54065fcfb23af1baf03d3a6edf12839534d88d8c1c1f7c48e"
+            }
+          ],
+          "total": 6
+        },
+        "created_at": 1794332334.6599333
+      },
+      {
+        "cursor": 29,
+        "agent_task_id": "f3b7a916-64a5-4acf-b167-f7052cce0966",
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "revision": 2,
+        "kind": "tools_discovered",
+        "payload": {
+          "directory_version": "de5b917f1bf7071f08c95e0e83783af63837b84ea33073fcfa92535040da4b19",
+          "namespace": null,
+          "next_offset": 5,
+          "offset": 0,
+          "query": "onmyway read_tasks store versions",
+          "tools": [
+            {
+              "description": "步行/骑行办事路线规划。 read_tasks supplies store_id/versions and exact task fields incl.priority/place/address. task_versions keys=request.tasks IDs",
+              "description_truncated": true,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:onmyway",
+              "tool_id": "onmyway.plan_route",
+              "version": "155f58eae646b22bc4904239f3a89b33980479062fd83c1b99c41e0eb4448183"
+            },
+            {
+              "description": "读取正式待办。store_id/revision/task_versions identify business state, independent of Agent revisions; preserve exact task fields/versions. Read-only, no",
+              "description_truncated": true,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:onmyway",
+              "tool_id": "onmyway.read_tasks",
+              "version": "150ddb6f150cb95af64e07840c2511885652ef6889bdc31c8e13652d42dd1327"
+            },
+            {
+              "description": "只读查询原能力执行编号 run_id 的当前状态和已核实设备回执。请求已记录或已确认不代表设备已执行；仅 device_execution_ob",
+              "description_truncated": true,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:onmyway",
+              "tool_id": "onmyway.read_execution",
+              "version": "0b5b41901ef1448aa6b8f7c142a3e507b18e003e525c7698bf36bf8a5655c818"
+            },
+            {
+              "description": "按城市搜索真实地点、门店或旅行景点，返回地点身份和坐标。先搜索再使用地点；结果不证明营业时间或预约可用性。",
+              "description_truncated": false,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:onmyway",
+              "tool_id": "onmyway.search_places",
+              "version": "d76f8e5261082bd9535ecebe16e9bc2f79d0a7e0b6d60269247d7ecb5beee65d"
+            },
+            {
+              "description": "按 content_ref/version 读取成果缺失段；旧成果仅供参考。offset 为字符，页最多 2400 UTF-8 字节，用 next_offset 续读。",
+              "description_truncated": false,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:agent",
+              "tool_id": "agent.read_artifact",
+              "version": "d97ab12ec31675e7525c386db7accab6c836c6509ac8797f12c6ee1c38a7719a"
+            }
+          ],
+          "total": 7
+        },
+        "created_at": 1794332336.1940565
+      },
+      {
+        "cursor": 31,
+        "agent_task_id": "f3b7a916-64a5-4acf-b167-f7052cce0966",
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "revision": 2,
+        "kind": "tool_error",
+        "payload": {
+          "code": "discover_tool_schema_first",
+          "tool_id": "onmyway.read_tasks"
+        },
+        "created_at": 1794332337.1035452
+      },
+      {
+        "cursor": 37,
+        "agent_task_id": "f3b7a916-64a5-4acf-b167-f7052cce0966",
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "revision": 2,
+        "kind": "tools_discovered",
+        "payload": {
+          "directory_version": "fbda0a25d29629cb940f9985a7549f40b0475e47576e5ca3edb7dbe13671d439",
+          "namespace": null,
+          "next_offset": 5,
+          "offset": 0,
+          "query": "amap walking route planning",
+          "tools": [
+            {
+              "description": "根据输入起点终点经纬度坐标规划100km 以内的步行通勤方案，并且返回通勤方案的数据",
+              "description_truncated": false,
+              "effect": "read",
+              "executor": "server",
+              "source": "mcp:official:amap",
+              "tool_id": "amap.maps_direction_walking",
+              "version": "0355e8964df2ea1222f019f8eda98004573b0e67e8faf96215b0cdaba49d2d91"
+            },
+            {
+              "description": "根据用户起终点经纬度坐标规划综合各类公共（火车、公交、地铁）交通方式的通勤方案，并且返回通勤方案的数据，跨",
+              "description_truncated": true,
+              "effect": "read",
+              "executor": "server",
+              "source": "mcp:official:amap",
+              "tool_id": "amap.maps_direction_transit_integrated",
+              "version": "e4fc1c2a70b9e24f4d4d354e9efc70e12fcc5d8546a3d5c52a617defc266de69"
+            },
+            {
+              "description": "测量两个经纬度坐标之间的距离,支持驾车、步行以及球面距离测量",
+              "description_truncated": false,
+              "effect": "read",
+              "executor": "server",
+              "source": "mcp:official:amap",
+              "tool_id": "amap.maps_distance",
+              "version": "5b0aef38f961fc41115686a9772d5a6ea069809131a83479c78b3b5b91ea2d61"
+            },
+            {
+              "description": "查询关键词搜或者周边搜获取到的POI ID的详细信息",
+              "description_truncated": false,
+              "effect": "read",
+              "executor": "server",
+              "source": "mcp:official:amap",
+              "tool_id": "amap.maps_search_detail",
+              "version": "f0ef632ab9a0cd48068e3cd9a3e6f241ca92e508577ce5e0d4aa21ea61f0fc41"
+            },
+            {
+              "description": "关键字搜索 API 根据用户输入的关键字进行 POI 搜索，并返回相关的信息",
+              "description_truncated": false,
+              "effect": "read",
+              "executor": "server",
+              "source": "mcp:official:amap",
+              "tool_id": "amap.maps_text_search",
+              "version": "499b706cd09f93536a12c385b1105fc4463c9ddb61bdf7e7d34c282c83e7313f"
+            }
+          ],
+          "total": 7
+        },
+        "created_at": 1794332339.4668818
+      },
+      {
+        "cursor": 43,
+        "agent_task_id": "f3b7a916-64a5-4acf-b167-f7052cce0966",
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "revision": 2,
+        "kind": "tools_discovered",
+        "payload": {
+          "directory_version": "dbd685a366e2f01ffdd25059ed4662a46bb444d4a05137cf3b6d85aaa436f253",
+          "namespace": null,
+          "next_offset": 5,
+          "offset": 0,
+          "query": "amap walking route 步行路线规划",
+          "tools": [
+            {
+              "description": "根据输入起点终点经纬度坐标规划100km 以内的步行通勤方案，并且返回通勤方案的数据",
+              "description_truncated": false,
+              "effect": "read",
+              "executor": "server",
+              "source": "mcp:official:amap",
+              "tool_id": "amap.maps_direction_walking",
+              "version": "0355e8964df2ea1222f019f8eda98004573b0e67e8faf96215b0cdaba49d2d91"
+            },
+            {
+              "description": "根据用户起终点经纬度坐标规划综合各类公共（火车、公交、地铁）交通方式的通勤方案，并且返回通勤方案的数据，跨",
+              "description_truncated": true,
+              "effect": "read",
+              "executor": "server",
+              "source": "mcp:official:amap",
+              "tool_id": "amap.maps_direction_transit_integrated",
+              "version": "e4fc1c2a70b9e24f4d4d354e9efc70e12fcc5d8546a3d5c52a617defc266de69"
+            },
+            {
+              "description": "测量两个经纬度坐标之间的距离,支持驾车、步行以及球面距离测量",
+              "description_truncated": false,
+              "effect": "read",
+              "executor": "server",
+              "source": "mcp:official:amap",
+              "tool_id": "amap.maps_distance",
+              "version": "5b0aef38f961fc41115686a9772d5a6ea069809131a83479c78b3b5b91ea2d61"
+            },
+            {
+              "description": "查询关键词搜或者周边搜获取到的POI ID的详细信息",
+              "description_truncated": false,
+              "effect": "read",
+              "executor": "server",
+              "source": "mcp:official:amap",
+              "tool_id": "amap.maps_search_detail",
+              "version": "f0ef632ab9a0cd48068e3cd9a3e6f241ca92e508577ce5e0d4aa21ea61f0fc41"
+            },
+            {
+              "description": "关键字搜索 API 根据用户输入的关键字进行 POI 搜索，并返回相关的信息",
+              "description_truncated": false,
+              "effect": "read",
+              "executor": "server",
+              "source": "mcp:official:amap",
+              "tool_id": "amap.maps_text_search",
+              "version": "499b706cd09f93536a12c385b1105fc4463c9ddb61bdf7e7d34c282c83e7313f"
+            }
+          ],
+          "total": 7
+        },
+        "created_at": 1794332342.8218715
+      },
+      {
+        "cursor": 45,
+        "agent_task_id": "f3b7a916-64a5-4acf-b167-f7052cce0966",
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "revision": 2,
+        "kind": "decision_error",
+        "payload": {
+          "code": "invalid_decision",
+          "diagnostic": {
+            "field_path": [
+              "evidence_call_ids"
+            ],
+            "rule": "missing_field"
+          },
+          "message": "Include the required field at field_path."
+        },
+        "created_at": 1794332346.2871115
+      },
+      {
+        "cursor": 51,
+        "agent_task_id": "f3b7a916-64a5-4acf-b167-f7052cce0966",
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "revision": 2,
+        "kind": "decision_error",
+        "payload": {
+          "code": "artifact_source_mismatch",
+          "message": "正式 route 必须引用当前修订的 onmyway.plan_route 成功回执，plan_id、地点、分段、时间和距离按回执保留，不能用旧路线或单段查询拼造。请发现并调用 onmyway.plan_route 后重发；不匹配字段：plan_id/source"
+        },
+        "created_at": 1794332350.2073045
+      },
+      {
+        "cursor": 53,
+        "agent_task_id": "f3b7a916-64a5-4acf-b167-f7052cce0966",
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "revision": 2,
+        "kind": "tools_discovered",
+        "payload": {
+          "directory_version": "85bbd23a8c35862ce84ca6fcfea6a126d093dd9816f38c1369237101138a6641",
+          "namespace": null,
+          "next_offset": null,
+          "offset": 0,
+          "query": "onmyway plan_route",
+          "tools": [
+            {
+              "description": "步行/骑行办事路线规划。 read_tasks supplies store_id/versions and exact task fields incl.priority/place/address. task_versions keys=request.tasks IDs",
+              "description_truncated": true,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:onmyway",
+              "tool_id": "onmyway.plan_route",
+              "version": "155f58eae646b22bc4904239f3a89b33980479062fd83c1b99c41e0eb4448183"
+            },
+            {
+              "description": "只读查询原能力执行编号 run_id 的当前状态和已核实设备回执。请求已记录或已确认不代表设备已执行；仅 device_execution_ob",
+              "description_truncated": true,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:onmyway",
+              "tool_id": "onmyway.read_execution",
+              "version": "0b5b41901ef1448aa6b8f7c142a3e507b18e003e525c7698bf36bf8a5655c818"
+            },
+            {
+              "description": "读取正式待办。store_id/revision/task_versions identify business state, independent of Agent revisions; preserve exact task fields/versions. Read-only, no",
+              "description_truncated": true,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:onmyway",
+              "tool_id": "onmyway.read_tasks",
+              "version": "150ddb6f150cb95af64e07840c2511885652ef6889bdc31c8e13652d42dd1327"
+            },
+            {
+              "description": "按城市搜索真实地点、门店或旅行景点，返回地点身份和坐标。先搜索再使用地点；结果不证明营业时间或预约可用性。",
+              "description_truncated": false,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:onmyway",
+              "tool_id": "onmyway.search_places",
+              "version": "d76f8e5261082bd9535ecebe16e9bc2f79d0a7e0b6d60269247d7ecb5beee65d"
+            }
+          ],
+          "total": 4
+        },
+        "created_at": 1794332351.7519145
+      },
+      {
+        "cursor": 59,
+        "agent_task_id": "f3b7a916-64a5-4acf-b167-f7052cce0966",
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "revision": 2,
+        "kind": "decision_error",
+        "payload": {
+          "code": "invalid_decision",
+          "diagnostic": {
+            "field_path": [
+              "evidence_call_ids"
+            ],
+            "rule": "missing_field"
+          },
+          "message": "Include the required field at field_path."
+        },
+        "created_at": 1794332354.3846688
+      },
+      {
+        "cursor": 61,
+        "agent_task_id": "f3b7a916-64a5-4acf-b167-f7052cce0966",
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "revision": 2,
+        "kind": "tools_discovered",
+        "payload": {
+          "directory_version": "85bbd23a8c35862ce84ca6fcfea6a126d093dd9816f38c1369237101138a6641",
+          "namespace": null,
+          "next_offset": null,
+          "offset": 0,
+          "query": "onmyway plan_route",
+          "tools": [
+            {
+              "description": "步行/骑行办事路线规划。 read_tasks supplies store_id/versions and exact task fields incl.priority/place/address. task_versions keys=request.tasks IDs",
+              "description_truncated": true,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:onmyway",
+              "tool_id": "onmyway.plan_route",
+              "version": "155f58eae646b22bc4904239f3a89b33980479062fd83c1b99c41e0eb4448183"
+            },
+            {
+              "description": "只读查询原能力执行编号 run_id 的当前状态和已核实设备回执。请求已记录或已确认不代表设备已执行；仅 device_execution_ob",
+              "description_truncated": true,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:onmyway",
+              "tool_id": "onmyway.read_execution",
+              "version": "0b5b41901ef1448aa6b8f7c142a3e507b18e003e525c7698bf36bf8a5655c818"
+            },
+            {
+              "description": "读取正式待办。store_id/revision/task_versions identify business state, independent of Agent revisions; preserve exact task fields/versions. Read-only, no",
+              "description_truncated": true,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:onmyway",
+              "tool_id": "onmyway.read_tasks",
+              "version": "150ddb6f150cb95af64e07840c2511885652ef6889bdc31c8e13652d42dd1327"
+            },
+            {
+              "description": "按城市搜索真实地点、门店或旅行景点，返回地点身份和坐标。先搜索再使用地点；结果不证明营业时间或预约可用性。",
+              "description_truncated": false,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:onmyway",
+              "tool_id": "onmyway.search_places",
+              "version": "d76f8e5261082bd9535ecebe16e9bc2f79d0a7e0b6d60269247d7ecb5beee65d"
+            }
+          ],
+          "total": 4
+        },
+        "created_at": 1794332356.329917
+      },
+      {
+        "cursor": 63,
+        "agent_task_id": "f3b7a916-64a5-4acf-b167-f7052cce0966",
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "revision": 2,
+        "kind": "decision_error",
+        "payload": {
+          "code": "invalid_decision",
+          "diagnostic": {
+            "fields": [
+              "query",
+              "namespace"
+            ],
+            "rule": "discovery_scope_required"
+          },
+          "message": "Provide a nonempty query, or a namespace for an empty discovery query."
+        },
+        "created_at": 1794332357.6290576
+      },
+      {
+        "cursor": 65,
+        "agent_task_id": "f3b7a916-64a5-4acf-b167-f7052cce0966",
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "revision": 2,
+        "kind": "tool_error",
+        "payload": {
+          "code": "invalid_arguments",
+          "message": "工具参数不符合 Schema，请按契约修正：{\"rule\":\"required\",\"schema_path\":[\"required\"],\"allowed_fields\":[\"store_id\",\"task_versions\",\"request\"],\"required_fields\":[\"store_id\",\"task_versions\",\"request\"]}",
+          "tool_id": "onmyway.plan_route"
+        },
+        "created_at": 1794332358.6996343
+      },
+      {
+        "cursor": 71,
+        "agent_task_id": "f3b7a916-64a5-4acf-b167-f7052cce0966",
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "revision": 2,
+        "kind": "tools_discovered",
+        "payload": {
+          "directory_version": "85bbd23a8c35862ce84ca6fcfea6a126d093dd9816f38c1369237101138a6641",
+          "namespace": null,
+          "next_offset": null,
+          "offset": 0,
+          "query": "onmyway plan_route",
+          "tools": [
+            {
+              "description": "步行/骑行办事路线规划。 read_tasks supplies store_id/versions and exact task fields incl.priority/place/address. task_versions keys=request.tasks IDs",
+              "description_truncated": true,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:onmyway",
+              "tool_id": "onmyway.plan_route",
+              "version": "155f58eae646b22bc4904239f3a89b33980479062fd83c1b99c41e0eb4448183"
+            },
+            {
+              "description": "只读查询原能力执行编号 run_id 的当前状态和已核实设备回执。请求已记录或已确认不代表设备已执行；仅 device_execution_ob",
+              "description_truncated": true,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:onmyway",
+              "tool_id": "onmyway.read_execution",
+              "version": "0b5b41901ef1448aa6b8f7c142a3e507b18e003e525c7698bf36bf8a5655c818"
+            },
+            {
+              "description": "读取正式待办。store_id/revision/task_versions identify business state, independent of Agent revisions; preserve exact task fields/versions. Read-only, no",
+              "description_truncated": true,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:onmyway",
+              "tool_id": "onmyway.read_tasks",
+              "version": "150ddb6f150cb95af64e07840c2511885652ef6889bdc31c8e13652d42dd1327"
+            },
+            {
+              "description": "按城市搜索真实地点、门店或旅行景点，返回地点身份和坐标。先搜索再使用地点；结果不证明营业时间或预约可用性。",
+              "description_truncated": false,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:onmyway",
+              "tool_id": "onmyway.search_places",
+              "version": "d76f8e5261082bd9535ecebe16e9bc2f79d0a7e0b6d60269247d7ecb5beee65d"
+            }
+          ],
+          "total": 4
+        },
+        "created_at": 1794332361.7377949
+      },
+      {
+        "cursor": 73,
+        "agent_task_id": "f3b7a916-64a5-4acf-b167-f7052cce0966",
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "revision": 2,
+        "kind": "tool_error",
+        "payload": {
+          "code": "invalid_arguments",
+          "message": "工具参数不符合 Schema，请按契约修正：{\"rule\":\"additionalProperties\",\"schema_path\":[\"additionalProperties\"],\"allowed_fields\":[]}",
+          "tool_id": "onmyway.read_tasks"
+        },
+        "created_at": 1794332362.9317653
+      },
+      {
+        "cursor": 75,
+        "agent_task_id": "f3b7a916-64a5-4acf-b167-f7052cce0966",
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "revision": 2,
+        "kind": "decision_error",
+        "payload": {
+          "code": "invalid_decision",
+          "diagnostic": {
+            "rule": "json_extra_data"
+          },
+          "message": "Return exactly one JSON object; no second action or trailing text."
+        },
+        "created_at": 1794332364.002285
+      },
+      {
+        "cursor": 77,
+        "agent_task_id": "f3b7a916-64a5-4acf-b167-f7052cce0966",
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "revision": 2,
+        "kind": "tools_discovered",
+        "payload": {
+          "directory_version": "7b5c8e634e5fb98cd801fd70e18f673f7911fd85e0fd3d9a8aff9ad054d8c422",
+          "namespace": null,
+          "next_offset": null,
+          "offset": 0,
+          "query": "onmyway",
+          "tools": [
+            {
+              "description": "步行/骑行办事路线规划。 read_tasks supplies store_id/versions and exact task fields incl.priority/place/address. task_versions keys=request.tasks IDs",
+              "description_truncated": true,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:onmyway",
+              "tool_id": "onmyway.plan_route",
+              "version": "155f58eae646b22bc4904239f3a89b33980479062fd83c1b99c41e0eb4448183"
+            },
+            {
+              "description": "只读查询原能力执行编号 run_id 的当前状态和已核实设备回执。请求已记录或已确认不代表设备已执行；仅 device_execution_ob",
+              "description_truncated": true,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:onmyway",
+              "tool_id": "onmyway.read_execution",
+              "version": "0b5b41901ef1448aa6b8f7c142a3e507b18e003e525c7698bf36bf8a5655c818"
+            },
+            {
+              "description": "读取正式待办。store_id/revision/task_versions identify business state, independent of Agent revisions; preserve exact task fields/versions. Read-only, no",
+              "description_truncated": true,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:onmyway",
+              "tool_id": "onmyway.read_tasks",
+              "version": "150ddb6f150cb95af64e07840c2511885652ef6889bdc31c8e13652d42dd1327"
+            },
+            {
+              "description": "按城市搜索真实地点、门店或旅行景点，返回地点身份和坐标。先搜索再使用地点；结果不证明营业时间或预约可用性。",
+              "description_truncated": false,
+              "effect": "read",
+              "executor": "server",
+              "source": "builtin:onmyway",
+              "tool_id": "onmyway.search_places",
+              "version": "d76f8e5261082bd9535ecebe16e9bc2f79d0a7e0b6d60269247d7ecb5beee65d"
+            }
+          ],
+          "total": 4
+        },
+        "created_at": 1794332366.2732298
+      }
+    ],
+    "unresolved_calls": []
+  },
+  "tool_catalog": [
+    {
+      "tool_id": "agent.read_artifact",
+      "description": "按 content_ref/version 读取成果缺失段；旧成果仅供参考。offset 为字符，页最多 2400 UTF-8 字节，用 next_offset 续读。",
+      "version": "d97ab12ec31675e7525c386db7accab6c836c6509ac8797f12c6ee1c38a7719a",
+      "effect": "read",
+      "executor": "server",
+      "source": "builtin:agent",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "artifact_id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_chars": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3000
+          }
+        },
+        "required": [
+          "artifact_id"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": null,
+      "output_key": "[REDACTED]"
+    },
+    {
+      "tool_id": "agent.read_result",
+      "description": "按result_ref读缺失事实：结构字段优先用paths（原result的JSON Pointer，非decoded_path）；否则offset/max_chars字符分页，按next_offset续读。最多2400 UTF-8字节，勿重读。",
+      "version": "96acab23d3499837716b8e1a39087fecf884c93cc09d482bec434a77076311b0",
+      "effect": "read",
+      "executor": "server",
+      "source": "builtin:agent",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "tool_call_id": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_chars": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3000
+          },
+          "paths": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "maxLength": 512
+            }
+          }
+        },
+        "required": [
+          "tool_call_id"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "paths"
+              ]
+            },
+            "then": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "offset"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "max_chars"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "output_schema": null,
+      "output_key": "[REDACTED]"
+    },
+    {
+      "tool_id": "amap.maps_direction_transit_integrated",
+      "description": "根据用户起终点经纬度坐标规划综合各类公共（火车、公交、地铁）交通方式的通勤方案，并且返回通勤方案的数据，跨城场景下必须传起点城市与终点城市",
+      "version": "e4fc1c2a70b9e24f4d4d354e9efc70e12fcc5d8546a3d5c52a617defc266de69",
+      "effect": "read",
+      "executor": "server",
+      "source": "mcp:official:amap",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "origin": {
+            "type": "string",
+            "description": "出发点经纬度，坐标格式为：经度，纬度"
+          },
+          "destination": {
+            "type": "string",
+            "description": "目的地经纬度，坐标格式为：经度，纬度"
+          },
+          "city": {
+            "type": "string",
+            "description": "公共交通规划起点城市"
+          },
+          "cityd": {
+            "type": "string",
+            "description": "公共交通规划终点城市"
+          }
+        },
+        "required": [
+          "origin",
+          "destination",
+          "city",
+          "cityd"
+        ]
+      },
+      "output_schema": null,
+      "output_key": "[REDACTED]"
+    },
+    {
+      "tool_id": "amap.maps_direction_walking",
+      "description": "根据输入起点终点经纬度坐标规划100km 以内的步行通勤方案，并且返回通勤方案的数据",
+      "version": "0355e8964df2ea1222f019f8eda98004573b0e67e8faf96215b0cdaba49d2d91",
+      "effect": "read",
+      "executor": "server",
+      "source": "mcp:official:amap",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "origin": {
+            "type": "string",
+            "description": "出发点经度，纬度，坐标格式为：经度，纬度"
+          },
+          "destination": {
+            "type": "string",
+            "description": "目的地经度，纬度，坐标格式为：经度，纬度"
+          }
+        },
+        "required": [
+          "origin",
+          "destination"
+        ]
+      },
+      "output_schema": null,
+      "output_key": "[REDACTED]"
+    },
+    {
+      "tool_id": "amap.maps_distance",
+      "description": "测量两个经纬度坐标之间的距离,支持驾车、步行以及球面距离测量",
+      "version": "5b0aef38f961fc41115686a9772d5a6ea069809131a83479c78b3b5b91ea2d61",
+      "effect": "read",
+      "executor": "server",
+      "source": "mcp:official:amap",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "origins": {
+            "type": "string",
+            "description": "起点经度，纬度，可以传多个坐标，使用竖线隔离，比如120,30|120,31，坐标格式为：经度，纬度"
+          },
+          "destination": {
+            "type": "string",
+            "description": "终点经度，纬度，坐标格式为：经度，纬度"
+          },
+          "type": {
+            "type": "string",
+            "description": "距离测量类型,1代表驾车距离测量，0代表直线距离测量，3步行距离测量"
+          }
+        },
+        "required": [
+          "origins",
+          "destination"
+        ]
+      },
+      "output_schema": null,
+      "output_key": "[REDACTED]"
+    },
+    {
+      "tool_id": "amap.maps_search_detail",
+      "description": "查询关键词搜或者周边搜获取到的POI ID的详细信息",
+      "version": "f0ef632ab9a0cd48068e3cd9a3e6f241ca92e508577ce5e0d4aa21ea61f0fc41",
+      "effect": "read",
+      "executor": "server",
+      "source": "mcp:official:amap",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "关键词搜或者周边搜获取到的POI ID"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "output_schema": null,
+      "output_key": "[REDACTED]"
+    },
+    {
+      "tool_id": "amap.maps_text_search",
+      "description": "关键字搜索 API 根据用户输入的关键字进行 POI 搜索，并返回相关的信息",
+      "version": "499b706cd09f93536a12c385b1105fc4463c9ddb61bdf7e7d34c282c83e7313f",
+      "effect": "read",
+      "executor": "server",
+      "source": "mcp:official:amap",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "keywords": {
+            "type": "string",
+            "description": "查询关键字"
+          },
+          "city": {
+            "type": "string",
+            "description": "查询城市"
+          },
+          "citylimit": {
+            "type": "boolean",
+            "default": false,
+            "description": "是否限制城市范围内搜索，默认不限制"
+          }
+        },
+        "required": [
+          "keywords"
+        ]
+      },
+      "output_schema": null,
+      "output_key": "[REDACTED]"
+    },
+    {
+      "tool_id": "amap.maps_weather",
+      "description": "根据城市名称或者标准adcode查询指定城市的天气",
+      "version": "d0fd971e6b10488c655354d7fecca851f5e44656c38438be70c90700b8de1087",
+      "effect": "read",
+      "executor": "server",
+      "source": "mcp:official:amap",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "city": {
+            "type": "string",
+            "description": "城市名称或者adcode"
+          }
+        },
+        "required": [
+          "city"
+        ]
+      },
+      "output_schema": null,
+      "output_key": "[REDACTED]"
+    },
+    {
+      "tool_id": "exa.web_fetch_exa",
+      "description": "Read a webpage's full content as clean markdown. Use after web_search_exa when highlights are insufficient or to read any URL.\n\nBest for: Extracting full content from known URLs. Batch multiple URLs in one call.\nReturns: Clean text content and metadata from the page(s).",
+      "version": "eb8d7b8aeeacdfe54065fcfb23af1baf03d3a6edf12839534d88d8c1c1f7c48e",
+      "effect": "read",
+      "executor": "server",
+      "source": "mcp:official:exa",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "urls": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "URLs to read. Batch multiple URLs in one call."
+          },
+          "maxCharacters": {
+            "type": "number",
+            "minimum": 1,
+            "description": "Maximum characters to extract per page (default: 3000)"
+          }
+        },
+        "required": [
+          "urls"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "output_schema": null,
+      "output_key": "[REDACTED]"
+    },
+    {
+      "tool_id": "exa.web_search_exa",
+      "description": "Search the web for any topic and get clean, ready-to-use content.\n\n      Best for: Finding current information, news, facts, people, companies, or answering questions about any topic.\n      Returns: Clean text content from top search results.\n\n      Query tips:\n      describe the ideal page, not keywords. \"blog post comparing React and Vue performance\" not \"React vs Vue\".\n      Use category:people / category:company to search through Linkedin profiles / companies respectively.\n      If highlights are insufficient, follow up with web_fetch_exa on the best URLs.",
+      "version": "7f599640d0e0049b54f2e19fbd9619f41b3c792fd0bfd2cf6e1a4fbe97e1570f",
+      "effect": "read",
+      "executor": "server",
+      "source": "mcp:official:exa",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Natural language search query. Should be a semantically rich description of the ideal page, not just keywords. Optionally include category:<type> (company, people) to focus results — e.g. 'category:people John Doe software engineer'."
+          },
+          "numResults": {
+            "type": "number",
+            "description": "Number of search results to return (default: 10)."
+          },
+          "objective": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "Goal for this search turn; say which documents should rank first, which should be excluded, and what specific facts or figures to pull from them."
+          }
+        },
+        "required": [
+          "query",
+          "objective"
+        ],
+        "additionalProperties": false,
+        "$schema": "http://json-schema.org/draft-07/schema#"
+      },
+      "output_schema": null,
+      "output_key": "[REDACTED]"
+    },
+    {
+      "tool_id": "onmyway.plan_route",
+      "description": "步行/骑行办事路线规划。 read_tasks supplies store_id/versions and exact task fields incl.priority/place/address. task_versions keys=request.tasks IDs; place XOR place_type; no snapshot. Read-only: no todo edits/confirmation/navigation; removed stop stays pending. Result /data/plan_id; /data/plan=intermediate stops, legs to destination, times/totals/warnings; geometry_ref reads full geometry. Publish route preserving facts, navigation_started=false; revision needs new receipt. Z=UTC; label/convert timezone in prose.",
+      "version": "155f58eae646b22bc4904239f3a89b33980479062fd83c1b99c41e0eb4448183",
+      "effect": "read",
+      "executor": "server",
+      "source": "builtin:onmyway",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "store_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Store Id",
+            "type": "string"
+          },
+          "task_versions": {
+            "additionalProperties": {
+              "maximum": 2147483646,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "maxProperties": 6,
+            "title": "Task Versions",
+            "type": "object"
+          },
+          "request": {
+            "$ref": "#/$defs/PlanRequest"
+          }
+        },
+        "required": [
+          "store_id",
+          "task_versions",
+          "request"
+        ],
+        "title": "PlanRoute",
+        "type": "object",
+        "$defs": {
+          "Place": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "maxLength": 120,
+                "minLength": 1,
+                "title": "Id",
+                "type": "string"
+              },
+              "name": {
+                "maxLength": 200,
+                "minLength": 1,
+                "title": "Name",
+                "type": "string"
+              },
+              "longitude": {
+                "maximum": 180.0,
+                "minimum": -180.0,
+                "title": "Longitude",
+                "type": "number"
+              },
+              "latitude": {
+                "maximum": 90.0,
+                "minimum": -90.0,
+                "title": "Latitude",
+                "type": "number"
+              },
+              "address": {
+                "default": "",
+                "maxLength": 500,
+                "title": "Address",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "longitude",
+              "latitude"
+            ],
+            "title": "Place",
+            "type": "object"
+          },
+          "PlanRequest": {
+            "additionalProperties": false,
+            "properties": {
+              "origin": {
+                "$ref": "#/$defs/Place"
+              },
+              "destination": {
+                "$ref": "#/$defs/Place"
+              },
+              "tasks": {
+                "items": {
+                  "$ref": "#/$defs/Task"
+                },
+                "maxItems": 6,
+                "title": "Tasks",
+                "type": "array"
+              },
+              "mode": {
+                "default": "walking",
+                "enum": [
+                  "walking",
+                  "cycling"
+                ],
+                "title": "Mode",
+                "type": "string"
+              },
+              "preference": {
+                "default": "most_tasks",
+                "enum": [
+                  "fastest",
+                  "most_tasks",
+                  "priority"
+                ],
+                "title": "Preference",
+                "type": "string"
+              },
+              "departure": {
+                "format": "date-time",
+                "title": "Departure",
+                "type": "string"
+              },
+              "arrive_by": {
+                "anyOf": [
+                  {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Arrive By"
+              },
+              "max_extra_minutes": {
+                "anyOf": [
+                  {
+                    "maximum": 240,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Extra Minutes"
+              },
+              "allow_partial": {
+                "default": false,
+                "title": "Allow Partial",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "origin",
+              "destination",
+              "departure"
+            ],
+            "title": "PlanRequest",
+            "type": "object"
+          },
+          "Task": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "maxLength": 100,
+                "minLength": 1,
+                "title": "Id",
+                "type": "string"
+              },
+              "title": {
+                "maxLength": 100,
+                "minLength": 1,
+                "title": "Title",
+                "type": "string"
+              },
+              "priority": {
+                "default": 2,
+                "maximum": 3,
+                "minimum": 1,
+                "title": "Priority",
+                "type": "integer"
+              },
+              "service_minutes": {
+                "default": 5,
+                "maximum": 240,
+                "minimum": 1,
+                "title": "Service Minutes",
+                "type": "integer"
+              },
+              "deadline": {
+                "anyOf": [
+                  {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Deadline"
+              },
+              "place": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/Place"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "place_type": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "PRINT_SHOP",
+                      "SUPERMARKET",
+                      "PHARMACY",
+                      "PARCEL",
+                      "TAKEOUT",
+                      "INDOOR",
+                      "OTHER"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Place Type"
+              }
+            },
+            "required": [
+              "id",
+              "title"
+            ],
+            "title": "Task",
+            "type": "object",
+            "oneOf": [
+              {
+                "required": [
+                  "place"
+                ],
+                "properties": {
+                  "place": {
+                    "type": "object"
+                  },
+                  "place_type": {
+                    "type": "null"
+                  }
+                }
+              },
+              {
+                "required": [
+                  "place_type"
+                ],
+                "properties": {
+                  "place": {
+                    "type": "null"
+                  },
+                  "place_type": {
+                    "type": "string"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "output_schema": null,
+      "output_key": "[REDACTED]"
+    },
+    {
+      "tool_id": "onmyway.read_execution",
+      "description": "只读查询原能力执行编号 run_id 的当前状态和已核实设备回执。请求已记录或已确认不代表设备已执行；仅 device_execution_observed=true 且匹配 result 回执可证明设备行为。不会确认、派发、重试、核实新回执或启动导航。",
+      "version": "0b5b41901ef1448aa6b8f7c142a3e507b18e003e525c7698bf36bf8a5655c818",
+      "effect": "read",
+      "executor": "server",
+      "source": "builtin:onmyway",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": null,
+      "output_key": "[REDACTED]"
+    },
+    {
+      "tool_id": "onmyway.read_tasks",
+      "description": "读取正式待办。store_id/revision/task_versions identify business state, independent of Agent revisions; preserve exact task fields/versions. Read-only, not completion.",
+      "version": "150ddb6f150cb95af64e07840c2511885652ef6889bdc31c8e13652d42dd1327",
+      "effect": "read",
+      "executor": "server",
+      "source": "builtin:onmyway",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "ReadTasks",
+        "type": "object"
+      },
+      "output_schema": null,
+      "output_key": "[REDACTED]"
+    },
+    {
+      "tool_id": "onmyway.search_places",
+      "description": "按城市搜索真实地点、门店或旅行景点，返回地点身份和坐标。先搜索再使用地点；结果不证明营业时间或预约可用性。",
+      "version": "d76f8e5261082bd9535ecebe16e9bc2f79d0a7e0b6d60269247d7ecb5beee65d",
+      "effect": "read",
+      "executor": "server",
+      "source": "builtin:onmyway",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "city": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50
+          }
+        },
+        "required": [
+          "query",
+          "city"
+        ],
+        "additionalProperties": false
+      },
+      "output_schema": null,
+      "output_key": "[REDACTED]"
+    }
+  ],
+  "steps": [
+    {
+      "model_index": 8,
+      "at": 1794332330.190643,
+      "run": {
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "revision": 2,
+        "state": "running",
+        "reason": null,
+        "steps_used": 3,
+        "tool_calls_used": 0,
+        "budget": {
+          "max_duration_seconds": 900,
+          "max_steps": 24,
+          "max_tool_calls": 20
+        },
+        "remaining_steps": 21
+      },
+      "namespace_index": {
+        "items": [
+          {
+            "namespace": "agent",
+            "tool_count": 2
+          },
+          {
+            "namespace": "amap",
+            "tool_count": 6,
+            "display_name": "高德地图",
+            "aliases": [
+              "高德",
+              "Amap"
+            ]
+          },
+          {
+            "namespace": "exa",
+            "tool_count": 2,
+            "display_name": "Exa 搜索",
+            "aliases": [
+              "Exa"
+            ]
+          },
+          {
+            "namespace": "onmyway",
+            "tool_count": 4
+          }
+        ],
+        "omitted": 0
+      },
+      "expected_tool": "onmyway.read_tasks",
+      "recorded_visible_schemas": [
+        "onmyway.plan_route",
+        "agent.read_result"
+      ]
+    },
+    {
+      "model_index": 9,
+      "at": 1794332333.282714,
+      "run": {
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "revision": 2,
+        "state": "running",
+        "reason": null,
+        "steps_used": 4,
+        "tool_calls_used": 0,
+        "budget": {
+          "max_duration_seconds": 900,
+          "max_steps": 24,
+          "max_tool_calls": 20
+        },
+        "remaining_steps": 20
+      },
+      "namespace_index": {
+        "items": [
+          {
+            "namespace": "agent",
+            "tool_count": 2
+          },
+          {
+            "namespace": "amap",
+            "tool_count": 6
+          },
+          {
+            "namespace": "exa",
+            "tool_count": 2
+          },
+          {
+            "namespace": "onmyway",
+            "tool_count": 4
+          }
+        ],
+        "omitted": 0
+      },
+      "expected_tool": "onmyway.read_tasks",
+      "recorded_visible_schemas": [
+        "onmyway.plan_route",
+        "agent.read_result"
+      ]
+    },
+    {
+      "model_index": 10,
+      "at": 1794332334.679339,
+      "run": {
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "revision": 2,
+        "state": "running",
+        "reason": null,
+        "steps_used": 5,
+        "tool_calls_used": 0,
+        "budget": {
+          "max_duration_seconds": 900,
+          "max_steps": 24,
+          "max_tool_calls": 20
+        },
+        "remaining_steps": 19
+      },
+      "namespace_index": {
+        "items": [
+          {
+            "namespace": "agent",
+            "tool_count": 2
+          },
+          {
+            "namespace": "amap",
+            "tool_count": 6
+          },
+          {
+            "namespace": "exa",
+            "tool_count": 2
+          },
+          {
+            "namespace": "onmyway",
+            "tool_count": 4
+          }
+        ],
+        "omitted": 0
+      },
+      "expected_tool": "onmyway.read_tasks",
+      "recorded_visible_schemas": [
+        "onmyway.plan_route",
+        "agent.read_result"
+      ]
+    },
+    {
+      "model_index": 11,
+      "at": 1794332336.215012,
+      "run": {
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "revision": 2,
+        "state": "running",
+        "reason": null,
+        "steps_used": 6,
+        "tool_calls_used": 0,
+        "budget": {
+          "max_duration_seconds": 900,
+          "max_steps": 24,
+          "max_tool_calls": 20
+        },
+        "remaining_steps": 18
+      },
+      "namespace_index": {
+        "items": [
+          {
+            "namespace": "agent",
+            "tool_count": 2
+          },
+          {
+            "namespace": "amap",
+            "tool_count": 6
+          },
+          {
+            "namespace": "exa",
+            "tool_count": 2
+          },
+          {
+            "namespace": "onmyway",
+            "tool_count": 4
+          }
+        ],
+        "omitted": 0
+      },
+      "expected_tool": "onmyway.read_tasks",
+      "recorded_visible_schemas": [
+        "onmyway.plan_route",
+        "agent.read_result"
+      ]
+    },
+    {
+      "model_index": 20,
+      "at": 1794332351.778465,
+      "run": {
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "revision": 2,
+        "state": "running",
+        "reason": null,
+        "steps_used": 15,
+        "tool_calls_used": 3,
+        "budget": {
+          "max_duration_seconds": 900,
+          "max_steps": 24,
+          "max_tool_calls": 20
+        },
+        "remaining_steps": 9
+      },
+      "namespace_index": {
+        "items": [
+          {
+            "namespace": "agent",
+            "tool_count": 2
+          },
+          {
+            "namespace": "amap",
+            "tool_count": 6
+          },
+          {
+            "namespace": "exa",
+            "tool_count": 2
+          },
+          {
+            "namespace": "onmyway",
+            "tool_count": 4
+          }
+        ],
+        "omitted": 0
+      },
+      "expected_tool": "onmyway.plan_route",
+      "recorded_visible_schemas": [
+        "onmyway.plan_route",
+        "agent.read_result"
+      ]
+    },
+    {
+      "model_index": 23,
+      "at": 1794332356.371918,
+      "run": {
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "revision": 2,
+        "state": "running",
+        "reason": null,
+        "steps_used": 18,
+        "tool_calls_used": 4,
+        "budget": {
+          "max_duration_seconds": 900,
+          "max_steps": 24,
+          "max_tool_calls": 20
+        },
+        "remaining_steps": 6
+      },
+      "namespace_index": {
+        "items": [
+          {
+            "namespace": "agent",
+            "tool_count": 2
+          },
+          {
+            "namespace": "amap",
+            "tool_count": 6,
+            "display_name": "高德地图",
+            "aliases": [
+              "高德",
+              "Amap"
+            ]
+          },
+          {
+            "namespace": "exa",
+            "tool_count": 2,
+            "display_name": "Exa 搜索",
+            "aliases": [
+              "Exa"
+            ]
+          },
+          {
+            "namespace": "onmyway",
+            "tool_count": 4
+          }
+        ],
+        "omitted": 0
+      },
+      "expected_tool": "onmyway.plan_route",
+      "recorded_visible_schemas": [
+        "onmyway.plan_route",
+        "agent.read_result"
+      ]
+    },
+    {
+      "model_index": 24,
+      "at": 1794332357.661536,
+      "run": {
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "revision": 2,
+        "state": "running",
+        "reason": null,
+        "steps_used": 19,
+        "tool_calls_used": 4,
+        "budget": {
+          "max_duration_seconds": 900,
+          "max_steps": 24,
+          "max_tool_calls": 20
+        },
+        "remaining_steps": 5
+      },
+      "namespace_index": {
+        "items": [
+          {
+            "namespace": "agent",
+            "tool_count": 2
+          },
+          {
+            "namespace": "amap",
+            "tool_count": 6,
+            "display_name": "高德地图",
+            "aliases": [
+              "高德",
+              "Amap"
+            ]
+          },
+          {
+            "namespace": "exa",
+            "tool_count": 2,
+            "display_name": "Exa 搜索",
+            "aliases": [
+              "Exa"
+            ]
+          },
+          {
+            "namespace": "onmyway",
+            "tool_count": 4
+          }
+        ],
+        "omitted": 0
+      },
+      "expected_tool": "onmyway.plan_route",
+      "recorded_visible_schemas": [
+        "onmyway.plan_route"
+      ]
+    },
+    {
+      "model_index": 25,
+      "at": 1794332358.73518,
+      "run": {
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "revision": 2,
+        "state": "running",
+        "reason": null,
+        "steps_used": 20,
+        "tool_calls_used": 4,
+        "budget": {
+          "max_duration_seconds": 900,
+          "max_steps": 24,
+          "max_tool_calls": 20
+        },
+        "remaining_steps": 4
+      },
+      "namespace_index": {
+        "items": [
+          {
+            "namespace": "agent",
+            "tool_count": 2
+          },
+          {
+            "namespace": "amap",
+            "tool_count": 6
+          },
+          {
+            "namespace": "exa",
+            "tool_count": 2
+          },
+          {
+            "namespace": "onmyway",
+            "tool_count": 4
+          }
+        ],
+        "omitted": 0
+      },
+      "expected_tool": "onmyway.plan_route",
+      "recorded_visible_schemas": [
+        "onmyway.plan_route"
+      ]
+    },
+    {
+      "model_index": 27,
+      "at": 1794332361.769345,
+      "run": {
+        "agent_run_id": "e0351362-56d3-48ca-ab69-a5495562da1c",
+        "revision": 2,
+        "state": "running",
+        "reason": null,
+        "steps_used": 22,
+        "tool_calls_used": 5,
+        "budget": {
+          "max_duration_seconds": 900,
+          "max_steps": 24,
+          "max_tool_calls": 20
+        },
+        "remaining_steps": 2
+      },
+      "namespace_index": {
+        "items": [
+          {
+            "namespace": "agent",
+            "tool_count": 2
+          },
+          {
+            "namespace": "amap",
+            "tool_count": 6
+          },
+          {
+            "namespace": "exa",
+            "tool_count": 2
+          },
+          {
+            "namespace": "onmyway",
+            "tool_count": 4
+          }
+        ],
+        "omitted": 0
+      },
+      "expected_tool": "onmyway.plan_route",
+      "recorded_visible_schemas": [
+        "onmyway.plan_route"
+      ]
+    }
+  ]
+}

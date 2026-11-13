@@ -213,6 +213,10 @@ internal class BackupRepository(private val context: Context, private val databa
                     else -> error("同步设置类型无效")
                 }
             }
+            if (name == "assistant_conversation") {
+                // Local workspace pointers are not part of the backup wire contract.
+                editor.remove("active_conversation_id").remove("memory_session_id").remove("memory_session_started_at")
+            }
             check(editor.commit()) { "设置恢复失败，将在下次同步继续恢复" }
         }
     }

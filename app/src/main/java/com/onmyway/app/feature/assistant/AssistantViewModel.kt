@@ -26,7 +26,7 @@ import com.onmyway.app.data.local.entity.Errand
 import com.onmyway.app.data.local.entity.RouteHistory
 import com.onmyway.app.data.remote.Api
 import com.onmyway.app.data.remote.AssistantRequestTransport
-import com.onmyway.app.data.remote.HttpAssistantRequestTransport
+import com.onmyway.app.data.remote.AuthenticatedAssistantRequestTransport
 import com.onmyway.app.data.remote.assistantTripContext
 import com.onmyway.app.feature.planning.AutomaticRoutePlanner
 import com.onmyway.app.feature.planning.travelModeReply
@@ -49,7 +49,7 @@ internal class AssistantViewModel internal constructor(
     application: Application,
     conversationPrefs: SharedPreferences,
     database: TaskDatabase = TaskDatabase.get(application),
-    private val requestTransport: AssistantRequestTransport = HttpAssistantRequestTransport,
+    private val requestTransport: AssistantRequestTransport = AuthenticatedAssistantRequestTransport(application),
     private val requestJournalName: String = "onmyway-assistant-requests.db",
     private val originProvider: (suspend () -> Place?)? = null,
 ) : AndroidViewModel(application) {
@@ -59,8 +59,14 @@ internal class AssistantViewModel internal constructor(
         originProvider = { vm.assistantOriginOrNull() },
     )
     private val store = AssistantStore(database, conversationPrefs)
+    private val personalMemoryRepository = PersonalMemoryRepository(application)
+    private var personalMemoryServer = ""
     private val writeMutex = Mutex()
     private val welcome = ChatLine("assistant", "今天想做什么？可以让我记待办，或告诉我准备去哪儿。")
+    private var loadedConversation by mutableStateOf("")
+    val conversationId: String get() = loadedConversation
+    private var loadedMemorySession = ""
+    private var loadedMemorySessionStartedAt = 0L
     private var storedLines by mutableStateOf(listOf(welcome))
     val lines: List<ChatLine> get() = storedLines
     var ready by mutableStateOf(false)
@@ -72,10 +78,11 @@ internal class AssistantViewModel internal constructor(
         id: String = UUID.randomUUID().toString(),
     ): ChatLine {
         val line = ChatLine(role, text, id = id, routeHistoryId = routeHistoryId)
+        val conversation = loadedConversation
         storedLines = ((if (storedLines.size == 1 && storedLines[0].id == welcome.id) emptyList() else storedLines)
             + line).takeLast(500)
         viewModelScope.launch {
-            try { writeMutex.withLock { store.add(line) } }
+            try { writeMutex.withLock { store.add(line, conversation) } }
             catch (e: Exception) { error = "对话保存失败，请稍后重试：" + (e.message ?: "数据库不可用") }
         }
         return line
@@ -105,14 +112,39 @@ internal class AssistantViewModel internal constructor(
             }
             storedProposal = identified
             clarification = null
+            val conversation = loadedConversation
             viewModelScope.launch {
-                try { writeMutex.withLock { store.setDraft(identified) } }
+                try { writeMutex.withLock { store.setDraft(identified, conversationId = conversation) } }
                 catch (e: Exception) { error = "待确认方案保存失败，请稍后重试：" + (e.message ?: "数据库不可用") }
             }
         }
     var input by mutableStateOf("")
     var busy by mutableStateOf(false)
+    var voiceBusy by mutableStateOf(false)
     var error by mutableStateOf("")
+    /** 跨对话长期记忆，最新在前；发送时作为参考随请求附带。 */
+    var memories by mutableStateOf<List<AssistantMemory>>(emptyList())
+        private set
+    var memoryEnabled by mutableStateOf(true)
+        private set
+    var autoRemember by mutableStateOf(true)
+        private set
+    var memoryBusy by mutableStateOf(false)
+        private set
+    var memoryMessage by mutableStateOf("")
+        private set
+    var personalMemory by mutableStateOf<PersonalMemorySnapshot?>(null)
+        private set
+    var personalMemoryConnected by mutableStateOf(false)
+        private set
+    var personalMemoryPending by mutableStateOf(false)
+        private set
+    var personalReferenceAllowed by mutableStateOf(true)
+        private set
+    var personalLearningAllowed by mutableStateOf(true)
+        private set
+    var personalMemoryEvidence by mutableStateOf<List<PersonalMemoryItem>>(emptyList())
+        private set
     var pendingRequest by mutableStateOf<PendingAssistantRequest?>(null)
         private set
     var recoveryMessage by mutableStateOf("")
@@ -145,14 +177,28 @@ internal class AssistantViewModel internal constructor(
     init {
         viewModelScope.launch {
             try {
-                val restored = writeMutex.withLock { store.load() }
+                val interrupted = journal { it.pending() }
+                val restored = writeMutex.withLock { store.load(
+                    interrupted?.let { requestConversationId(it.contextKey, it.createdAt) },
+                    interrupted?.let { JSONObject(it.bodyJson).optString("memory_session_id").takeIf(String::isNotBlank) },
+                ) }
+                loadedConversation = store.activeConversationId
+                loadedMemorySession = store.memorySessionId
+                loadedMemorySessionStartedAt = store.memorySessionStartedAt
                 storedLines = restored.first.ifEmpty { listOf(welcome) }
                 automatic.restoredChoices = writeMutex.withLock { store.planningChoices() }
                 clarification = writeMutex.withLock { store.clarification() }
                 clarification?.let(automatic::restoreQuestion)
                 storedProposal = restored.second
-                val interrupted = journal { it.pending() }
+                try { refreshMemories() }
+                catch (e: CancellationException) { throw e }
+                catch (_: Exception) {
+                    memoryEnabled = false
+                    autoRemember = false
+                    memoryMessage = "暂时无法读取记忆；对话仍可继续，记忆恢复后再使用。"
+                }
                 if (interrupted != null && store.responseApplied(interrupted.requestId)) {
+                    interrupted.resultJson?.let { applyResponseMemories(interrupted, JSONObject(it)) }
                     journal { it.finish(interrupted.requestId) }
                 } else {
                     pendingRequest = interrupted
@@ -166,6 +212,206 @@ internal class AssistantViewModel internal constructor(
     }
     suspend fun conversationDays() = writeMutex.withLock { store.days() }
     suspend fun conversationDay(day: LocalDate) = writeMutex.withLock { store.day(day) }
+    suspend fun conversations() = writeMutex.withLock { store.conversations() }
+    suspend fun conversation(id: String, limit: Int = 500) = writeMutex.withLock { store.conversation(id, limit) }
+
+    private fun displayMemories(snapshot: MemorySnapshot) {
+        memories = snapshot.items.filter { it.status == "active" && (it.expiresAt == 0L || it.expiresAt > System.currentTimeMillis()) }
+        memoryEnabled = snapshot.state.useMemory
+        autoRemember = snapshot.state.autoRemember
+    }
+
+    private suspend fun refreshMemories() = displayMemories(writeMutex.withLock { store.memorySnapshot() })
+
+    private fun changeMemory(success: String, rejected: String, onSaved: () -> Unit = {}, change: suspend () -> Boolean) {
+        if (!ready || memoryBusy) return
+        memoryBusy = true
+        memoryMessage = ""
+        viewModelScope.launch {
+            try {
+                val changed = writeMutex.withLock { change() }
+                refreshMemories()
+                memoryMessage = if (changed) success else rejected
+                if (changed) onSaved()
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) { memoryMessage = "记忆更新失败，请稍后重试。" }
+            finally { memoryBusy = false }
+        }
+    }
+
+    fun addMemory(text: String, scope: String = "general", onSaved: () -> Unit = {}) = changeMemory(
+        "已添加记忆。", "未添加：请检查内容是否重复、包含敏感信息，或记忆是否已满。", onSaved,
+    ) { store.addManualMemory(text, scope) }
+
+    fun editMemory(item: AssistantMemory, text: String, scope: String, onSaved: () -> Unit = {}) = changeMemory(
+        "已更新记忆。", "未更新：内容可能重复、包含敏感信息，或这条记忆已变化，请重新打开。", onSaved,
+    ) { store.editMemory(item.id, item.revision, text, scope) }
+
+    fun forgetMemory(id: String) = changeMemory("已忘记这条记忆。", "这条记忆已不存在。") { store.forget(id) }
+
+    fun setMemorySettings(useMemory: Boolean, autoRemember: Boolean) = changeMemory("记忆设置已更新。", "") {
+        store.updateMemorySettings(useMemory, autoRemember)
+        true
+    }
+
+    fun refreshPersonalMemory(server: String) {
+        if (memoryBusy) return
+        val base = Api.validateBase(server)
+        if (personalMemoryServer != base) personalMemoryEvidence = emptyList()
+        personalMemoryServer = base
+        personalMemory = null
+        personalMemoryConnected = false
+        memoryBusy = true
+        viewModelScope.launch {
+            try {
+                val controls = withContext(Dispatchers.IO) { personalMemoryRepository.localControls(server) }
+                personalReferenceAllowed = controls.first
+                personalLearningAllowed = controls.second
+                val client = withContext(Dispatchers.IO) { personalMemoryRepository.client(server) }
+                if (client == null) {
+                    memoryMessage = "请先在电脑连接中配置当前服务。连接前可正常对话，个人记忆暂不参与。"
+                    personalMemoryPending = false
+                } else {
+                    personalMemory = withContext(Dispatchers.IO) { client.cached() }
+                    personalMemoryPending = withContext(Dispatchers.IO) { client.hasPendingCommand() }
+                    personalMemory = withContext(Dispatchers.IO) { client.refresh() }
+                    personalMemoryEvidence = personalMemoryEvidence.filter { provided ->
+                        personalMemory?.items?.any { it.id == provided.id && it.revision == provided.revision && it.status == "active" } == true
+                    }
+                    personalMemoryConnected = true
+                    memoryMessage = if (personalMemoryPending) "上次更新结果尚未确认，请重新获取。" else "已获取最新个人记忆。"
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) { memoryMessage = "暂时无法连接记忆服务。此处显示上次保存的副本，新对话会重新检查连接。" }
+            finally { memoryBusy = false }
+        }
+    }
+
+    private fun changePersonalMemory(
+        server: String, operation: String, fields: JSONObject = JSONObject(),
+        onSaved: () -> Unit = {}, beforeChange: suspend () -> Unit = {},
+    ) {
+        if (!ready || memoryBusy) return
+        memoryBusy = true
+        memoryMessage = ""
+        viewModelScope.launch {
+            try {
+                beforeChange()
+                personalMemory = withContext(Dispatchers.IO) {
+                    val client = personalMemoryRepository.client(server)
+                        ?: error("请先配置当前服务的电脑连接。")
+                    client.mutate(operation, fields)
+                }
+                personalMemoryConnected = true
+                personalMemoryPending = false
+                personalMemoryEvidence = emptyList()
+                memoryMessage = "个人记忆已更新。"
+                onSaved()
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                personalMemoryPending = withContext(Dispatchers.IO) {
+                    personalMemoryRepository.client(server)?.hasPendingCommand() == true
+                }
+                memoryMessage = if (personalMemoryPending) "更新结果尚未确认，请重新获取；不会创建另一条相同操作。"
+                    else e.message ?: "记忆更新失败，请刷新后重试。"
+            } finally { memoryBusy = false }
+        }
+    }
+
+    fun savePersonalMemory(
+        server: String, previous: PersonalMemoryItem?, text: String, kind: String, topic: String,
+        validUntil: String?, onSaved: () -> Unit,
+    ) {
+        val item = JSONObject().put("kind", kind).put("text", text.trim()).put("topic", topic)
+            .put("scope", previous?.scope ?: "personal").put("scope_id", previous?.scopeId.orEmpty())
+            .put("valid_from", previous?.validFrom ?: JSONObject.NULL)
+            .put("valid_until", validUntil ?: JSONObject.NULL).put("source_kind", "manual")
+            .put("source_id", UUID.randomUUID().toString()).put("quote", text.trim()).put("derived_from", JSONArray())
+        previous?.let { item.put("id", it.id).put("revision", it.revision) }
+        changePersonalMemory(server, "upsert", JSONObject().put("item", item), onSaved)
+    }
+
+    fun forgetPersonalMemory(server: String, item: PersonalMemoryItem) = changePersonalMemory(
+        server, "forget", JSONObject().put("id", item.id).put("item_revision", item.revision),
+    )
+
+    fun setPersonalMemorySettings(server: String, useMemory: Boolean, learn: Boolean) = changePersonalMemory(
+        server, "settings", JSONObject().put("reference_enabled", useMemory).put("learning_enabled", learn),
+        beforeChange = {
+            // Disabling is effective on this phone even if the service cannot be reached.
+            withContext(Dispatchers.IO) { personalMemoryRepository.setLocalControls(server, useMemory, learn) }
+            personalReferenceAllowed = useMemory
+            personalLearningAllowed = learn
+        },
+    )
+
+    fun retryPersonalMemory(server: String, onRecovered: () -> Unit = {}) {
+        if (!ready || memoryBusy) return
+        memoryBusy = true
+        viewModelScope.launch {
+            try {
+                personalMemory = withContext(Dispatchers.IO) {
+                    checkNotNull(personalMemoryRepository.client(server)) { "请先配置电脑连接。" }.retryPending()
+                }
+                personalMemoryPending = false
+                personalMemoryConnected = true
+                memoryMessage = "已确认上次记忆更新结果。"
+                onRecovered()
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                personalMemoryPending = withContext(Dispatchers.IO) {
+                    personalMemoryRepository.client(server)?.hasPendingCommand() == true
+                }
+                memoryMessage = e.message ?: "暂时无法确认，请稍后重试。"
+            } finally { memoryBusy = false }
+        }
+    }
+
+    fun importLegacyPersonalMemory(server: String) {
+        val items = JSONArray(memories.map { item ->
+            JSONObject().put("id", item.id).put("kind", "preference").put("text", item.text)
+                .put("topic", if (item.scope == "errands") "errand" else item.scope).put("scope", "personal")
+                .put("scope_id", "").put("source_kind", "legacy").put("source_id", item.id)
+                .put("quote", item.sourceQuote).put("derived_from", JSONArray())
+        })
+        changePersonalMemory(server, "import", JSONObject().put("items", items))
+    }
+
+    fun reflectPersonalMemory(server: String) = changePersonalMemory(server, "reflect")
+
+    fun startConversation(vm: AppViewModel, id: String? = null, onStarted: () -> Unit = {}) {
+        if (id == loadedConversation) { onStarted(); return }
+        conversationSwitchIssue(ready, busy || voiceBusy || automatic.busy || automatic.committing || preparingRoute ||
+            vm.busy || vm.updatingTrip || vm.restoringTrip || tripCompletion != null,
+            pendingRequest != null, proposal != null, input)?.let { error = it; return }
+        busy = true
+        viewModelScope.launch {
+            try {
+                writeMutex.withLock {
+                    check(journal { it.pending() } == null) { "上一条请求尚未处理，请先取回结果。" }
+                    val target = id ?: "chat-${UUID.randomUUID()}"
+                    val restored = if (id == null) emptyList() else store.conversation(target).takeLast(500)
+                    store.activateConversation(target)
+                    loadedConversation = target
+                    loadedMemorySession = store.memorySessionId
+                    loadedMemorySessionStartedAt = store.memorySessionStartedAt
+                    storedLines = restored.ifEmpty { listOf(welcome) }
+                    clarification = null
+                    automatic.clear()
+                    automatic.restoredChoices = null
+                    historyDestination = null
+                    preparingRoute = false
+                    routeResult = null
+                    recoveryMessage = ""
+                    personalMemoryEvidence = emptyList()
+                    error = ""
+                    onStarted()
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { error = "切换对话失败：" + (e.message ?: "请重试") }
+            finally { busy = false }
+        }
+    }
 
     fun chooseMode(mode: String) = chooseMode(mode, proposal?.optString("_draft_id").orEmpty())
 
@@ -192,7 +438,6 @@ internal class AssistantViewModel internal constructor(
             error = "待确认建议已变化，请使用当前卡片。"
             return false
         }
-        assistantCardIssue(current)?.let { error = it; return false }
         val text = if (current.optString("action") == "create_tasks")
             "已取消剩余草稿；已保存的待办保留。" else "已取消待确认建议，没有执行。"
         busy = true; error = ""
@@ -372,6 +617,7 @@ internal class AssistantViewModel internal constructor(
     private fun requestContext(vm: AppViewModel): String {
         return JSONObject().put("draft_id", proposal?.optString("_draft_id") ?: JSONObject.NULL)
             .put("trip", assistantTripContext(vm.planningBase()))
+            .put("conversation_id", loadedConversation).put("memory_session_id", loadedMemorySession)
             .put("started", vm.tripStarted).toString()
     }
 
@@ -387,7 +633,13 @@ internal class AssistantViewModel internal constructor(
         }
         check(Api.validateBase(vm.server) == request.server) { "服务地址已变化，旧请求不会应用。" }
         val snapshot = requestSnapshot(request)
-        check(requestContext(vm) == request.contextKey) { "当前草稿或行程已变化，旧回复不会应用。" }
+        check(requestConversationId(request.contextKey, request.createdAt) == loadedConversation) {
+            "当前对话已变化，旧回复不会应用。"
+        }
+        val actual = JSONObject(requestContext(vm))
+        val expected = JSONObject(request.contextKey)
+        listOf("conversation_id", "memory_session_id").filterNot(expected::has).forEach(actual::remove)
+        check(actual.toString() == expected.toString()) { "当前草稿、行程或对话已变化，旧回复不会应用。" }
         vm.requireCurrentContext(snapshot)
         recoveryMessage = ""
         true
@@ -407,6 +659,7 @@ internal class AssistantViewModel internal constructor(
             try {
                 if (writeMutex.withLock { store.responseApplied(request.requestId) }) {
                     refreshConversation(vm)
+                    request.resultJson?.let { applyResponseMemories(request, JSONObject(it)) }
                     finishRequest(request)
                     return@launch
                 }
@@ -446,7 +699,8 @@ internal class AssistantViewModel internal constructor(
         busy = true
         viewModelScope.launch {
             try {
-                writeMutex.withLock { store.add(ChatLine("user", request.userText, request.userMessageId, request.createdAt)) }
+                writeMutex.withLock { store.add(ChatLine("user", request.userText, request.userMessageId, request.createdAt),
+                    requestConversationId(request.contextKey, request.createdAt)) }
                 finishRequest(request)
                 input = request.userText
                 error = ""
@@ -465,25 +719,32 @@ internal class AssistantViewModel internal constructor(
     }
 
     private suspend fun receiveResponse(request: PendingAssistantRequest, answer: JSONObject, vm: AppViewModel) {
+        // Keep the complete result in the journal so a crash cannot lose its memory evidence.
         if (!journal { it.saveResult(request.requestId, answer.toString()) }) return
         pendingRequest = request.copy(resultJson = answer.toString())
+        val response = JSONObject(answer.toString())
+        response.remove("memory")
+        response.remove("memory_updates")
+        response.remove("memory_context")
+        response.remove("memory_actions")
         if (writeMutex.withLock { store.responseApplied(request.requestId) }) {
             refreshConversation(vm)
+            applyResponseMemories(request, answer)
             finishRequest(request)
             return
         }
         if (!contextMatches(request, vm)) {
             return
         }
-        require(assistantCardVersionSupported(answer)) { "建议版本暂不支持，回复未应用，请重新输入需求。" }
-        val action = answer.getString("action")
+        require(assistantCardVersionSupported(response)) { "建议版本暂不支持，回复未应用，请重新输入需求。" }
+        val action = response.getString("action")
         val actionableProposal = proposal?.takeIf { assistantCardIssue(it) == null }
         val batch = action in listOf("create_tasks", "update_task_drafts") ||
-            (action == "create_task" && answer.has("planned_date"))
+            (action == "create_task" && response.has("planned_date"))
         val replace = batch || action in listOf("create_task", "plan_route")
         check(!replace || batch || taskDraftItems(actionableProposal).isEmpty()) { "请先保存或取消剩余任务草稿。" }
-        val replacement = if (batch) taskDraftReplacement(answer, actionableProposal, request.requestId)
-        else if (replace) JSONObject(answer.toString()).apply {
+        val replacement = if (batch) taskDraftReplacement(response, actionableProposal, request.requestId)
+        else if (replace) JSONObject(response.toString()).apply {
             put("_draft_id", request.requestId)
             val previousPlan = actionableProposal?.takeIf { action == "plan_route" && it.optString("action") == "plan_route" }
                 ?.optString("_plan_id").orEmpty()
@@ -501,12 +762,12 @@ internal class AssistantViewModel internal constructor(
             "create_tasks" -> "已整理为多项草稿，请逐项核对，可以只保存其中几项。"
             "update_task_drafts" -> "已修改指定草稿，其他条目保留；核对后再保存。"
             "create_task" -> "请确认这件事，保存后会加入待办。"
-            "plan_route" -> if (answer.optString("mode").isBlank()) "这次步行还是骑行？" else "我来定位并查看有哪些事可以顺路办。"
+            "plan_route" -> if (response.optString("mode").isBlank()) "这次步行还是骑行？" else "我来定位并查看有哪些事可以顺路办。"
             "list_tasks" -> taskListReply(request)
-            else -> answer.getString("reply")
+            else -> response.getString("reply")
         }.let { text ->
-            listOf(text, placeFillNote(fill), reminderNote(replacement))
-                .filter { it.isNotBlank() }.joinToString(" ")
+            appendMemoryFeedback(listOf(text, placeFillNote(fill), reminderNote(replacement))
+                .filter { it.isNotBlank() }.joinToString(" "), action, answer)
         }
         val expectedDraft = JSONObject(request.contextKey).optString("draft_id").takeIf { it.isNotBlank() && it != "null" }
         val applied = try {
@@ -515,7 +776,8 @@ internal class AssistantViewModel internal constructor(
                     ChatLine("user", request.userText, request.userMessageId, request.createdAt),
                     ChatLine("assistant", reply), replacement, replace,
                     expectedTripContext = JSONObject(request.contextKey).getString("trip"),
-                    expectedContextSnapshot = requestSnapshot(request))
+                    expectedContextSnapshot = requestSnapshot(request),
+                    expectedConversationId = requestConversationId(request.contextKey, request.createdAt))
             }
         } catch (e: CancellationException) {
             throw e
@@ -528,9 +790,53 @@ internal class AssistantViewModel internal constructor(
             return
         }
         // Room's receipt is authoritative. If the process dies before journal deletion,
-        // the next launch only removes the journal entry; it never recreates the draft.
+        // the next launch may retry memory validation; it never recreates the draft.
         refreshConversation(vm)
+        applyResponseMemories(request, answer)
         finishRequest(request)
+    }
+
+    /** Memory is auxiliary: invalid suggestions or storage failure cannot trap a completed chat. */
+    private suspend fun applyResponseMemories(request: PendingAssistantRequest, answer: JSONObject) {
+        try {
+            val requestBody = JSONObject(request.bodyJson)
+            if (requestBody.optInt("memory_contract") == 2) {
+                personalMemoryEvidence = personalMemoryEvidence(requestBody, answer)
+                val context = answer.optJSONObject("memory_context")
+                val referenceMessage = when (context?.optString("status")) {
+                    "ready" -> if (personalMemoryEvidence.isEmpty()) "本轮未提供相关个人记忆。"
+                        else "本轮向助手提供了 ${personalMemoryEvidence.size} 条相关记忆，可查看来源。"
+                    "stale" -> "记忆已变化，本轮未采用旧记忆；下次发送会重新获取。"
+                    "disabled" -> "本轮未参考或学习个人记忆。"
+                    else -> "本轮个人记忆暂不可用，对话回复已保存。"
+                }
+                val writeMessage = personalMemoryWriteMessage(context)
+                memoryMessage = listOf(referenceMessage, writeMessage).filter { it.isNotBlank() }.joinToString(" ")
+                // The server has already committed accepted actions. Never reapply them to Room.
+                viewModelScope.launch {
+                    try {
+                        personalMemoryRepository.refresh(request.server)?.let { updated ->
+                            if ((request.server == personalMemoryServer || personalMemoryServer.isBlank()) &&
+                                (personalMemory?.storeId != updated.storeId || updated.revision >= (personalMemory?.revision ?: 0)))
+                                personalMemory = updated
+                        }
+                    } catch (e: CancellationException) { throw e }
+                    catch (_: Exception) { /* The committed chat remains usable when a cache refresh fails. */ }
+                }
+                return
+            }
+            val batch = memoryResponseBatch(JSONObject(request.bodyJson), answer) ?: return
+            if (batch.updates.isEmpty()) return
+            val count = writeMutex.withLock {
+                store.applyMemoryUpdates(batch.updates, batch.revision, request.userMessageId, request.userText, batch.references)
+            }
+            refreshMemories()
+            if (count > 0) memoryMessage = "已依据你的原话更新 $count 条记忆，可在这里查看和修改。"
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            memoryMessage = "本轮回复已保存，但记忆未能更新；需要时可手动添加。"
+        }
     }
 
     /**
@@ -590,6 +896,9 @@ internal class AssistantViewModel internal constructor(
 
     private suspend fun refreshConversation(vm: AppViewModel) {
         val (restored, question) = writeMutex.withLock { store.load() to store.clarification() }
+        loadedConversation = store.activeConversationId
+        loadedMemorySession = store.memorySessionId
+        loadedMemorySessionStartedAt = store.memorySessionStartedAt
         storedLines = restored.first.ifEmpty { listOf(welcome) }
         if (storedProposal?.optString("_draft_id") != restored.second?.optString("_draft_id")) {
             check(automatic.supersede(vm)) { "行程正在更新，请稍后继续获取结果。" }
@@ -718,24 +1027,20 @@ internal class AssistantViewModel internal constructor(
         val userLine = addLine("user", text)
         viewModelScope.launch {
             try {
-                val today = LocalDate.now()
                 val pendingContext = pendingAtSend?.let(::assistantDraftContext)
-                // Keep short follow-ups across date boundaries, but mark old turns so
-                // yesterday's route is not mistaken for an active trip.
-                val recentLines = assistantContextLines(lines)
-                fun contextualText(line: ChatLine, latest: Boolean): String {
-                    val day = Instant.ofEpochMilli(line.createdAt).atZone(ZoneId.systemDefault()).toLocalDate()
-                    return if (latest || day == today) line.text else "[${day}] ${line.text}".take(4000)
-                }
+                val contextNow = System.currentTimeMillis()
+                val recentLines = assistantContextLines(lines.mapIndexed { index, line ->
+                    line.copy(text = assistantContextText(line, index == lines.lastIndex, contextNow, loadedMemorySessionStartedAt))
+                })
                 val messages = JSONArray().apply {
-                    (if (pendingContext == null) recentLines else recentLines.dropLast(1)).forEachIndexed { index, line ->
+                    (if (pendingContext == null) recentLines else recentLines.dropLast(1)).forEach { line ->
                         put(JSONObject().put("role", line.role)
-                            .put("content", contextualText(line, pendingContext == null && index == recentLines.lastIndex)))
+                            .put("content", line.text))
                     }
                     if (pendingContext != null) {
                         put(JSONObject().put("role", "assistant").put("content", pendingContext))
                         recentLines.lastOrNull()?.let {
-                            put(JSONObject().put("role", it.role).put("content", contextualText(it, true)))
+                            put(JSONObject().put("role", it.role).put("content", it.text))
                         }
                     }
                 }
@@ -752,6 +1057,25 @@ internal class AssistantViewModel internal constructor(
                 val body = JSONObject().put("request_id", requestId).put("messages", messages)
                     .put("route_active", vm.tripStarted).put("now", java.time.OffsetDateTime.now().toString())
                     .put("context_snapshot", snapshot.json())
+                val remoteMemory = try {
+                    val controls = withContext(Dispatchers.IO) { personalMemoryRepository.localControls(vm.server) }
+                    personalReferenceAllowed = controls.first
+                    personalLearningAllowed = controls.second
+                    personalMemoryRepository.refresh(vm.server).also {
+                        personalMemoryServer = Api.validateBase(vm.server)
+                        personalMemory = it
+                        personalMemoryConnected = it != null
+                        if (it == null) memoryMessage = "尚未配置个人记忆连接，本轮正常对话。"
+                    }
+                } catch (e: CancellationException) { throw e }
+                catch (_: Exception) {
+                    personalMemoryConnected = false
+                    memoryMessage = "本轮无法读取服务端记忆，已跳过参考与学习。"
+                    null
+                }
+                val memoryFields = personalMemoryRequestFields(remoteMemory, loadedMemorySession,
+                    vm.planningBase()?.sessionId.orEmpty(), personalReferenceAllowed, personalLearningAllowed)
+                memoryFields.keys().forEach { key -> body.put(key, memoryFields.get(key)) }
                 if (pendingAtSend?.optString("action") == "create_tasks")
                     body.put("draft_items", taskDraftRequestItems(pendingAtSend))
                 val request = PendingAssistantRequest(requestId, Api.validateBase(vm.server), body.toString(),
@@ -761,7 +1085,7 @@ internal class AssistantViewModel internal constructor(
                 pendingRequest = request
                 // The journal always precedes transport. A crash before this message write is
                 // repaired by the response transaction using the same userMessageId.
-                writeMutex.withLock { store.add(userLine) }
+                writeMutex.withLock { store.add(userLine, requestConversationId(request.contextKey, request.createdAt)) }
                 receiveResponse(request, requestTransport.submit(request.server, JSONObject(request.bodyJson)), vm)
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) {

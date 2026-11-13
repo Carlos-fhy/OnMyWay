@@ -23,6 +23,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
+import org.json.JSONArray
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
@@ -383,6 +384,88 @@ class AssistantRecoveryTest {
         assertEquals(messages, db.assistant().recentMessages())
         assertEquals(1, transport.submissions.size)
         assertTrue(transport.statusQueries.isEmpty())
+    }
+
+    private fun memoryReply(quote: String) = routeReply().put("memory_updates", JSONArray().put(
+        JSONObject().put("op", "add").put("text", quote).put("quote", quote)
+            .put("kind", "preference").put("scope", "travel")))
+
+    private suspend fun legacyMemoryRequest(request: PendingAssistantRequest): PendingAssistantRequest {
+        val fields = memoryRequestFields(AssistantStore(db, prefs).memorySnapshot(), request.userText)
+        val body = JSONObject(request.bodyJson).apply {
+            listOf("memory_enabled", "memory_store_id", "memory_session_id", "memory_trip_id").forEach(::remove)
+            fields.keys().forEach { key -> put(key, fields.get(key)) }
+        }
+        return request.copy(bodyJson = body.toString()).also { legacy ->
+            AssistantRequestJournal(app, journalName).use { journal ->
+                journal.finish(request.requestId)
+                journal.create(legacy)
+            }
+        }
+    }
+
+    @Test fun committedReplyRecoversMemoryOnceAndCannotResurrectItAfterDeletion() = runBlocking {
+        val quote = "以后喜欢步行"
+        val original = openChat()
+        val sent = interruptedSend(original, quote)
+        stop(original)
+        val request = legacyMemoryRequest(sent)
+        val store = commitRoomResponseOnly(request)
+        AssistantRequestJournal(app, journalName).use { it.saveResult(request.requestId, memoryReply(quote).toString()) }
+        val recovered = openChat()
+        val memory = store.memories().single()
+        assertEquals(quote, memory.text)
+        assertEquals(request.userMessageId, memory.sourceMessageId)
+        assertEquals(quote, memory.sourceQuote)
+        assertNull(recovered.pendingRequest)
+        stop(recovered)
+        assertTrue(store.forget(memory.id))
+        // A stale completed journal may reappear, but its frozen generation cannot write again.
+        AssistantRequestJournal(app, journalName).use {
+            it.create(request)
+            it.saveResult(request.requestId, memoryReply(quote).toString())
+        }
+        val reopened = openChat()
+        assertNull(reopened.pendingRequest)
+        assertTrue(store.memories().isEmpty())
+        assertEquals(1, db.assistant().recentMessages().count { it.id == "agent-response-${request.requestId}" })
+        assertTrue(transport.statusQueries.isEmpty())
+        assertEquals(1, transport.submissions.size)
+    }
+
+    @Test fun disablingLearningDuringInterruptedRequestKeepsReplyWithoutAddingMemory() = runBlocking {
+        val quote = "以后喜欢步行"
+        val chat = openChat()
+        val sent = interruptedSend(chat, quote)
+        stop(chat)
+        val request = legacyMemoryRequest(sent)
+        val reopened = openChat()
+        val store = AssistantStore(db, prefs)
+        store.updateMemorySettings(useMemory = true, autoRemember = false)
+        transport.onStatus = { _, body -> status(body, "completed", memoryReply(quote)) }
+        recover(reopened)
+        assertNull(reopened.pendingRequest)
+        assertTrue(store.memories().isEmpty())
+        assertFalse(reopened.autoRemember)
+        assertEquals(1, db.assistant().recentMessages().count { it.id == "agent-response-${request.requestId}" })
+    }
+
+    @Test fun unavailableMemoryStorageDoesNotBlockStartupOrSendingAReply() = runBlocking {
+        withContext(Dispatchers.IO) { db.openHelper.writableDatabase.execSQL("DROP TABLE assistant_memory_state") }
+        val chat = openChat()
+        assertFalse(chat.memoryEnabled)
+        assertTrue(chat.memoryMessage.isNotBlank())
+        transport.onSubmit = { _, body ->
+            assertFalse(body.getBoolean("memory_auto_learn"))
+            assertEquals(2, body.getInt("memory_contract"))
+            assertFalse(body.getBoolean("memory_enabled"))
+            assertFalse(body.has("memory_items"))
+            JSONObject().put("action", "reply").put("reply", "对话仍然可用")
+        }
+        withContext(Dispatchers.Main) { chat.input = "你好"; chat.send(vm) }
+        waitUntil { transport.submissions.size == 1 && !chat.busy }
+        assertNull(chat.pendingRequest)
+        assertTrue(chat.lines.any { it.text == "对话仍然可用" })
     }
 
     @Test fun cachedTaskListReadsPendingRowsWithoutTaskFlowSubscription() = runBlocking {

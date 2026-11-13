@@ -7,9 +7,9 @@ class AssistantContextTest {
     private fun line(text: String, time: Long, history: String? = null) =
         ChatLine("user", text, id = time.toString(), createdAt = time, routeHistoryId = history)
 
-    @Test fun excludesPreviousSessionButKeepsShortFollowUpsAcrossMidnight() {
+    @Test fun keepsConversationAcrossLongPauseAndMidnight() {
         val lines = listOf(line("old", 1), line("go", 2_000_000), line("cycling", 2_060_000))
-        assertEquals(listOf("go", "cycling"), assistantContextLines(lines).map { it.text })
+        assertEquals(listOf("old", "go", "cycling"), assistantContextLines(lines).map { it.text })
     }
 
     @Test fun newestInstructionSurvivesCharacterBudget() {

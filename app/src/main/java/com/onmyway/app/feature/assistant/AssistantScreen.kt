@@ -16,11 +16,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -55,7 +57,7 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: () -> Unit, openPlan: () -> Unit, openNavigation: () -> Unit,
-    chat: AssistantViewModel = viewModel()) {
+    chat: AssistantViewModel = viewModel(), historyVisibilityChanged: (Boolean) -> Unit = {}) {
     var editor by rememberSaveable(stateSaver = AssistantEditorHostSaver) {
         mutableStateOf<AssistantEditorHost>(AssistantEditorHost.Closed)
     }
@@ -64,8 +66,12 @@ internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: ()
     var showVoice by rememberSaveable { mutableStateOf(false) }
     var showArchive by remember { mutableStateOf(false) }
     val historyDrawer = rememberDrawerState(DrawerValue.Closed)
+    val reportHistoryVisibility by rememberUpdatedState(historyVisibilityChanged)
+    DisposableEffect(Unit) {
+        onDispose { reportHistoryVisibility(false) }
+    }
     val drawerScope = rememberCoroutineScope()
-    var selectedHistoryDate by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedHistoryConversation by rememberSaveable { mutableStateOf<String?>(null) }
     var screenTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -81,24 +87,32 @@ internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: ()
             screenTime = System.currentTimeMillis()
         }
     }
-    val today = Instant.ofEpochMilli(screenTime).atZone(ZoneId.systemDefault()).toLocalDate()
-    val displayedDay = selectedHistoryDate?.let(LocalDate::parse) ?: today
-    val viewingToday = displayedDay == today
+    val displayedConversation = selectedHistoryConversation ?: chat.conversationId
+    val viewingCurrent = displayedConversation == chat.conversationId
+    LaunchedEffect(historyDrawer.currentValue, historyDrawer.targetValue, viewingCurrent) {
+        // Keep global notices from intercepting drawer items or the history continuation actions.
+        reportHistoryVisibility(!viewingCurrent || historyDrawer.currentValue == DrawerValue.Open ||
+            historyDrawer.targetValue == DrawerValue.Open)
+    }
     var visibleLines by remember { mutableStateOf<List<ChatLine>>(emptyList()) }
     var dayLoadError by remember { mutableStateOf("") }
-    LaunchedEffect(chat.ready, chat.lines, displayedDay, vm.routeSession?.id, vm.tripStarted) {
+    var messageLimit by remember(displayedConversation) { mutableIntStateOf(500) }
+    var hasEarlierMessages by remember(displayedConversation) { mutableStateOf(false) }
+    LaunchedEffect(chat.ready, chat.lines, displayedConversation, messageLimit, vm.routeSession?.id, vm.tripStarted) {
         if (chat.ready) try {
-            visibleLines = latestRouteEntries(chat.conversationDay(displayedDay))
+            val loaded = chat.conversation(displayedConversation, messageLimit)
+            hasEarlierMessages = loaded.size >= messageLimit
+            visibleLines = latestRouteEntries(loaded)
             dayLoadError = ""
         } catch (e: CancellationException) { throw e }
-        catch (_: Exception) { dayLoadError = "对话读取失败，请重新选择日期。" }
+        catch (_: Exception) { dayLoadError = "对话读取失败，请重新选择对话。" }
     }
     var archiveEventId by remember { mutableStateOf<String?>(null) }
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = LocalFocusManager.current
     val scroll = rememberLazyListState()
     val dragging by scroll.interactionSource.collectIsDraggedAsState()
-    var followLatest by remember(displayedDay) { mutableStateOf(true) }
+    var followLatest by remember(displayedConversation) { mutableStateOf(true) }
     var scrollRequest by remember { mutableIntStateOf(0) }
     var listHeight by remember { mutableIntStateOf(0) }
     val itemCount by remember { derivedStateOf { scroll.layoutInfo.totalItemsCount } }
@@ -162,12 +176,12 @@ internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: ()
     LaunchedEffect(dragging) {
         if (dragging) followLatest = false
     }
-    LaunchedEffect(scroll, displayedDay) {
+    LaunchedEffect(scroll, displayedConversation) {
         snapshotFlow { scroll.isScrollInProgress to scroll.canScrollForward }.collect { (scrolling, more) ->
             if (!scrolling && !more) followLatest = true
         }
     }
-    LaunchedEffect(displayedDay, itemCount, listHeight, scrollRequest, visibleLines.lastOrNull()?.id,
+    LaunchedEffect(displayedConversation, itemCount, listHeight, scrollRequest, visibleLines.lastOrNull()?.id,
         chat.proposal, chat.busy, chat.error, chat.routeResult, chat.tripCompletion?.eventId) {
         if (followLatest && itemCount > 0) {
             // 首帧可能仍处在 Scaffold 子组合的测量过程中，滚到末项会强制再测量一次；
@@ -181,25 +195,30 @@ internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: ()
         scrollRequest++
         chat.send(vm)
     }
-    ConversationHistoryDrawer(chat, historyDrawer, displayedDay, { day ->
-        selectedHistoryDate = if (day == today) null else day.toString()
+    ConversationHistoryDrawer(chat, historyDrawer, displayedConversation, { id ->
+        selectedHistoryConversation = id.takeUnless { it == chat.conversationId }
         drawerScope.launch { historyDrawer.close() }
     }) {
-        Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainerLow).imePadding()) {
+        Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).imePadding()) {
             AssistantChatHeader(
-                historyLabel = if (viewingToday) null else displayedDay.format(DateTimeFormatter.ofPattern("M月d日")) + " · 历史对话",
+                historyLabel = if (viewingCurrent) "对话会持续保留，可随时开始新话题" else "历史对话 · 回看",
                 history = { focus.clearFocus(); keyboard?.hide(); drawerScope.launch { historyDrawer.open() } },
                 routes = { archiveEventId = null; showArchive = true },
                 settings = settings,
+                newConversation = { chat.startConversation(vm) { selectedHistoryConversation = null } },
+                compact = viewingCurrent && WindowInsets.ime.getBottom(LocalDensity.current) > 0,
             )
             Box(Modifier.weight(1f).fillMaxWidth()) {
             LazyColumn(
                 Modifier.fillMaxSize().testTag("assistant-messages").onSizeChanged { listHeight = it.height },
                 state = scroll,
-                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 16.dp, bottom = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {
                 if (dayLoadError.isNotBlank()) item { Text(dayLoadError, color = MaterialTheme.colorScheme.error) }
+                if (hasEarlierMessages) item(key = "earlier-messages") {
+                    TextButton({ followLatest = false; messageLimit += 500 }, Modifier.fillMaxWidth()) { Text("加载更早消息") }
+                }
                 visibleLines.forEachIndexed { index, line ->
                     val day = chatDateLabel(line.createdAt)
                     if (index == 0 || chatDateLabel(visibleLines[index - 1].createdAt) != day) {
@@ -222,7 +241,10 @@ internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: ()
                         }
                     }
                 }
-                if (viewingToday) {
+                if (viewingCurrent) {
+                    if (vm.planningRecoveryVisible) item(key = "planning-recovery") {
+                        com.onmyway.app.feature.planning.PlanningRecoveryCard(vm)
+                    }
                     chat.pendingRequest?.takeIf { !chat.busy }?.let { request -> item(key = "interrupted-request") {
                         AppCard(contentPadding = PaddingValues(16.dp)) {
                             Row(
@@ -267,6 +289,10 @@ internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: ()
                         val cardIssue = assistantCardIssue(proposal, screenTime)
                         if (cardIssue != null) {
                             UnavailableAssistantCard(cardIssue)
+                            TextButton({ chat.dismissDraft(proposal.optString("_draft_id"), proposal.optString("_plan_id"), vm) },
+                                enabled = !chat.busy && !auto.busy && !vm.busy && !vm.updatingTrip && !vm.restoringTrip) {
+                                Text("取消此建议")
+                            }
                         } else if (proposal.optString("action") == "plan_route") {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 listOf("walking" to "步行", "cycling" to "骑行").forEach { (mode, label) ->
@@ -412,7 +438,7 @@ internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: ()
                             }
                         }
                     } }
-                    if (viewingToday) {
+                    if (viewingCurrent) {
                         chat.tripCompletion?.let { prompt -> item(key = "trip-completion:${prompt.eventId}") {
                             TripCompletionCard(
                                 prompt,
@@ -426,8 +452,6 @@ internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: ()
                     vm.result?.let { route -> item {
                         val current = route === vm.result && !vm.editingPlan && !vm.restoringTrip
                         AppCard(
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                            border = null,
                             contentPadding = PaddingValues(18.dp),
                         ) {
                             Row(
@@ -437,37 +461,38 @@ internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: ()
                                 AppIconBadge(
                                     R.drawable.ic_route,
                                     size = 36.dp,
-                                    container = MaterialTheme.colorScheme.surfaceContainerLowest.copy(alpha = 0.55f),
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    container = MaterialTheme.colorScheme.surfaceContainer,
                                 )
                                 Text(
                                     if (current) "路线已算好" else "此方案已更新，请查看当前行程",
                                     style = MaterialTheme.typography.labelLarge,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
                             Spacer(Modifier.height(10.dp))
                             Text(
                                 Place.from(route.getJSONObject("destination")).name,
                                 style = MaterialTheme.typography.titleLarge,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                color = MaterialTheme.colorScheme.onSurface,
                             )
                             if (current) {
                                 Text(
                                     "全程 ${formatDuration(route.getInt("total_seconds"))} · 多花 ${formatDuration(route.getInt("extra_seconds"))}",
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    color = MaterialTheme.colorScheme.onSurface,
                                 )
                                 Text(
                                     "预计 ${displayTime(route.getString("arrival"))} 到达 · 规划估算",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                                 if (vm.planNeedsRefresh) {
                                     Text(
                                         if (vm.tripStarted) "待办有变化，当前导航路线未自动更改，建议重新规划。"
                                         else "待办有变化，此路线需重新规划后才能开始。",
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        color = MaterialTheme.colorScheme.tertiary,
                                     )
                                 }
                                 val stops = route.getJSONArray("stops")
@@ -475,7 +500,7 @@ internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: ()
                                     Text(
                                         "${i + 1}. ${Place.from(stops.getJSONObject(i).getJSONObject("place")).name}",
                                         style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        color = MaterialTheme.colorScheme.onSurface,
                                     )
                                 }
                                 val omitted = route.getJSONArray("omitted")
@@ -483,7 +508,7 @@ internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: ()
                                     Text(
                                         "${omitted.length()} 件未安排，请在详情查看原因。",
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
                                 val warnings = route.getJSONArray("warnings")
@@ -491,7 +516,7 @@ internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: ()
                                     Text(
                                         warnings.getString(i),
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
                             }
@@ -553,22 +578,37 @@ internal fun AssistantScreen(vm: AppViewModel, tasks: List<Errand>, settings: ()
                 }
             }
             }
-            if (!viewingToday) {
-                TextButton({ selectedHistoryDate = null }, Modifier.fillMaxWidth()) {
-                    Text("返回今天继续对话")
+            if (!viewingCurrent) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        "继续这段对话可接着聊；待办与行程以当前状态为准。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
+                    if (chat.error.isNotBlank()) Text(chat.error, color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton({ selectedHistoryConversation = null }) { Text("返回当前对话") }
+                        TextButton({ chat.startConversation(vm, displayedConversation) { selectedHistoryConversation = null } }) {
+                            Text("继续这段对话")
+                        }
+                    }
                 }
             } else {
                 val canSend = chat.ready && chat.pendingRequest == null && !chat.busy && !auto.busy &&
                     !vm.busy && !vm.updatingTrip && !vm.restoringTrip
-                AssistantComposer(
+                val inputConversation = chat.conversationId
+                key(inputConversation) { AssistantComposer(
                     input = chat.input, onInput = { chat.input = it }, ready = chat.ready, busy = chat.busy,
                     canSend = canSend, showVoice = showVoice,
                     toggleVoice = { showVoice = !showVoice; focus.clearFocus(); keyboard?.hide() },
                     server = vm.server,
-                    onVoice = { chat.input = it.take(4000); sendMessage() },
-                    onVoiceError = { chat.error = it },
+                    onVoice = { if (chat.conversationId == inputConversation) { chat.input = it.take(4000); sendMessage() } },
+                    onVoiceError = { if (chat.conversationId == inputConversation) chat.error = it },
+                    onVoiceActivity = { if (chat.conversationId == inputConversation) chat.voiceBusy = it },
                     send = { if (canSend && chat.input.isNotBlank()) sendMessage() },
-                )
+                ) }
             }
         }
     }

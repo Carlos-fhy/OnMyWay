@@ -16,23 +16,25 @@ import androidx.compose.ui.unit.dp
 import com.onmyway.app.R
 import com.onmyway.app.core.ui.AppKicker
 import com.onmyway.app.core.ui.AppStatusPill
-import java.time.LocalDate
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 @Composable
 internal fun ConversationHistoryDrawer(chat: AssistantViewModel, drawerState: DrawerState,
-    selectedDay: LocalDate, select: (LocalDate) -> Unit, content: @Composable () -> Unit) {
-    var days by remember { mutableStateOf<List<AssistantDay>>(emptyList()) }
+    selectedConversation: String, select: (String) -> Unit, content: @Composable () -> Unit) {
+    var conversations by remember { mutableStateOf<List<AssistantConversation>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var retry by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
     BackHandler(drawerState.isOpen) { scope.launch { drawerState.close() } }
-    LaunchedEffect(drawerState.isOpen, retry, chat.lines.size) {
+    LaunchedEffect(drawerState.isOpen, retry, chat.lines.size, chat.conversationId) {
         if (drawerState.isOpen) {
             loading = true; error = ""
-            try { days = chat.conversationDays() }
+            try { conversations = chat.conversations() }
             catch (e: CancellationException) { throw e }
             catch (_: Exception) { error = "对话读取失败，点击重试" }
             finally { loading = false }
@@ -60,16 +62,16 @@ internal fun ConversationHistoryDrawer(chat: AssistantViewModel, drawerState: Dr
                 }
             }
             Text(
-                "按日期回看之前的安排，不会影响当前待办。",
+                "对话不会在零点清空。按话题回看，也可以接着聊。",
                 Modifier.padding(horizontal = 22.dp),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(12.dp))
             NavigationDrawerItem(
-                label = { Text("今天的对话") },
-                selected = selectedDay == LocalDate.now(),
-                onClick = { select(LocalDate.now()) },
+                label = { Text("当前对话") },
+                selected = selectedConversation == chat.conversationId,
+                onClick = { select(chat.conversationId) },
                 modifier = Modifier.padding(horizontal = 12.dp),
                 shape = RoundedCornerShape(14.dp),
             )
@@ -85,23 +87,26 @@ internal fun ConversationHistoryDrawer(chat: AssistantViewModel, drawerState: Dr
                 contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                items(days.filter { it.day != LocalDate.now().toString() }, key = { it.day }) { day ->
-                    val date = LocalDate.parse(day.day)
+                items(conversations.filter { it.id != chat.conversationId }, key = { it.id }) { conversation ->
                     NavigationDrawerItem(
-                        label = { Text(day.day) },
-                        selected = selectedDay == date,
+                        label = { Column {
+                            Text(conversation.title, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                            Text(Instant.ofEpochMilli(conversation.updatedAt).atZone(ZoneId.systemDefault())
+                                .format(DateTimeFormatter.ofPattern("M月d日 HH:mm")), style = MaterialTheme.typography.bodySmall)
+                        } },
+                        selected = selectedConversation == conversation.id,
                         badge = {
                             AppStatusPill(
-                                day.count.toString(),
+                                conversation.count.toString(),
                                 container = MaterialTheme.colorScheme.secondaryContainer,
                                 content = MaterialTheme.colorScheme.onSecondaryContainer,
                             )
                         },
-                        onClick = { select(date) },
+                        onClick = { select(conversation.id) },
                         shape = RoundedCornerShape(14.dp),
                     )
                 }
-                if (!loading && days.none { it.day != LocalDate.now().toString() }) {
+                if (!loading && conversations.none { it.id != chat.conversationId }) {
                     item {
                         Text(
                             "还没有更早的对话。",

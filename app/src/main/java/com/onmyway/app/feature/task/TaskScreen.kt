@@ -6,37 +6,41 @@ import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.onmyway.app.R
 import com.onmyway.app.core.format.displayTime
 import com.onmyway.app.core.model.isIndoor
 import com.onmyway.app.core.model.placeTypeIcon
 import com.onmyway.app.core.reminder.notificationsAllowed
-import com.onmyway.app.core.time.currentDate
 import com.onmyway.app.core.time.rememberCurrentDate
-import com.onmyway.app.core.ui.AppIconBadge
-import com.onmyway.app.core.ui.AppRouteArt
 import com.onmyway.app.core.ui.AppScreenHeader
-import com.onmyway.app.core.ui.AppStatusPill
-import com.onmyway.app.core.ui.ChoiceRow
 import com.onmyway.app.data.local.entity.Errand
+
+private val TaskContentInset = 56.dp
 
 @Composable
 internal fun TaskScreen(tasks: List<Errand>, add: () -> Unit, edit: (Errand) -> Unit, delete: (Errand) -> Unit,
@@ -46,33 +50,30 @@ internal fun TaskScreen(tasks: List<Errand>, add: () -> Unit, edit: (Errand) -> 
     val currentDate = rememberCurrentDate()
     val sections = taskDateSections(tasks, filter, currentDate.date, currentDate.zone)
     val visible = sections.flatMap { it.tasks }
+    val pendingCount = tasks.count { it.status == "pending" }
+    val deferredCount = tasks.count { it.status == "deferred" }
+    val doneCount = tasks.count { it.status == "done" }
     val reminders = tasks.count { it.status == "pending" && it.reminderPending }
     val listState = rememberLazyListState()
     val expandAdd by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset < 40 } }
+    val context = LocalContext.current
+    var notificationsGranted by remember { mutableStateOf(notificationsAllowed(context)) }
+    var notificationDenied by remember { mutableStateOf(false) }
+    val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        notificationsGranted = notificationsAllowed(context)
+        notificationDenied = !notificationsGranted
+    }
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             AppScreenHeader(
                 "待办",
-                kicker = "TODAY",
-                subtitle = "${tasks.count { it.status == "pending" }} 件事，留给下一次顺路",
-                actions = {
-                    if (reminders > 0) {
-                        AppStatusPill(
-                            "$reminders 个提醒",
-                            container = MaterialTheme.colorScheme.tertiaryContainer,
-                            content = MaterialTheme.colorScheme.onTertiaryContainer,
-                        )
-                    }
-                },
+                subtitle = if (reminders > 0) "$pendingCount 件待办 · $reminders 个提醒待处理"
+                    else "$pendingCount 件事，留给下一次顺路",
             )
             Column(
-                Modifier.padding(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                Modifier.padding(horizontal = 16.dp),
             ) {
-                val pendingCount = tasks.count { it.status == "pending" }
-                val deferredCount = tasks.count { it.status == "deferred" }
-                val doneCount = tasks.count { it.status == "done" }
-                ChoiceRow(
+                TaskFilters(
                     listOf(
                         "pending" to "待办 ($pendingCount)",
                         "deferred" to "暂缓 ($deferredCount)",
@@ -80,21 +81,39 @@ internal fun TaskScreen(tasks: List<Errand>, add: () -> Unit, edit: (Errand) -> 
                     ),
                     filter,
                 ) { filter = it }
-                ReminderPermission()
             }
             LazyColumn(
                 Modifier.weight(1f),
                 state = listState,
-                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 104.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 104.dp),
+                verticalArrangement = Arrangement.spacedBy(0.dp),
             ) {
+                if (!notificationsGranted) item(key = "reminder-permission") {
+                    ReminderPermission(notificationDenied) {
+                        if (Build.VERSION.SDK_INT >= 33 && !notificationDenied) {
+                            notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        } else {
+                            context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName))
+                        }
+                    }
+                }
                 if (visible.isEmpty()) item {
                     Column(
-                        Modifier.fillMaxWidth().padding(top = 40.dp, bottom = 32.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 40.dp, bottom = 32.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        AppRouteArt(Modifier.width(190.dp).height(96.dp))
-                        Spacer(Modifier.height(18.dp))
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainer,
+                        ) {
+                            Icon(
+                                painterResource(R.drawable.ic_tasks),
+                                null,
+                                Modifier.padding(14.dp).size(24.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         Text(
                             when (filter) {
                                 "done" -> "完成的事，会留在这里"
@@ -104,7 +123,6 @@ internal fun TaskScreen(tasks: List<Errand>, add: () -> Unit, edit: (Errand) -> 
                             style = MaterialTheme.typography.titleLarge,
                         )
                         if (filter == "pending") {
-                            Spacer(Modifier.height(6.dp))
                             Text(
                                 "买东西、取快递，出门时一起安排。",
                                 style = MaterialTheme.typography.bodyMedium,
@@ -116,24 +134,27 @@ internal fun TaskScreen(tasks: List<Errand>, add: () -> Unit, edit: (Errand) -> 
                 sections.forEach { section ->
                     item(key = "section:${section.key}") {
                         Row(
-                            Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 2.dp),
+                            Modifier.fillMaxWidth().padding(start = TaskContentInset, end = 16.dp)
+                                .padding(top = 24.dp, bottom = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
                             Text(
                                 section.title,
-                                style = MaterialTheme.typography.titleSmall,
+                                Modifier.weight(1f),
+                                style = MaterialTheme.typography.labelLarge,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Text(
                                 "${section.tasks.size}",
                                 style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.outline,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }
-                    items(section.tasks, key = { it.id }) { task ->
+                    itemsIndexed(section.tasks, key = { _, task -> task.id }) { index, task ->
                         TaskRow(task, save, edit, delete, { reminderTarget = it }, dismissReminder,
+                            first = index == 0, last = index == section.tasks.lastIndex,
                             modifier = Modifier.animateItem())
                     }
                 }
@@ -142,12 +163,12 @@ internal fun TaskScreen(tasks: List<Errand>, add: () -> Unit, edit: (Errand) -> 
         ExtendedFloatingActionButton(
             onClick = add,
             expanded = expandAdd,
-            modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp),
+            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
             icon = { Icon(painterResource(R.drawable.ic_add), "新增待办") },
             text = { Text("记一件事", style = MaterialTheme.typography.titleSmall) },
             containerColor = MaterialTheme.colorScheme.primary,
             contentColor = MaterialTheme.colorScheme.onPrimary,
-            shape = RoundedCornerShape(19.dp),
+            shape = CircleShape,
         )
     }
     reminderTarget?.let { expected ->
@@ -162,6 +183,39 @@ internal fun TaskScreen(tasks: List<Errand>, add: () -> Unit, edit: (Errand) -> 
 }
 
 @Composable
+private fun TaskFilters(options: List<Pair<String, String>>, selected: String, choose: (String) -> Unit) {
+    Column {
+        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).selectableGroup()) {
+            options.forEach { (value, label) ->
+                val active = value == selected
+                Column(
+                    modifier = Modifier.weight(1f).fillMaxHeight()
+                        .selectable(selected = active, role = Role.RadioButton, onClick = { choose(value) })
+                        .heightIn(min = 52.dp).padding(horizontal = 4.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        label,
+                        Modifier.padding(vertical = 12.dp),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                        textAlign = TextAlign.Center,
+                    )
+                    Box(Modifier.size(width = 24.dp, height = 3.dp).background(
+                        if (active) MaterialTheme.colorScheme.primary else Color.Transparent,
+                        CircleShape,
+                    ))
+                }
+            }
+        }
+        HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
 private fun TaskRow(
     task: Errand,
     save: (Errand) -> Unit,
@@ -169,6 +223,8 @@ private fun TaskRow(
     delete: (Errand) -> Unit,
     remind: (Errand) -> Unit,
     dismissReminder: (Errand) -> Unit,
+    first: Boolean,
+    last: Boolean,
     modifier: Modifier = Modifier,
 ) {
     var menu by remember { mutableStateOf(false) }
@@ -181,126 +237,146 @@ private fun TaskRow(
         task.reminderAt.takeIf { it > 0 }?.let { "提醒 ${displayReminderTime(it)}" },
         if (task.deadline.isNotBlank()) "${displayTime(task.deadline)} 前" else null,
     )
-    // 连续清单：普通任务不单独描边，依靠留白和分隔线分组。
-    Column(modifier) {
-        Row(
-            Modifier.fillMaxWidth().padding(start = 2.dp, end = 0.dp, top = 4.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Checkbox(
-                completed,
-                onCheckedChange = { save(task.copy(status = if (it) "done" else "pending")) },
-                colors = CheckboxDefaults.colors(
-                    checkedColor = MaterialTheme.colorScheme.primary,
-                    uncheckedColor = MaterialTheme.colorScheme.outline,
-                ),
-                modifier = Modifier.semantics { contentDescription = "完成${task.title}" },
-            )
-            Column(
-                Modifier.weight(1f).clickable { edit(task) }.padding(vertical = 6.dp, horizontal = 2.dp),
-                verticalArrangement = Arrangement.spacedBy(5.dp),
+    Surface(
+        modifier = modifier,
+        color = MaterialTheme.colorScheme.surfaceContainerLowest,
+        shape = RoundedCornerShape(
+            topStart = if (first) 16.dp else 0.dp,
+            topEnd = if (first) 16.dp else 0.dp,
+            bottomStart = if (last) 16.dp else 0.dp,
+            bottomEnd = if (last) 16.dp else 0.dp,
+        ),
+    ) {
+        Column {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.Top,
             ) {
-                Text(
-                    task.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    textDecoration = if (completed) TextDecoration.LineThrough else TextDecoration.None,
-                    color = if (completed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                Checkbox(
+                    completed,
+                    onCheckedChange = { save(task.copy(status = if (it) "done" else "pending")) },
+                    colors = CheckboxDefaults.colors(
+                        checkedColor = MaterialTheme.colorScheme.primary,
+                        uncheckedColor = MaterialTheme.colorScheme.outline,
+                    ),
+                    modifier = Modifier.size(48.dp).semantics { contentDescription = "完成${task.title}" },
                 )
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Icon(
-                        painterResource(placeTypeIcon(task.placeType)),
-                        null,
-                        Modifier.size(14.dp),
-                        tint = when {
-                            completed -> MaterialTheme.colorScheme.outline
-                            missingPlace -> MaterialTheme.colorScheme.tertiary
-                            else -> MaterialTheme.colorScheme.primary
-                        },
-                    )
+                Column(
+                    Modifier.weight(1f).clickable { edit(task) }
+                        .padding(start = 4.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
                     Text(
-                        listOfNotNull(
+                        task.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = if (completed) FontWeight.Normal else FontWeight.Medium,
+                        textDecoration = if (completed) TextDecoration.LineThrough else TextDecoration.None,
+                        color = if (completed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                    )
+                    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Icon(
+                            painterResource(placeTypeIcon(task.placeType)),
+                            null,
+                            Modifier.padding(top = 2.dp).size(14.dp),
+                            tint = when {
+                                completed -> MaterialTheme.colorScheme.outline
+                                missingPlace -> MaterialTheme.colorScheme.tertiary
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                        Text(
                             when {
                                 indoor -> "不用出门"
                                 missingPlace -> "待补办理地点"
-                                else -> task.place()?.name
+                                else -> task.place()?.name.orEmpty()
                             },
-                            if (!indoor) "${task.serviceMinutes} 分钟" else null,
-                        ).joinToString(" · "),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (missingPlace && !completed) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                if (!completed && meta.isNotEmpty()) {
-                    Text(
-                        meta.joinToString(" · "),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
-            }
-            Box {
-                IconButton({ menu = true }, Modifier.size(42.dp)) {
-                    Icon(
-                        painterResource(R.drawable.ic_more),
-                        "${task.title}的更多操作",
-                        Modifier.size(20.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                DropdownMenu(menu, { menu = false }) {
-                    DropdownMenuItem(text = { Text("编辑") }, onClick = { menu = false; edit(task) })
-                    if (task.status == "pending") {
-                        DropdownMenuItem(text = { Text("稍后提醒") }, onClick = { menu = false; remind(task) })
-                        if (task.reminderPending) DropdownMenuItem(text = { Text("忽略本次提醒") }, onClick = {
-                            menu = false; dismissReminder(task)
-                        })
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (missingPlace && !completed) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
-                    DropdownMenuItem(text = { Text(if (task.status == "pending") "暂缓" else "恢复待办") }, onClick = {
-                        menu = false; save(task.copy(status = if (task.status == "pending") "deferred" else "pending"))
-                    })
-                    DropdownMenuItem(text = { Text("删除", color = MaterialTheme.colorScheme.error) }, onClick = { menu = false; delete(task) })
+                    if (!indoor || (!completed && meta.isNotEmpty())) {
+                        FlowRow(
+                            Modifier.padding(start = 20.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            if (!indoor) Text(
+                                "办理约 ${task.serviceMinutes} 分钟",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            if (!completed) meta.forEach { detail ->
+                                Text(
+                                    detail,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = if (task.reminderPending) MaterialTheme.colorScheme.tertiary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+                Box {
+                    IconButton({ menu = true }, Modifier.size(48.dp)) {
+                        Icon(
+                            painterResource(R.drawable.ic_more),
+                            "${task.title}的更多操作",
+                            Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    DropdownMenu(menu, { menu = false }) {
+                        DropdownMenuItem(text = { Text("编辑") }, onClick = { menu = false; edit(task) })
+                        if (task.status == "pending") {
+                            DropdownMenuItem(text = { Text("稍后提醒") }, onClick = { menu = false; remind(task) })
+                            if (task.reminderPending) DropdownMenuItem(text = { Text("忽略本次提醒") }, onClick = {
+                                menu = false; dismissReminder(task)
+                            })
+                        }
+                        DropdownMenuItem(text = { Text(if (task.status == "pending") "暂缓" else "恢复待办") }, onClick = {
+                            menu = false; save(task.copy(status = if (task.status == "pending") "deferred" else "pending"))
+                        })
+                        DropdownMenuItem(text = { Text("删除", color = MaterialTheme.colorScheme.error) }, onClick = { menu = false; delete(task) })
+                    }
                 }
             }
+            if (!last) HorizontalDivider(
+                modifier = Modifier.padding(start = TaskContentInset, end = 16.dp),
+                thickness = 0.5.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+            )
         }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
     }
 }
 
 @Composable
-private fun ReminderPermission() {
-    val context = LocalContext.current
-    var allowed by remember { mutableStateOf(notificationsAllowed(context)) }
-    var denied by remember { mutableStateOf(false) }
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
-        allowed = notificationsAllowed(context); denied = !allowed
-    }
-    if (allowed) return
+private fun ReminderPermission(denied: Boolean, request: () -> Unit) {
     Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+        modifier = Modifier.padding(top = 16.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
-        Row(
-            Modifier.fillMaxWidth().padding(start = 12.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        Column(
+            Modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp, top = 14.dp, bottom = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            AppIconBadge(
-                R.drawable.ic_clock,
-                size = 32.dp,
-                tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                container = MaterialTheme.colorScheme.surfaceContainerLowest.copy(alpha = 0.6f),
-            )
-            Text(
-                "可单独预约提醒 · 未预约时每三天提醒",
-                Modifier.weight(1f),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
-            )
-            TextButton({
-                if (Build.VERSION.SDK_INT >= 33 && !denied) launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                else context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName))
-            }) { Text(if (denied) "通知设置" else "开启通知") }
+            Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Icon(
+                    painterResource(R.drawable.ic_clock),
+                    null,
+                    Modifier.padding(top = 2.dp).size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    "可单独预约提醒 · 未预约时每三天提醒",
+                    Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            TextButton(request, Modifier.align(Alignment.End).heightIn(min = 48.dp)) {
+                Text(if (denied) "通知设置" else "开启通知")
+            }
         }
     }
 }

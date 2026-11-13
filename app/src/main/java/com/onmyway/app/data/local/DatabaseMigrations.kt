@@ -136,3 +136,41 @@ val MIGRATION_16_17 = object : Migration(16, 17) {
         db.execSQL("ALTER TABLE route_history ADD COLUMN planVersion INTEGER NOT NULL DEFAULT 0")
     }
 }
+
+val MIGRATION_17_18 = object : Migration(17, 18) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // Old sessions have no execution claim evidence. Do not invent it during migration.
+        db.execSQL("CREATE TABLE IF NOT EXISTS `capability_runs` (`runId` TEXT NOT NULL, `capabilityId` TEXT NOT NULL, `capabilityVersion` INTEGER NOT NULL, `executor` TEXT NOT NULL, `state` TEXT NOT NULL, `step` TEXT NOT NULL, `snapshotJson` TEXT NOT NULL, `correlationId` TEXT NOT NULL, `planId` TEXT NOT NULL, `planVersion` INTEGER NOT NULL, `sessionId` TEXT NOT NULL, `attemptId` TEXT NOT NULL, `resultJson` TEXT NOT NULL, `error` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`runId`))")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_capability_runs_sessionId_updatedAt` ON `capability_runs` (`sessionId`, `updatedAt`)")
+    }
+}
+
+val MIGRATION_18_19 = object : Migration(18, 19) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // 每天一段对话：按本机日期重写旧消息和草稿的会话归属，历史日期因此只读。
+        db.execSQL("UPDATE assistant_messages SET conversationId = 'day-' || strftime('%Y-%m-%d', createdAt / 1000, 'unixepoch', 'localtime')")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_assistant_messages_conversationId` ON `assistant_messages` (`conversationId`)")
+        db.execSQL("UPDATE assistant_draft SET conversationId = 'day-' || strftime('%Y-%m-%d', savedAt / 1000, 'unixepoch', 'localtime')")
+        // 跨对话记忆从空开始，不根据旧对话推断。
+        db.execSQL("CREATE TABLE IF NOT EXISTS `assistant_memory` (`id` TEXT NOT NULL, `text` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_assistant_memory_text` ON `assistant_memory` (`text`)")
+    }
+}
+
+val MIGRATION_19_20 = object : Migration(19, 20) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE assistant_memory ADD COLUMN kind TEXT NOT NULL DEFAULT 'preference'")
+        db.execSQL("ALTER TABLE assistant_memory ADD COLUMN scope TEXT NOT NULL DEFAULT 'general'")
+        db.execSQL("ALTER TABLE assistant_memory ADD COLUMN sourceType TEXT NOT NULL DEFAULT 'legacy'")
+        db.execSQL("ALTER TABLE assistant_memory ADD COLUMN sourceMessageId TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE assistant_memory ADD COLUMN sourceQuote TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE assistant_memory ADD COLUMN updatedAt INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE assistant_memory ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
+        db.execSQL("ALTER TABLE assistant_memory ADD COLUMN revision INTEGER NOT NULL DEFAULT 1")
+        db.execSQL("ALTER TABLE assistant_memory ADD COLUMN expiresAt INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE assistant_memory ADD COLUMN replaces TEXT NOT NULL DEFAULT ''")
+        db.execSQL("UPDATE assistant_memory SET updatedAt = createdAt")
+        db.execSQL("CREATE TABLE IF NOT EXISTS assistant_memory_state (id INTEGER NOT NULL PRIMARY KEY, revision INTEGER NOT NULL, useMemory INTEGER NOT NULL, autoRemember INTEGER NOT NULL)")
+        db.execSQL("INSERT OR IGNORE INTO assistant_memory_state (id, revision, useMemory, autoRemember) VALUES (1, 0, 1, 1)")
+    }
+}

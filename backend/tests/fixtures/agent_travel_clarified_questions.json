@@ -1,0 +1,1727 @@
+{
+  "source_report": "app/build/reports/agent-a1-20261111/travel-clarification/live-20261110T191925Z-80780497/report.json",
+  "source_report_sha256": "889ce047999afd185ad582ad4655cde5c874793cedbfeacf2bf545b8eba70399",
+  "scope": "Frozen public synthetic travel inputs at the first resumed decision and two unnecessary question boundaries.",
+  "cases": [
+    {
+      "model_index": 3,
+      "snapshot": {
+        "agent_task_id": "ded09217-8128-4157-ab4f-41b1d328d1a5",
+        "revision": 1,
+        "goal": "成都四天旅行，预算三千，别太累。请先问清必要条件，不要先假定日期、出发地和预算范围。",
+        "constraints": {
+          "delivery_contract": {
+            "content_schema": {
+              "properties": {
+                "budget": {
+                  "properties": {
+                    "estimated_total_cny": {
+                      "exclusiveMinimum": 0,
+                      "maximum": 3000,
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "estimated_total_cny"
+                  ],
+                  "type": "object"
+                },
+                "days": {
+                  "items": {
+                    "properties": {
+                      "date": {
+                        "minLength": 10,
+                        "type": "string"
+                      },
+                      "day": {
+                        "maximum": 4,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "stops": {
+                        "maxItems": 2,
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "day",
+                      "date",
+                      "stops",
+                      "transport",
+                      "rest"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 4,
+                  "minItems": 4,
+                  "type": "array"
+                }
+              },
+              "required": [
+                "days",
+                "budget",
+                "sources",
+                "limitations"
+              ],
+              "type": "object"
+            },
+            "kind": "itinerary",
+            "max_artifacts": 1
+          }
+        },
+        "success_criteria": [],
+        "current_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+        "run": {
+          "agent_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+          "revision": 1,
+          "state": "running",
+          "reason": null,
+          "steps_used": 3,
+          "tool_calls_used": 0,
+          "budget": {
+            "max_duration_seconds": 900,
+            "max_steps": 24,
+            "max_tool_calls": 20
+          }
+        },
+        "tool_calls": [],
+        "observations": [
+          {
+            "cursor": 5,
+            "agent_task_id": "ded09217-8128-4157-ab4f-41b1d328d1a5",
+            "agent_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+            "revision": 1,
+            "kind": "question_review_requested",
+            "payload": {
+              "fingerprint": "c99d15f2d35e3b98e42fae46e02a7311fc7d94c007f66f4eb21a6a328e0eaf8c",
+              "input_cursor": 0
+            },
+            "created_at": 1794338369.276861
+          },
+          {
+            "cursor": 6,
+            "agent_task_id": "ded09217-8128-4157-ab4f-41b1d328d1a5",
+            "agent_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+            "revision": 1,
+            "kind": "question_review_result",
+            "payload": {
+              "fingerprint": "c99d15f2d35e3b98e42fae46e02a7311fc7d94c007f66f4eb21a6a328e0eaf8c",
+              "reason": "No user_input answers exist. Goal explicitly requires clarifying necessary conditions before planning and forbids assuming dates, origin city, or budget scope. All five questions (dates, origin, budget inclusion of transport, party size, lodging preference) are missing and materially affect feasibility, cost, and itinerary; none can be estimated under instructions. Legitimately blocking.",
+              "status": "necessary"
+            },
+            "created_at": 1794338370.4261265
+          },
+          {
+            "cursor": 7,
+            "agent_task_id": "ded09217-8128-4157-ab4f-41b1d328d1a5",
+            "agent_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+            "revision": 1,
+            "kind": "question",
+            "payload": {
+              "missing_inputs": {
+                "/budget_scope": "决定3000元预算是否含大交通",
+                "/dates": "决定行程日期与天气、可预订性",
+                "/lodging_pref": "决定住宿选择与开销",
+                "/origin": "决定往返交通方式与费用是否计入预算",
+                "/party_size": "决定预算分摊与住宿安排"
+              },
+              "need": "missing_input",
+              "question": "在规划成都四天行程（预算3000元、节奏放松）之前，我需要确认几个必要条件：1) 具体出行日期或月份？2) 出发城市是哪里（影响往返交通）？3) 预算3000元是否包含往返大交通？4) 出行人数（单人/多人）？5) 住宿有什么偏好（青旅/经济酒店/民宿）？"
+            },
+            "created_at": 1794338370.4296348
+          },
+          {
+            "cursor": 9,
+            "agent_task_id": "ded09217-8128-4157-ab4f-41b1d328d1a5",
+            "agent_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+            "revision": 1,
+            "kind": "user_input",
+            "payload": {
+              "text": "帮我规划成都四天旅行，预算3000元，别太累。我1个人，2026年11月14日早上已到成都春熙路，2026年11月17日晚在成都结束；3000元是全部费用的严格上限，包含3晚住宿、市内交通、餐饮和门票，不含来回成都大交通。住宿选中心区域的经济型独立房间；以步行和地铁为主，可按需少量打车，每次约30元以内。请查可用官方地图和网页检索信息（高德/Exa），安排市内轻松行程，每天最多2处主要景点并留休息时间。第二天希望人民公园和宽窄巷子。查询开放/预约规则并注意周一闭馆。住宿餐饮没有实时报价时给估算，不要当成可购买报价；不预订、不付款。为方便后续修改，请交付itinerary成果，content使用days数组（day为1到4、date、stops、transport、rest）、budget（estimated_total_cny及分项）、sources（原始URL/查询时间）和limitations。"
+            },
+            "created_at": 1794338370.461154
+          }
+        ],
+        "artifacts": [],
+        "prior_artifacts": [],
+        "working_notes": [],
+        "unresolved_calls": [],
+        "delegation_enabled": true
+      },
+      "tool_descriptors": [
+        {
+          "tool_id": "onmyway.search_places",
+          "description": "按城市搜索真实地点、门店或旅行景点，返回地点身份和坐标。先搜索再使用地点；结果不证明营业时间或预约可用性。",
+          "version": "d76f8e5261082bd9535ecebe16e9bc2f79d0a7e0b6d60269247d7ecb5beee65d",
+          "effect": "read",
+          "executor": "server",
+          "source": "builtin:onmyway",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "city": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 50
+              }
+            },
+            "required": [
+              "query",
+              "city"
+            ],
+            "additionalProperties": false
+          }
+        }
+      ],
+      "active_tool_ids": [
+        "onmyway.search_places"
+      ],
+      "namespace_index": {
+        "items": [
+          {
+            "namespace": "agent",
+            "tool_count": 2
+          },
+          {
+            "namespace": "amap",
+            "tool_count": 6,
+            "display_name": "高德地图",
+            "aliases": [
+              "高德",
+              "Amap"
+            ]
+          },
+          {
+            "namespace": "exa",
+            "tool_count": 2,
+            "display_name": "Exa 搜索",
+            "aliases": [
+              "Exa"
+            ]
+          },
+          {
+            "namespace": "onmyway",
+            "tool_count": 4
+          }
+        ],
+        "omitted": 0
+      },
+      "evaluated_at": "2026-11-10T19:19:30.491674+00:00",
+      "max_input_tokens": 12000,
+      "original_prompt_sha256": "31a23c983a747b43847cad160b973e961e3bb8d9da574ed90d9adda1a3b73544",
+      "original_estimated_input_tokens": 6682
+    },
+    {
+      "model_index": 10,
+      "snapshot": {
+        "agent_task_id": "ded09217-8128-4157-ab4f-41b1d328d1a5",
+        "revision": 1,
+        "goal": "成都四天旅行，预算三千，别太累。请先问清必要条件，不要先假定日期、出发地和预算范围。",
+        "constraints": {
+          "delivery_contract": {
+            "content_schema": {
+              "properties": {
+                "budget": {
+                  "properties": {
+                    "estimated_total_cny": {
+                      "exclusiveMinimum": 0,
+                      "maximum": 3000,
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "estimated_total_cny"
+                  ],
+                  "type": "object"
+                },
+                "days": {
+                  "items": {
+                    "properties": {
+                      "date": {
+                        "minLength": 10,
+                        "type": "string"
+                      },
+                      "day": {
+                        "maximum": 4,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "stops": {
+                        "maxItems": 2,
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "day",
+                      "date",
+                      "stops",
+                      "transport",
+                      "rest"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 4,
+                  "minItems": 4,
+                  "type": "array"
+                }
+              },
+              "required": [
+                "days",
+                "budget",
+                "sources",
+                "limitations"
+              ],
+              "type": "object"
+            },
+            "kind": "itinerary",
+            "max_artifacts": 1
+          }
+        },
+        "success_criteria": [],
+        "current_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+        "run": {
+          "agent_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+          "revision": 1,
+          "state": "running",
+          "reason": null,
+          "steps_used": 10,
+          "tool_calls_used": 1,
+          "budget": {
+            "max_duration_seconds": 900,
+            "max_steps": 24,
+            "max_tool_calls": 20
+          }
+        },
+        "tool_calls": [
+          {
+            "tool_call_id": "684f9486-60b9-4b45-a223-4239560ee263",
+            "agent_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+            "tool_id": "amap.maps_text_search",
+            "tool_version": "499b706cd09f93536a12c385b1105fc4463c9ddb61bdf7e7d34c282c83e7313f",
+            "arguments": {
+              "city": "成都",
+              "citylimit": true,
+              "keywords": "人民公园"
+            },
+            "effect": "read",
+            "state": "succeeded",
+            "result": {
+              "data": {
+                "content": [
+                  {
+                    "text": "{\"suggestion\":{\"keywords\":\"\",\"ciytes\":{\"suggestion\":[]}},\"pois\":[{\"id\":\"B001C7X8QA\",\"name\":\"人民公园\",\"address\":\"小南街8号(人民公园地铁站B口步行250米)\",\"typecode\":\"110202\",\"photo\":\"https://aos-comment.amap.com/B001C7X8QA/comment/content_media_external_file_100003153_1767367568289_40288788.jpg\"},{\"id\":\"BV10061045\",\"name\":\"人民公园(地铁站)\",\"address\":\"(在建)10号线三期;(规划)10号线四期;17号线;2号线\",\"typecode\":\"150500\",\"photo\":\"https://store.is.autonavi.com/showpic/3f596012ddfbc3700000000720748976?type=pic\"},{\"id\":\"B0M1MCE447\",\"name\":\"人民公园门\",\"address\":\"小南街8号人民公园(人民公园地铁站H口步行100米)\",\"typecode\":\"110000\",\"photo\":\"https://store.is.autonavi.com/showpic/be12eff6d43ee3110000009383060745?type=pic\"},{\"id\":\"BV09061305\",\"name\":\"人民公园(小南街)(公交站)\",\"address\":\"53路\",\"typecode\":\"150700\",\"photo\":\"https://store.is.autonavi.com/showpic/0cc4f5be34936d3b0000003096098495?type=pic\"},{\"id\":\"B001C7XZH4\",\"name\":\"人民公园-君平园\",\"address\":\"少城街道君平街26号(人民公园地铁站J口步行480米)\",\"typecode\":\"110101\",\"photo\":\"http://store.is.autonavi.com/showpic/600658685316eaa728702f84934356d5\"},{\"id\":\"B0H2TUP12A\",\"name\":\"人民公园停车点\",\"address\":\"小南街2号人民公园(人民公园地铁站H口步行90米)\",\"typecode\":\"150904\",\"photo\":\"https://store.is.autonavi.com/showpic/1e44969a41ea9ba2a33cc9bf9f5d26af\"},{\"id\":\"B0340005AB\",\"name\":\"人民公园\",\"address\":\"公园后街(简阳市文化馆附近)\",\"typecode\":\"110101\",\"photo\":\"https://store.is.autonavi.com/showpic/41f4e721599023d20000008057670517?type=pic\"},{\"id\":\"B0FFG9HS28\",\"name\":\"人民公园-海棠春坞\",\"address\":\"小南街8号人民公园(人民公园地铁站B口步行420米)\",\"typecode\":\"110000\",\"photo\":\"https://store.is.autonavi.com/showpic/fbe91ee92594468d0000002256810413?type=pic\"},{\"id\":\"BV09339534\",\"name\":\"人民公园(公交站)\",\"address\":\"(停运)夜游观光3号线;(停运)锦城观光线;(停运)高铁旅游观光1号线;340路;43路;47路;51路;5路;62路;64路;70路;78路;93路;夜间2路;宽窄巷子春熙路专线;熊猫基地直通车5号线;蓉火火茶歇巴士;锦江公园环线(内环)\",\"typecode\":\"150700\",\"photo\":\"https://aos-comment.amap.com/BV09339534/comment/content_media_external_file_1000348404_ss__1767940254714_97703714.jpg\"},{\"id\":\"B001C8UCKP\",\"name\":\"人民公园-山水广场\",\"address\":\"小南街8号人民公园内(东侧)\",\"typecode\":\"110105\",\"photo\":\"https://aos-comment.amap.com/B001C8UCKP/comment/938efa56a6b2ee2a80c7c91f13e3a699_2048_2048_80.jpg\"},{\"id\":\"B0FFG9HRTZ\",\"name\":\"成都市人民公园管理处\",\"address\":\"小南街8号人民公园(人民公园地铁站H口步行300米)\",\"typecode\":\"130400\",\"photo\":\"http://store.is.autonavi.com/showpic/558cc7e4a3102f265a7c0a39\"},{\"id\":\"B001C8SAFT\",\"name\":\"人民公园-辛亥秋保路纪念广场\",\"address\":\"小南街8号人民公园(人民公园地铁站B口步行290米)\",\"typecode\":\"110105\",\"photo\":\"https://aos-comment.amap.com/B001C8SAFT/comment/content_media_external_images_media_1000121954_ss__1731077844863_51509953.jpg\"},{\"id\":\"B0FFFABOTA\",\"name\":\"人民公园-盆景园(君平街)\",\"address\":\"君平街人民公园(西南角)\",\"typecode\":\"110000\",\"photo\":\"https://aos-comment.amap.com/B0FFFABOTA/comment/content_media_external_images_media_1000232556_ss__1735179750879_17698882.jpg\"},{\"id\":\"B0FFG50J26\",\"name\":\"人民公园-少城苑\",\"address\":\"小南街8号人民公园(人民公园地铁站H口步行390米)\",\"typecode\":\"110000\",\"photo\":\"https://aos-comment.amap.com/B0FFG50J26/comment/177016916069_1770169162034_80706097.jpg\"},{\"id\":\"B0FFG50JSG\",\"name\":\"人民公园-望舟亭\",\"address\":\"小南街8号人民公园(东南角)\",\"typecode\":\"110000\",\"photo\":\"https://store.is.autonavi.com/showpic/a6cb5c3f41893efae779eb05a5195faa\"},{\"id\":\"B0FFK7W8FM\",\"name\":\"成都市人民公园-游船码头\",\"address\":\"少城路12号成都市人民公园内\",\"typecode\":\"110200\",\"photo\":\"https://store.is.autonavi.com/showpic/a726020b5b22d81f0000007770760433?type=pic\"},{\"id\":\"B0K3AU98K6\",\"name\":\"内江人民公园\",\"address\":\"蜀源大道1999号\",\"typecode\":\"110101\",\"photo\":null},{\"id\":\"B001C90U4W\",\"name\":\"人民公园-儿童乐园\",\"address\":\"君平街88号(人民公园地铁站H口步行180米)\",\"typecode\":\"080501\",\"photo\":\"https://aos-comment.amap.com/B001C90U4W/comment/content_media_external_images_media_33037_ss_2_1693627151565_1a3d5362.jpg\"},{\"id\":\"BX09915803\",\"name\":\"人民公园地铁站出入口\",\"address\":\"17号线\",\"typecode\":\"150501\",\"photo\":null},{\"id\":\"B0MUBL8SS1\",\"name\":\"人民公园菊花展\",\"address\":\"小南街8号人民公园(人民公园地铁站B口步行320米)\",\"typecode\":\"110000\",\"photo\":\"https://store.is.autonavi.com/showpic/e45171ae9e1296160000009294924218\"}]}",
+                    "type": "text"
+                  }
+                ],
+                "isError": false
+              },
+              "observed_at": "2026-11-10T19:19:38.523097+00:00",
+              "source": "mcp:official:amap",
+              "tool_id": "amap.maps_text_search",
+              "version": "499b706cd09f93536a12c385b1105fc4463c9ddb61bdf7e7d34c282c83e7313f"
+            },
+            "error": null,
+            "created_at": 1794338378.2594147,
+            "updated_at": 1794338378.5324874
+          }
+        ],
+        "observations": [
+          {
+            "cursor": 5,
+            "agent_task_id": "ded09217-8128-4157-ab4f-41b1d328d1a5",
+            "agent_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+            "revision": 1,
+            "kind": "question_review_requested",
+            "payload": {
+              "fingerprint": "c99d15f2d35e3b98e42fae46e02a7311fc7d94c007f66f4eb21a6a328e0eaf8c",
+              "input_cursor": 0
+            },
+            "created_at": 1794338369.276861
+          },
+          {
+            "cursor": 6,
+            "agent_task_id": "ded09217-8128-4157-ab4f-41b1d328d1a5",
+            "agent_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+            "revision": 1,
+            "kind": "question_review_result",
+            "payload": {
+              "fingerprint": "c99d15f2d35e3b98e42fae46e02a7311fc7d94c007f66f4eb21a6a328e0eaf8c",
+              "reason": "No user_input answers exist. Goal explicitly requires clarifying necessary conditions before planning and forbids assuming dates, origin city, or budget scope. All five questions (dates, origin, budget inclusion of transport, party size, lodging preference) are missing and materially affect feasibility, cost, and itinerary; none can be estimated under instructions. Legitimately blocking.",
+              "status": "necessary"
+            },
+            "created_at": 1794338370.4261265
+          },
+          {
+            "cursor": 7,
+            "agent_task_id": "ded09217-8128-4157-ab4f-41b1d328d1a5",
+            "agent_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+            "revision": 1,
+            "kind": "question",
+            "payload": {
+              "missing_inputs": {
+                "/budget_scope": "决定3000元预算是否含大交通",
+                "/dates": "决定行程日期与天气、可预订性",
+                "/lodging_pref": "决定住宿选择与开销",
+                "/origin": "决定往返交通方式与费用是否计入预算",
+                "/party_size": "决定预算分摊与住宿安排"
+              },
+              "need": "missing_input",
+              "question": "在规划成都四天行程（预算3000元、节奏放松）之前，我需要确认几个必要条件：1) 具体出行日期或月份？2) 出发城市是哪里（影响往返交通）？3) 预算3000元是否包含往返大交通？4) 出行人数（单人/多人）？5) 住宿有什么偏好（青旅/经济酒店/民宿）？"
+            },
+            "created_at": 1794338370.4296348
+          },
+          {
+            "cursor": 9,
+            "agent_task_id": "ded09217-8128-4157-ab4f-41b1d328d1a5",
+            "agent_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+            "revision": 1,
+            "kind": "user_input",
+            "payload": {
+              "text": "帮我规划成都四天旅行，预算3000元，别太累。我1个人，2026年11月14日早上已到成都春熙路，2026年11月17日晚在成都结束；3000元是全部费用的严格上限，包含3晚住宿、市内交通、餐饮和门票，不含来回成都大交通。住宿选中心区域的经济型独立房间；以步行和地铁为主，可按需少量打车，每次约30元以内。请查可用官方地图和网页检索信息（高德/Exa），安排市内轻松行程，每天最多2处主要景点并留休息时间。第二天希望人民公园和宽窄巷子。查询开放/预约规则并注意周一闭馆。住宿餐饮没有实时报价时给估算，不要当成可购买报价；不预订、不付款。为方便后续修改，请交付itinerary成果，content使用days数组（day为1到4、date、stops、transport、rest）、budget（estimated_total_cny及分项）、sources（原始URL/查询时间）和limitations。"
+            },
+            "created_at": 1794338370.461154
+          },
+          {
+            "cursor": 13,
+            "agent_task_id": "ded09217-8128-4157-ab4f-41b1d328d1a5",
+            "agent_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+            "revision": 1,
+            "kind": "decision_error",
+            "payload": {
+              "code": "invalid_decision",
+              "diagnostic": {
+                "rule": "invalid_json"
+              },
+              "message": "Return valid JSON only; no Markdown or explanatory text."
+            },
+            "created_at": 1794338371.3797064
+          },
+          {
+            "cursor": 15,
+            "agent_task_id": "ded09217-8128-4157-ab4f-41b1d328d1a5",
+            "agent_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+            "revision": 1,
+            "kind": "tools_discovered",
+            "payload": {
+              "directory_version": "9d7d5a821daf382ec767da1782fa0094f0aa99d41afa782eaa8fed8aeb23c904",
+              "namespace": null,
+              "next_offset": 5,
+              "offset": 0,
+              "query": "amap exa",
+              "tools": [
+                {
+                  "description": "根据用户起终点经纬度坐标规划综合各类公共（火车、公交、地铁）交通方式的通勤方案，并且返回通勤方案的数据，跨",
+                  "description_truncated": true,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:amap",
+                  "tool_id": "amap.maps_direction_transit_integrated",
+                  "version": "e4fc1c2a70b9e24f4d4d354e9efc70e12fcc5d8546a3d5c52a617defc266de69"
+                },
+                {
+                  "description": "根据输入起点终点经纬度坐标规划100km 以内的步行通勤方案，并且返回通勤方案的数据",
+                  "description_truncated": false,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:amap",
+                  "tool_id": "amap.maps_direction_walking",
+                  "version": "0355e8964df2ea1222f019f8eda98004573b0e67e8faf96215b0cdaba49d2d91"
+                },
+                {
+                  "description": "测量两个经纬度坐标之间的距离,支持驾车、步行以及球面距离测量",
+                  "description_truncated": false,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:amap",
+                  "tool_id": "amap.maps_distance",
+                  "version": "5b0aef38f961fc41115686a9772d5a6ea069809131a83479c78b3b5b91ea2d61"
+                },
+                {
+                  "description": "查询关键词搜或者周边搜获取到的POI ID的详细信息",
+                  "description_truncated": false,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:amap",
+                  "tool_id": "amap.maps_search_detail",
+                  "version": "f0ef632ab9a0cd48068e3cd9a3e6f241ca92e508577ce5e0d4aa21ea61f0fc41"
+                },
+                {
+                  "description": "关键字搜索 API 根据用户输入的关键字进行 POI 搜索，并返回相关的信息",
+                  "description_truncated": false,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:amap",
+                  "tool_id": "amap.maps_text_search",
+                  "version": "499b706cd09f93536a12c385b1105fc4463c9ddb61bdf7e7d34c282c83e7313f"
+                }
+              ],
+              "total": 8
+            },
+            "created_at": 1794338372.8720784
+          },
+          {
+            "cursor": 17,
+            "agent_task_id": "ded09217-8128-4157-ab4f-41b1d328d1a5",
+            "agent_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+            "revision": 1,
+            "kind": "tools_discovered",
+            "payload": {
+              "directory_version": "9f8be81627ca0f2bcd753caa75bc3c497c20c6457a95ff238a800d350f748957",
+              "namespace": null,
+              "next_offset": 5,
+              "offset": 0,
+              "query": "exa next page search",
+              "tools": [
+                {
+                  "description": "Read a webpage's full content as clean markdown. Use after web_search_exa when highlights are insufficient or to read any URL.\n\nBest for: Extracting full conten",
+                  "description_truncated": true,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:exa",
+                  "tool_id": "exa.web_fetch_exa",
+                  "version": "eb8d7b8aeeacdfe54065fcfb23af1baf03d3a6edf12839534d88d8c1c1f7c48e"
+                },
+                {
+                  "description": "Search the web for any topic and get clean, ready-to-use content.\n\n      Best for: Finding current information, news, facts, people, companies, or answering que",
+                  "description_truncated": true,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:exa",
+                  "tool_id": "exa.web_search_exa",
+                  "version": "7f599640d0e0049b54f2e19fbd9619f41b3c792fd0bfd2cf6e1a4fbe97e1570f"
+                },
+                {
+                  "description": "按 content_ref/version 读取成果缺失段；旧成果仅供参考。offset 为字符，页最多 2400 UTF-8 字节，用 next_offset 续读。",
+                  "description_truncated": false,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "builtin:agent",
+                  "tool_id": "agent.read_artifact",
+                  "version": "d97ab12ec31675e7525c386db7accab6c836c6509ac8797f12c6ee1c38a7719a"
+                },
+                {
+                  "description": "按result_ref读缺失事实：结构字段优先用paths（原result的JSON Pointer，非decoded_path）；否则offset/max_chars字符分页，按next_offset",
+                  "description_truncated": true,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "builtin:agent",
+                  "tool_id": "agent.read_result",
+                  "version": "96acab23d3499837716b8e1a39087fecf884c93cc09d482bec434a77076311b0"
+                },
+                {
+                  "description": "查询关键词搜或者周边搜获取到的POI ID的详细信息",
+                  "description_truncated": false,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:amap",
+                  "tool_id": "amap.maps_search_detail",
+                  "version": "f0ef632ab9a0cd48068e3cd9a3e6f241ca92e508577ce5e0d4aa21ea61f0fc41"
+                }
+              ],
+              "total": 7
+            },
+            "created_at": 1794338374.3254104
+          },
+          {
+            "cursor": 19,
+            "agent_task_id": "ded09217-8128-4157-ab4f-41b1d328d1a5",
+            "agent_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+            "revision": 1,
+            "kind": "decision_error",
+            "payload": {
+              "code": "invalid_decision",
+              "diagnostic": {
+                "rule": "json_extra_data"
+              },
+              "message": "Return exactly one JSON object; no second action or trailing text."
+            },
+            "created_at": 1794338375.41842
+          },
+          {
+            "cursor": 21,
+            "agent_task_id": "ded09217-8128-4157-ab4f-41b1d328d1a5",
+            "agent_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+            "revision": 1,
+            "kind": "tools_discovered",
+            "payload": {
+              "directory_version": "fb1ffcb5ee053ecda74933ae3691af919fd7186d1ad9cbec6eff9ac5d995ce9a",
+              "namespace": null,
+              "next_offset": 5,
+              "offset": 0,
+              "query": "amap 高德地图 路径规划 地理编码 周边搜索",
+              "tools": [
+                {
+                  "description": "查询关键词搜或者周边搜获取到的POI ID的详细信息",
+                  "description_truncated": false,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:amap",
+                  "tool_id": "amap.maps_search_detail",
+                  "version": "f0ef632ab9a0cd48068e3cd9a3e6f241ca92e508577ce5e0d4aa21ea61f0fc41"
+                },
+                {
+                  "description": "根据用户起终点经纬度坐标规划综合各类公共（火车、公交、地铁）交通方式的通勤方案，并且返回通勤方案的数据，跨",
+                  "description_truncated": true,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:amap",
+                  "tool_id": "amap.maps_direction_transit_integrated",
+                  "version": "e4fc1c2a70b9e24f4d4d354e9efc70e12fcc5d8546a3d5c52a617defc266de69"
+                },
+                {
+                  "description": "根据输入起点终点经纬度坐标规划100km 以内的步行通勤方案，并且返回通勤方案的数据",
+                  "description_truncated": false,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:amap",
+                  "tool_id": "amap.maps_direction_walking",
+                  "version": "0355e8964df2ea1222f019f8eda98004573b0e67e8faf96215b0cdaba49d2d91"
+                },
+                {
+                  "description": "关键字搜索 API 根据用户输入的关键字进行 POI 搜索，并返回相关的信息",
+                  "description_truncated": false,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:amap",
+                  "tool_id": "amap.maps_text_search",
+                  "version": "499b706cd09f93536a12c385b1105fc4463c9ddb61bdf7e7d34c282c83e7313f"
+                },
+                {
+                  "description": "测量两个经纬度坐标之间的距离,支持驾车、步行以及球面距离测量",
+                  "description_truncated": false,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:amap",
+                  "tool_id": "amap.maps_distance",
+                  "version": "5b0aef38f961fc41115686a9772d5a6ea069809131a83479c78b3b5b91ea2d61"
+                }
+              ],
+              "total": 8
+            },
+            "created_at": 1794338376.7653573
+          },
+          {
+            "cursor": 27,
+            "agent_task_id": "ded09217-8128-4157-ab4f-41b1d328d1a5",
+            "agent_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+            "revision": 1,
+            "kind": "tools_discovered",
+            "payload": {
+              "directory_version": "a6b43b9be690dca6ef35fe51803d02f4e8ed4ce6df2cd1a5988f1fba5c538f46",
+              "namespace": null,
+              "next_offset": 5,
+              "offset": 0,
+              "query": "amap",
+              "tools": [
+                {
+                  "description": "根据用户起终点经纬度坐标规划综合各类公共（火车、公交、地铁）交通方式的通勤方案，并且返回通勤方案的数据，跨",
+                  "description_truncated": true,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:amap",
+                  "tool_id": "amap.maps_direction_transit_integrated",
+                  "version": "e4fc1c2a70b9e24f4d4d354e9efc70e12fcc5d8546a3d5c52a617defc266de69"
+                },
+                {
+                  "description": "根据输入起点终点经纬度坐标规划100km 以内的步行通勤方案，并且返回通勤方案的数据",
+                  "description_truncated": false,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:amap",
+                  "tool_id": "amap.maps_direction_walking",
+                  "version": "0355e8964df2ea1222f019f8eda98004573b0e67e8faf96215b0cdaba49d2d91"
+                },
+                {
+                  "description": "测量两个经纬度坐标之间的距离,支持驾车、步行以及球面距离测量",
+                  "description_truncated": false,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:amap",
+                  "tool_id": "amap.maps_distance",
+                  "version": "5b0aef38f961fc41115686a9772d5a6ea069809131a83479c78b3b5b91ea2d61"
+                },
+                {
+                  "description": "查询关键词搜或者周边搜获取到的POI ID的详细信息",
+                  "description_truncated": false,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:amap",
+                  "tool_id": "amap.maps_search_detail",
+                  "version": "f0ef632ab9a0cd48068e3cd9a3e6f241ca92e508577ce5e0d4aa21ea61f0fc41"
+                },
+                {
+                  "description": "关键字搜索 API 根据用户输入的关键字进行 POI 搜索，并返回相关的信息",
+                  "description_truncated": false,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:amap",
+                  "tool_id": "amap.maps_text_search",
+                  "version": "499b706cd09f93536a12c385b1105fc4463c9ddb61bdf7e7d34c282c83e7313f"
+                }
+              ],
+              "total": 6
+            },
+            "created_at": 1794338379.9946847
+          }
+        ],
+        "artifacts": [],
+        "prior_artifacts": [],
+        "working_notes": [],
+        "unresolved_calls": [],
+        "delegation_enabled": true
+      },
+      "tool_descriptors": [
+        {
+          "tool_id": "amap.maps_text_search",
+          "description": "关键字搜索 API 根据用户输入的关键字进行 POI 搜索，并返回相关的信息",
+          "version": "499b706cd09f93536a12c385b1105fc4463c9ddb61bdf7e7d34c282c83e7313f",
+          "effect": "read",
+          "executor": "server",
+          "source": "mcp:official:amap",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "keywords": {
+                "type": "string",
+                "description": "查询关键字"
+              },
+              "city": {
+                "type": "string",
+                "description": "查询城市"
+              },
+              "citylimit": {
+                "type": "boolean",
+                "description": "是否限制城市范围内搜索，默认不限制"
+              }
+            },
+            "required": [
+              "keywords"
+            ]
+          }
+        },
+        {
+          "tool_id": "exa.web_fetch_exa",
+          "description": "Read a webpage's full content as clean markdown. Use after web_search_exa when highlights are insufficient or to read any URL.\n\nBest for: Extracting full content from known URLs. Batch multiple URLs in one call.\nReturns: Clean text content and metadata from the page(s).",
+          "version": "eb8d7b8aeeacdfe54065fcfb23af1baf03d3a6edf12839534d88d8c1c1f7c48e",
+          "effect": "read",
+          "executor": "server",
+          "source": "mcp:official:exa",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "urls": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "URLs to read. Batch multiple URLs in one call."
+              },
+              "maxCharacters": {
+                "type": "number",
+                "minimum": 1,
+                "description": "Maximum characters to extract per page (default: 3000)"
+              }
+            },
+            "required": [
+              "urls"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        },
+        {
+          "tool_id": "agent.read_artifact",
+          "description": "按 content_ref/version 读取成果缺失段；旧成果仅供参考。offset 为字符，页最多 2400 UTF-8 字节，用 next_offset 续读。",
+          "version": "d97ab12ec31675e7525c386db7accab6c836c6509ac8797f12c6ee1c38a7719a",
+          "effect": "read",
+          "executor": "server",
+          "source": "builtin:agent",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "artifact_id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "offset": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "max_chars": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3000
+              }
+            },
+            "required": [
+              "artifact_id"
+            ],
+            "additionalProperties": false
+          }
+        },
+        {
+          "tool_id": "amap.maps_direction_transit_integrated",
+          "description": "根据用户起终点经纬度坐标规划综合各类公共（火车、公交、地铁）交通方式的通勤方案，并且返回通勤方案的数据，跨城场景下必须传起点城市与终点城市",
+          "version": "e4fc1c2a70b9e24f4d4d354e9efc70e12fcc5d8546a3d5c52a617defc266de69",
+          "effect": "read",
+          "executor": "server",
+          "source": "mcp:official:amap",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "origin": {
+                "type": "string",
+                "description": "出发点经纬度，坐标格式为：经度，纬度"
+              },
+              "destination": {
+                "type": "string",
+                "description": "目的地经纬度，坐标格式为：经度，纬度"
+              },
+              "city": {
+                "type": "string",
+                "description": "公共交通规划起点城市"
+              },
+              "cityd": {
+                "type": "string",
+                "description": "公共交通规划终点城市"
+              }
+            },
+            "required": [
+              "origin",
+              "destination",
+              "city",
+              "cityd"
+            ]
+          }
+        },
+        {
+          "tool_id": "amap.maps_direction_walking",
+          "description": "根据输入起点终点经纬度坐标规划100km 以内的步行通勤方案，并且返回通勤方案的数据",
+          "version": "0355e8964df2ea1222f019f8eda98004573b0e67e8faf96215b0cdaba49d2d91",
+          "effect": "read",
+          "executor": "server",
+          "source": "mcp:official:amap",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "origin": {
+                "type": "string",
+                "description": "出发点经度，纬度，坐标格式为：经度，纬度"
+              },
+              "destination": {
+                "type": "string",
+                "description": "目的地经度，纬度，坐标格式为：经度，纬度"
+              }
+            },
+            "required": [
+              "origin",
+              "destination"
+            ]
+          }
+        },
+        {
+          "tool_id": "amap.maps_distance",
+          "description": "测量两个经纬度坐标之间的距离,支持驾车、步行以及球面距离测量",
+          "version": "5b0aef38f961fc41115686a9772d5a6ea069809131a83479c78b3b5b91ea2d61",
+          "effect": "read",
+          "executor": "server",
+          "source": "mcp:official:amap",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "origins": {
+                "type": "string",
+                "description": "起点经度，纬度，可以传多个坐标，使用竖线隔离，比如120,30|120,31，坐标格式为：经度，纬度"
+              },
+              "destination": {
+                "type": "string",
+                "description": "终点经度，纬度，坐标格式为：经度，纬度"
+              },
+              "type": {
+                "type": "string",
+                "description": "距离测量类型,1代表驾车距离测量，0代表直线距离测量，3步行距离测量"
+              }
+            },
+            "required": [
+              "origins",
+              "destination"
+            ]
+          }
+        },
+        {
+          "tool_id": "agent.read_result",
+          "description": "按result_ref读缺失事实：结构字段优先用paths（原result的JSON Pointer，非decoded_path）；否则offset/max_chars字符分页，按next_offset续读。最多2400 UTF-8字节，勿重读。",
+          "version": "96acab23d3499837716b8e1a39087fecf884c93cc09d482bec434a77076311b0",
+          "effect": "read",
+          "executor": "server",
+          "source": "builtin:agent",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "tool_call_id": {
+                "type": "string"
+              },
+              "offset": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "max_chars": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3000
+              },
+              "paths": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 8,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "maxLength": 512
+                }
+              }
+            },
+            "required": [
+              "tool_call_id"
+            ],
+            "additionalProperties": false,
+            "allOf": [
+              {
+                "if": {
+                  "required": [
+                    "paths"
+                  ]
+                },
+                "then": {
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "offset"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "max_chars"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "active_tool_ids": [],
+      "namespace_index": {
+        "items": [
+          {
+            "namespace": "agent",
+            "tool_count": 2
+          },
+          {
+            "namespace": "amap",
+            "tool_count": 6,
+            "display_name": "高德地图",
+            "aliases": [
+              "高德",
+              "Amap"
+            ]
+          },
+          {
+            "namespace": "exa",
+            "tool_count": 2,
+            "display_name": "Exa 搜索",
+            "aliases": [
+              "Exa"
+            ]
+          },
+          {
+            "namespace": "onmyway",
+            "tool_count": 4
+          }
+        ],
+        "omitted": 0
+      },
+      "evaluated_at": "2026-11-10T19:19:40.017685+00:00",
+      "max_input_tokens": 12000,
+      "original_prompt_sha256": "3b5860fc0e38cf7f3bf26335e41fe793b99a59e9fcb00e6db0079c9adc6d5d6b",
+      "original_estimated_input_tokens": 11871
+    },
+    {
+      "model_index": 12,
+      "snapshot": {
+        "agent_task_id": "ded09217-8128-4157-ab4f-41b1d328d1a5",
+        "revision": 1,
+        "goal": "成都四天旅行，预算三千，别太累。请先问清必要条件，不要先假定日期、出发地和预算范围。",
+        "constraints": {
+          "delivery_contract": {
+            "content_schema": {
+              "properties": {
+                "budget": {
+                  "properties": {
+                    "estimated_total_cny": {
+                      "exclusiveMinimum": 0,
+                      "maximum": 3000,
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "estimated_total_cny"
+                  ],
+                  "type": "object"
+                },
+                "days": {
+                  "items": {
+                    "properties": {
+                      "date": {
+                        "minLength": 10,
+                        "type": "string"
+                      },
+                      "day": {
+                        "maximum": 4,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "stops": {
+                        "maxItems": 2,
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "day",
+                      "date",
+                      "stops",
+                      "transport",
+                      "rest"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 4,
+                  "minItems": 4,
+                  "type": "array"
+                }
+              },
+              "required": [
+                "days",
+                "budget",
+                "sources",
+                "limitations"
+              ],
+              "type": "object"
+            },
+            "kind": "itinerary",
+            "max_artifacts": 1
+          }
+        },
+        "success_criteria": [],
+        "current_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+        "run": {
+          "agent_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+          "revision": 1,
+          "state": "running",
+          "reason": null,
+          "steps_used": 12,
+          "tool_calls_used": 1,
+          "budget": {
+            "max_duration_seconds": 900,
+            "max_steps": 24,
+            "max_tool_calls": 20
+          }
+        },
+        "tool_calls": [
+          {
+            "tool_call_id": "684f9486-60b9-4b45-a223-4239560ee263",
+            "agent_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+            "tool_id": "amap.maps_text_search",
+            "tool_version": "499b706cd09f93536a12c385b1105fc4463c9ddb61bdf7e7d34c282c83e7313f",
+            "arguments": {
+              "city": "成都",
+              "citylimit": true,
+              "keywords": "人民公园"
+            },
+            "effect": "read",
+            "state": "succeeded",
+            "result": {
+              "data": {
+                "content": [
+                  {
+                    "text": "{\"suggestion\":{\"keywords\":\"\",\"ciytes\":{\"suggestion\":[]}},\"pois\":[{\"id\":\"B001C7X8QA\",\"name\":\"人民公园\",\"address\":\"小南街8号(人民公园地铁站B口步行250米)\",\"typecode\":\"110202\",\"photo\":\"https://aos-comment.amap.com/B001C7X8QA/comment/content_media_external_file_100003153_1767367568289_40288788.jpg\"},{\"id\":\"BV10061045\",\"name\":\"人民公园(地铁站)\",\"address\":\"(在建)10号线三期;(规划)10号线四期;17号线;2号线\",\"typecode\":\"150500\",\"photo\":\"https://store.is.autonavi.com/showpic/3f596012ddfbc3700000000720748976?type=pic\"},{\"id\":\"B0M1MCE447\",\"name\":\"人民公园门\",\"address\":\"小南街8号人民公园(人民公园地铁站H口步行100米)\",\"typecode\":\"110000\",\"photo\":\"https://store.is.autonavi.com/showpic/be12eff6d43ee3110000009383060745?type=pic\"},{\"id\":\"BV09061305\",\"name\":\"人民公园(小南街)(公交站)\",\"address\":\"53路\",\"typecode\":\"150700\",\"photo\":\"https://store.is.autonavi.com/showpic/0cc4f5be34936d3b0000003096098495?type=pic\"},{\"id\":\"B001C7XZH4\",\"name\":\"人民公园-君平园\",\"address\":\"少城街道君平街26号(人民公园地铁站J口步行480米)\",\"typecode\":\"110101\",\"photo\":\"http://store.is.autonavi.com/showpic/600658685316eaa728702f84934356d5\"},{\"id\":\"B0H2TUP12A\",\"name\":\"人民公园停车点\",\"address\":\"小南街2号人民公园(人民公园地铁站H口步行90米)\",\"typecode\":\"150904\",\"photo\":\"https://store.is.autonavi.com/showpic/1e44969a41ea9ba2a33cc9bf9f5d26af\"},{\"id\":\"B0340005AB\",\"name\":\"人民公园\",\"address\":\"公园后街(简阳市文化馆附近)\",\"typecode\":\"110101\",\"photo\":\"https://store.is.autonavi.com/showpic/41f4e721599023d20000008057670517?type=pic\"},{\"id\":\"B0FFG9HS28\",\"name\":\"人民公园-海棠春坞\",\"address\":\"小南街8号人民公园(人民公园地铁站B口步行420米)\",\"typecode\":\"110000\",\"photo\":\"https://store.is.autonavi.com/showpic/fbe91ee92594468d0000002256810413?type=pic\"},{\"id\":\"BV09339534\",\"name\":\"人民公园(公交站)\",\"address\":\"(停运)夜游观光3号线;(停运)锦城观光线;(停运)高铁旅游观光1号线;340路;43路;47路;51路;5路;62路;64路;70路;78路;93路;夜间2路;宽窄巷子春熙路专线;熊猫基地直通车5号线;蓉火火茶歇巴士;锦江公园环线(内环)\",\"typecode\":\"150700\",\"photo\":\"https://aos-comment.amap.com/BV09339534/comment/content_media_external_file_1000348404_ss__1767940254714_97703714.jpg\"},{\"id\":\"B001C8UCKP\",\"name\":\"人民公园-山水广场\",\"address\":\"小南街8号人民公园内(东侧)\",\"typecode\":\"110105\",\"photo\":\"https://aos-comment.amap.com/B001C8UCKP/comment/938efa56a6b2ee2a80c7c91f13e3a699_2048_2048_80.jpg\"},{\"id\":\"B0FFG9HRTZ\",\"name\":\"成都市人民公园管理处\",\"address\":\"小南街8号人民公园(人民公园地铁站H口步行300米)\",\"typecode\":\"130400\",\"photo\":\"http://store.is.autonavi.com/showpic/558cc7e4a3102f265a7c0a39\"},{\"id\":\"B001C8SAFT\",\"name\":\"人民公园-辛亥秋保路纪念广场\",\"address\":\"小南街8号人民公园(人民公园地铁站B口步行290米)\",\"typecode\":\"110105\",\"photo\":\"https://aos-comment.amap.com/B001C8SAFT/comment/content_media_external_images_media_1000121954_ss__1731077844863_51509953.jpg\"},{\"id\":\"B0FFFABOTA\",\"name\":\"人民公园-盆景园(君平街)\",\"address\":\"君平街人民公园(西南角)\",\"typecode\":\"110000\",\"photo\":\"https://aos-comment.amap.com/B0FFFABOTA/comment/content_media_external_images_media_1000232556_ss__1735179750879_17698882.jpg\"},{\"id\":\"B0FFG50J26\",\"name\":\"人民公园-少城苑\",\"address\":\"小南街8号人民公园(人民公园地铁站H口步行390米)\",\"typecode\":\"110000\",\"photo\":\"https://aos-comment.amap.com/B0FFG50J26/comment/177016916069_1770169162034_80706097.jpg\"},{\"id\":\"B0FFG50JSG\",\"name\":\"人民公园-望舟亭\",\"address\":\"小南街8号人民公园(东南角)\",\"typecode\":\"110000\",\"photo\":\"https://store.is.autonavi.com/showpic/a6cb5c3f41893efae779eb05a5195faa\"},{\"id\":\"B0FFK7W8FM\",\"name\":\"成都市人民公园-游船码头\",\"address\":\"少城路12号成都市人民公园内\",\"typecode\":\"110200\",\"photo\":\"https://store.is.autonavi.com/showpic/a726020b5b22d81f0000007770760433?type=pic\"},{\"id\":\"B0K3AU98K6\",\"name\":\"内江人民公园\",\"address\":\"蜀源大道1999号\",\"typecode\":\"110101\",\"photo\":null},{\"id\":\"B001C90U4W\",\"name\":\"人民公园-儿童乐园\",\"address\":\"君平街88号(人民公园地铁站H口步行180米)\",\"typecode\":\"080501\",\"photo\":\"https://aos-comment.amap.com/B001C90U4W/comment/content_media_external_images_media_33037_ss_2_1693627151565_1a3d5362.jpg\"},{\"id\":\"BX09915803\",\"name\":\"人民公园地铁站出入口\",\"address\":\"17号线\",\"typecode\":\"150501\",\"photo\":null},{\"id\":\"B0MUBL8SS1\",\"name\":\"人民公园菊花展\",\"address\":\"小南街8号人民公园(人民公园地铁站B口步行320米)\",\"typecode\":\"110000\",\"photo\":\"https://store.is.autonavi.com/showpic/e45171ae9e1296160000009294924218\"}]}",
+                    "type": "text"
+                  }
+                ],
+                "isError": false
+              },
+              "observed_at": "2026-11-10T19:19:38.523097+00:00",
+              "source": "mcp:official:amap",
+              "tool_id": "amap.maps_text_search",
+              "version": "499b706cd09f93536a12c385b1105fc4463c9ddb61bdf7e7d34c282c83e7313f"
+            },
+            "error": null,
+            "created_at": 1794338378.2594147,
+            "updated_at": 1794338378.5324874
+          }
+        ],
+        "observations": [
+          {
+            "cursor": 5,
+            "agent_task_id": "ded09217-8128-4157-ab4f-41b1d328d1a5",
+            "agent_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+            "revision": 1,
+            "kind": "question_review_requested",
+            "payload": {
+              "fingerprint": "c99d15f2d35e3b98e42fae46e02a7311fc7d94c007f66f4eb21a6a328e0eaf8c",
+              "input_cursor": 0
+            },
+            "created_at": 1794338369.276861
+          },
+          {
+            "cursor": 6,
+            "agent_task_id": "ded09217-8128-4157-ab4f-41b1d328d1a5",
+            "agent_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+            "revision": 1,
+            "kind": "question_review_result",
+            "payload": {
+              "fingerprint": "c99d15f2d35e3b98e42fae46e02a7311fc7d94c007f66f4eb21a6a328e0eaf8c",
+              "reason": "No user_input answers exist. Goal explicitly requires clarifying necessary conditions before planning and forbids assuming dates, origin city, or budget scope. All five questions (dates, origin, budget inclusion of transport, party size, lodging preference) are missing and materially affect feasibility, cost, and itinerary; none can be estimated under instructions. Legitimately blocking.",
+              "status": "necessary"
+            },
+            "created_at": 1794338370.4261265
+          },
+          {
+            "cursor": 7,
+            "agent_task_id": "ded09217-8128-4157-ab4f-41b1d328d1a5",
+            "agent_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+            "revision": 1,
+            "kind": "question",
+            "payload": {
+              "missing_inputs": {
+                "/budget_scope": "决定3000元预算是否含大交通",
+                "/dates": "决定行程日期与天气、可预订性",
+                "/lodging_pref": "决定住宿选择与开销",
+                "/origin": "决定往返交通方式与费用是否计入预算",
+                "/party_size": "决定预算分摊与住宿安排"
+              },
+              "need": "missing_input",
+              "question": "在规划成都四天行程（预算3000元、节奏放松）之前，我需要确认几个必要条件：1) 具体出行日期或月份？2) 出发城市是哪里（影响往返交通）？3) 预算3000元是否包含往返大交通？4) 出行人数（单人/多人）？5) 住宿有什么偏好（青旅/经济酒店/民宿）？"
+            },
+            "created_at": 1794338370.4296348
+          },
+          {
+            "cursor": 9,
+            "agent_task_id": "ded09217-8128-4157-ab4f-41b1d328d1a5",
+            "agent_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+            "revision": 1,
+            "kind": "user_input",
+            "payload": {
+              "text": "帮我规划成都四天旅行，预算3000元，别太累。我1个人，2026年11月14日早上已到成都春熙路，2026年11月17日晚在成都结束；3000元是全部费用的严格上限，包含3晚住宿、市内交通、餐饮和门票，不含来回成都大交通。住宿选中心区域的经济型独立房间；以步行和地铁为主，可按需少量打车，每次约30元以内。请查可用官方地图和网页检索信息（高德/Exa），安排市内轻松行程，每天最多2处主要景点并留休息时间。第二天希望人民公园和宽窄巷子。查询开放/预约规则并注意周一闭馆。住宿餐饮没有实时报价时给估算，不要当成可购买报价；不预订、不付款。为方便后续修改，请交付itinerary成果，content使用days数组（day为1到4、date、stops、transport、rest）、budget（estimated_total_cny及分项）、sources（原始URL/查询时间）和limitations。"
+            },
+            "created_at": 1794338370.461154
+          },
+          {
+            "cursor": 13,
+            "agent_task_id": "ded09217-8128-4157-ab4f-41b1d328d1a5",
+            "agent_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+            "revision": 1,
+            "kind": "decision_error",
+            "payload": {
+              "code": "invalid_decision",
+              "diagnostic": {
+                "rule": "invalid_json"
+              },
+              "message": "Return valid JSON only; no Markdown or explanatory text."
+            },
+            "created_at": 1794338371.3797064
+          },
+          {
+            "cursor": 15,
+            "agent_task_id": "ded09217-8128-4157-ab4f-41b1d328d1a5",
+            "agent_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+            "revision": 1,
+            "kind": "tools_discovered",
+            "payload": {
+              "directory_version": "9d7d5a821daf382ec767da1782fa0094f0aa99d41afa782eaa8fed8aeb23c904",
+              "namespace": null,
+              "next_offset": 5,
+              "offset": 0,
+              "query": "amap exa",
+              "tools": [
+                {
+                  "description": "根据用户起终点经纬度坐标规划综合各类公共（火车、公交、地铁）交通方式的通勤方案，并且返回通勤方案的数据，跨",
+                  "description_truncated": true,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:amap",
+                  "tool_id": "amap.maps_direction_transit_integrated",
+                  "version": "e4fc1c2a70b9e24f4d4d354e9efc70e12fcc5d8546a3d5c52a617defc266de69"
+                },
+                {
+                  "description": "根据输入起点终点经纬度坐标规划100km 以内的步行通勤方案，并且返回通勤方案的数据",
+                  "description_truncated": false,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:amap",
+                  "tool_id": "amap.maps_direction_walking",
+                  "version": "0355e8964df2ea1222f019f8eda98004573b0e67e8faf96215b0cdaba49d2d91"
+                },
+                {
+                  "description": "测量两个经纬度坐标之间的距离,支持驾车、步行以及球面距离测量",
+                  "description_truncated": false,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:amap",
+                  "tool_id": "amap.maps_distance",
+                  "version": "5b0aef38f961fc41115686a9772d5a6ea069809131a83479c78b3b5b91ea2d61"
+                },
+                {
+                  "description": "查询关键词搜或者周边搜获取到的POI ID的详细信息",
+                  "description_truncated": false,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:amap",
+                  "tool_id": "amap.maps_search_detail",
+                  "version": "f0ef632ab9a0cd48068e3cd9a3e6f241ca92e508577ce5e0d4aa21ea61f0fc41"
+                },
+                {
+                  "description": "关键字搜索 API 根据用户输入的关键字进行 POI 搜索，并返回相关的信息",
+                  "description_truncated": false,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:amap",
+                  "tool_id": "amap.maps_text_search",
+                  "version": "499b706cd09f93536a12c385b1105fc4463c9ddb61bdf7e7d34c282c83e7313f"
+                }
+              ],
+              "total": 8
+            },
+            "created_at": 1794338372.8720784
+          },
+          {
+            "cursor": 17,
+            "agent_task_id": "ded09217-8128-4157-ab4f-41b1d328d1a5",
+            "agent_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+            "revision": 1,
+            "kind": "tools_discovered",
+            "payload": {
+              "directory_version": "9f8be81627ca0f2bcd753caa75bc3c497c20c6457a95ff238a800d350f748957",
+              "namespace": null,
+              "next_offset": 5,
+              "offset": 0,
+              "query": "exa next page search",
+              "tools": [
+                {
+                  "description": "Read a webpage's full content as clean markdown. Use after web_search_exa when highlights are insufficient or to read any URL.\n\nBest for: Extracting full conten",
+                  "description_truncated": true,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:exa",
+                  "tool_id": "exa.web_fetch_exa",
+                  "version": "eb8d7b8aeeacdfe54065fcfb23af1baf03d3a6edf12839534d88d8c1c1f7c48e"
+                },
+                {
+                  "description": "Search the web for any topic and get clean, ready-to-use content.\n\n      Best for: Finding current information, news, facts, people, companies, or answering que",
+                  "description_truncated": true,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:exa",
+                  "tool_id": "exa.web_search_exa",
+                  "version": "7f599640d0e0049b54f2e19fbd9619f41b3c792fd0bfd2cf6e1a4fbe97e1570f"
+                },
+                {
+                  "description": "按 content_ref/version 读取成果缺失段；旧成果仅供参考。offset 为字符，页最多 2400 UTF-8 字节，用 next_offset 续读。",
+                  "description_truncated": false,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "builtin:agent",
+                  "tool_id": "agent.read_artifact",
+                  "version": "d97ab12ec31675e7525c386db7accab6c836c6509ac8797f12c6ee1c38a7719a"
+                },
+                {
+                  "description": "按result_ref读缺失事实：结构字段优先用paths（原result的JSON Pointer，非decoded_path）；否则offset/max_chars字符分页，按next_offset",
+                  "description_truncated": true,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "builtin:agent",
+                  "tool_id": "agent.read_result",
+                  "version": "96acab23d3499837716b8e1a39087fecf884c93cc09d482bec434a77076311b0"
+                },
+                {
+                  "description": "查询关键词搜或者周边搜获取到的POI ID的详细信息",
+                  "description_truncated": false,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:amap",
+                  "tool_id": "amap.maps_search_detail",
+                  "version": "f0ef632ab9a0cd48068e3cd9a3e6f241ca92e508577ce5e0d4aa21ea61f0fc41"
+                }
+              ],
+              "total": 7
+            },
+            "created_at": 1794338374.3254104
+          },
+          {
+            "cursor": 19,
+            "agent_task_id": "ded09217-8128-4157-ab4f-41b1d328d1a5",
+            "agent_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+            "revision": 1,
+            "kind": "decision_error",
+            "payload": {
+              "code": "invalid_decision",
+              "diagnostic": {
+                "rule": "json_extra_data"
+              },
+              "message": "Return exactly one JSON object; no second action or trailing text."
+            },
+            "created_at": 1794338375.41842
+          },
+          {
+            "cursor": 21,
+            "agent_task_id": "ded09217-8128-4157-ab4f-41b1d328d1a5",
+            "agent_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+            "revision": 1,
+            "kind": "tools_discovered",
+            "payload": {
+              "directory_version": "fb1ffcb5ee053ecda74933ae3691af919fd7186d1ad9cbec6eff9ac5d995ce9a",
+              "namespace": null,
+              "next_offset": 5,
+              "offset": 0,
+              "query": "amap 高德地图 路径规划 地理编码 周边搜索",
+              "tools": [
+                {
+                  "description": "查询关键词搜或者周边搜获取到的POI ID的详细信息",
+                  "description_truncated": false,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:amap",
+                  "tool_id": "amap.maps_search_detail",
+                  "version": "f0ef632ab9a0cd48068e3cd9a3e6f241ca92e508577ce5e0d4aa21ea61f0fc41"
+                },
+                {
+                  "description": "根据用户起终点经纬度坐标规划综合各类公共（火车、公交、地铁）交通方式的通勤方案，并且返回通勤方案的数据，跨",
+                  "description_truncated": true,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:amap",
+                  "tool_id": "amap.maps_direction_transit_integrated",
+                  "version": "e4fc1c2a70b9e24f4d4d354e9efc70e12fcc5d8546a3d5c52a617defc266de69"
+                },
+                {
+                  "description": "根据输入起点终点经纬度坐标规划100km 以内的步行通勤方案，并且返回通勤方案的数据",
+                  "description_truncated": false,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:amap",
+                  "tool_id": "amap.maps_direction_walking",
+                  "version": "0355e8964df2ea1222f019f8eda98004573b0e67e8faf96215b0cdaba49d2d91"
+                },
+                {
+                  "description": "关键字搜索 API 根据用户输入的关键字进行 POI 搜索，并返回相关的信息",
+                  "description_truncated": false,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:amap",
+                  "tool_id": "amap.maps_text_search",
+                  "version": "499b706cd09f93536a12c385b1105fc4463c9ddb61bdf7e7d34c282c83e7313f"
+                },
+                {
+                  "description": "测量两个经纬度坐标之间的距离,支持驾车、步行以及球面距离测量",
+                  "description_truncated": false,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:amap",
+                  "tool_id": "amap.maps_distance",
+                  "version": "5b0aef38f961fc41115686a9772d5a6ea069809131a83479c78b3b5b91ea2d61"
+                }
+              ],
+              "total": 8
+            },
+            "created_at": 1794338376.7653573
+          },
+          {
+            "cursor": 27,
+            "agent_task_id": "ded09217-8128-4157-ab4f-41b1d328d1a5",
+            "agent_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+            "revision": 1,
+            "kind": "tools_discovered",
+            "payload": {
+              "directory_version": "a6b43b9be690dca6ef35fe51803d02f4e8ed4ce6df2cd1a5988f1fba5c538f46",
+              "namespace": null,
+              "next_offset": 5,
+              "offset": 0,
+              "query": "amap",
+              "tools": [
+                {
+                  "description": "根据用户起终点经纬度坐标规划综合各类公共（火车、公交、地铁）交通方式的通勤方案，并且返回通勤方案的数据，跨",
+                  "description_truncated": true,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:amap",
+                  "tool_id": "amap.maps_direction_transit_integrated",
+                  "version": "e4fc1c2a70b9e24f4d4d354e9efc70e12fcc5d8546a3d5c52a617defc266de69"
+                },
+                {
+                  "description": "根据输入起点终点经纬度坐标规划100km 以内的步行通勤方案，并且返回通勤方案的数据",
+                  "description_truncated": false,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:amap",
+                  "tool_id": "amap.maps_direction_walking",
+                  "version": "0355e8964df2ea1222f019f8eda98004573b0e67e8faf96215b0cdaba49d2d91"
+                },
+                {
+                  "description": "测量两个经纬度坐标之间的距离,支持驾车、步行以及球面距离测量",
+                  "description_truncated": false,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:amap",
+                  "tool_id": "amap.maps_distance",
+                  "version": "5b0aef38f961fc41115686a9772d5a6ea069809131a83479c78b3b5b91ea2d61"
+                },
+                {
+                  "description": "查询关键词搜或者周边搜获取到的POI ID的详细信息",
+                  "description_truncated": false,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:amap",
+                  "tool_id": "amap.maps_search_detail",
+                  "version": "f0ef632ab9a0cd48068e3cd9a3e6f241ca92e508577ce5e0d4aa21ea61f0fc41"
+                },
+                {
+                  "description": "关键字搜索 API 根据用户输入的关键字进行 POI 搜索，并返回相关的信息",
+                  "description_truncated": false,
+                  "effect": "read",
+                  "executor": "server",
+                  "source": "mcp:official:amap",
+                  "tool_id": "amap.maps_text_search",
+                  "version": "499b706cd09f93536a12c385b1105fc4463c9ddb61bdf7e7d34c282c83e7313f"
+                }
+              ],
+              "total": 6
+            },
+            "created_at": 1794338379.9946847
+          },
+          {
+            "cursor": 30,
+            "agent_task_id": "ded09217-8128-4157-ab4f-41b1d328d1a5",
+            "agent_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+            "revision": 1,
+            "kind": "question_review_requested",
+            "payload": {
+              "fingerprint": "86b7a7db2b41de4138a743cd6929b6ad2e3efda6e9bee777a320eb5a5e9755ec",
+              "input_cursor": 9
+            },
+            "created_at": 1794338382.1121123
+          },
+          {
+            "cursor": 31,
+            "agent_task_id": "ded09217-8128-4157-ab4f-41b1d328d1a5",
+            "agent_run_id": "0a93f99d-894f-4055-92ec-24d778e9ae4d",
+            "revision": 1,
+            "kind": "question_review_result",
+            "payload": {
+              "fingerprint": "86b7a7db2b41de4138a743cd6929b6ad2e3efda6e9bee777a320eb5a5e9755ec",
+              "reason": "用户已在user_input中明确3000元为含3晚住宿、市内交通、餐饮、门票的全部费用严格上限，且住宿选中心区域经济型独立房间；并允许无实时报价时估算、由规划合理分配预算。因此问题①已答，问题②属可由用户指示估算的偏好，均非阻塞。",
+              "status": "unnecessary"
+            },
+            "created_at": 1794338383.535919
+          }
+        ],
+        "artifacts": [],
+        "prior_artifacts": [],
+        "working_notes": [],
+        "unresolved_calls": [],
+        "delegation_enabled": true
+      },
+      "tool_descriptors": [
+        {
+          "tool_id": "amap.maps_text_search",
+          "description": "关键字搜索 API 根据用户输入的关键字进行 POI 搜索，并返回相关的信息",
+          "version": "499b706cd09f93536a12c385b1105fc4463c9ddb61bdf7e7d34c282c83e7313f",
+          "effect": "read",
+          "executor": "server",
+          "source": "mcp:official:amap",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "keywords": {
+                "type": "string",
+                "description": "查询关键字"
+              },
+              "city": {
+                "type": "string",
+                "description": "查询城市"
+              },
+              "citylimit": {
+                "type": "boolean",
+                "description": "是否限制城市范围内搜索，默认不限制"
+              }
+            },
+            "required": [
+              "keywords"
+            ]
+          }
+        },
+        {
+          "tool_id": "exa.web_fetch_exa",
+          "description": "Read a webpage's full content as clean markdown. Use after web_search_exa when highlights are insufficient or to read any URL.\n\nBest for: Extracting full content from known URLs. Batch multiple URLs in one call.\nReturns: Clean text content and metadata from the page(s).",
+          "version": "eb8d7b8aeeacdfe54065fcfb23af1baf03d3a6edf12839534d88d8c1c1f7c48e",
+          "effect": "read",
+          "executor": "server",
+          "source": "mcp:official:exa",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "urls": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "URLs to read. Batch multiple URLs in one call."
+              },
+              "maxCharacters": {
+                "type": "number",
+                "minimum": 1,
+                "description": "Maximum characters to extract per page (default: 3000)"
+              }
+            },
+            "required": [
+              "urls"
+            ],
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#"
+          }
+        },
+        {
+          "tool_id": "agent.read_artifact",
+          "description": "按 content_ref/version 读取成果缺失段；旧成果仅供参考。offset 为字符，页最多 2400 UTF-8 字节，用 next_offset 续读。",
+          "version": "d97ab12ec31675e7525c386db7accab6c836c6509ac8797f12c6ee1c38a7719a",
+          "effect": "read",
+          "executor": "server",
+          "source": "builtin:agent",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "artifact_id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "offset": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "max_chars": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3000
+              }
+            },
+            "required": [
+              "artifact_id"
+            ],
+            "additionalProperties": false
+          }
+        },
+        {
+          "tool_id": "amap.maps_direction_transit_integrated",
+          "description": "根据用户起终点经纬度坐标规划综合各类公共（火车、公交、地铁）交通方式的通勤方案，并且返回通勤方案的数据，跨城场景下必须传起点城市与终点城市",
+          "version": "e4fc1c2a70b9e24f4d4d354e9efc70e12fcc5d8546a3d5c52a617defc266de69",
+          "effect": "read",
+          "executor": "server",
+          "source": "mcp:official:amap",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "origin": {
+                "type": "string",
+                "description": "出发点经纬度，坐标格式为：经度，纬度"
+              },
+              "destination": {
+                "type": "string",
+                "description": "目的地经纬度，坐标格式为：经度，纬度"
+              },
+              "city": {
+                "type": "string",
+                "description": "公共交通规划起点城市"
+              },
+              "cityd": {
+                "type": "string",
+                "description": "公共交通规划终点城市"
+              }
+            },
+            "required": [
+              "origin",
+              "destination",
+              "city",
+              "cityd"
+            ]
+          }
+        },
+        {
+          "tool_id": "amap.maps_direction_walking",
+          "description": "根据输入起点终点经纬度坐标规划100km 以内的步行通勤方案，并且返回通勤方案的数据",
+          "version": "0355e8964df2ea1222f019f8eda98004573b0e67e8faf96215b0cdaba49d2d91",
+          "effect": "read",
+          "executor": "server",
+          "source": "mcp:official:amap",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "origin": {
+                "type": "string",
+                "description": "出发点经度，纬度，坐标格式为：经度，纬度"
+              },
+              "destination": {
+                "type": "string",
+                "description": "目的地经度，纬度，坐标格式为：经度，纬度"
+              }
+            },
+            "required": [
+              "origin",
+              "destination"
+            ]
+          }
+        },
+        {
+          "tool_id": "amap.maps_distance",
+          "description": "测量两个经纬度坐标之间的距离,支持驾车、步行以及球面距离测量",
+          "version": "5b0aef38f961fc41115686a9772d5a6ea069809131a83479c78b3b5b91ea2d61",
+          "effect": "read",
+          "executor": "server",
+          "source": "mcp:official:amap",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "origins": {
+                "type": "string",
+                "description": "起点经度，纬度，可以传多个坐标，使用竖线隔离，比如120,30|120,31，坐标格式为：经度，纬度"
+              },
+              "destination": {
+                "type": "string",
+                "description": "终点经度，纬度，坐标格式为：经度，纬度"
+              },
+              "type": {
+                "type": "string",
+                "description": "距离测量类型,1代表驾车距离测量，0代表直线距离测量，3步行距离测量"
+              }
+            },
+            "required": [
+              "origins",
+              "destination"
+            ]
+          }
+        },
+        {
+          "tool_id": "agent.read_result",
+          "description": "按result_ref读缺失事实：结构字段优先用paths（原result的JSON Pointer，非decoded_path）；否则offset/max_chars字符分页，按next_offset续读。最多2400 UTF-8字节，勿重读。",
+          "version": "96acab23d3499837716b8e1a39087fecf884c93cc09d482bec434a77076311b0",
+          "effect": "read",
+          "executor": "server",
+          "source": "builtin:agent",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "tool_call_id": {
+                "type": "string"
+              },
+              "offset": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "max_chars": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3000
+              },
+              "paths": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 8,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "maxLength": 512
+                }
+              }
+            },
+            "required": [
+              "tool_call_id"
+            ],
+            "additionalProperties": false,
+            "allOf": [
+              {
+                "if": {
+                  "required": [
+                    "paths"
+                  ]
+                },
+                "then": {
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "offset"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "max_chars"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "active_tool_ids": [],
+      "namespace_index": {
+        "items": [
+          {
+            "namespace": "agent",
+            "tool_count": 2
+          },
+          {
+            "namespace": "amap",
+            "tool_count": 6,
+            "display_name": "高德地图",
+            "aliases": [
+              "高德",
+              "Amap"
+            ]
+          },
+          {
+            "namespace": "exa",
+            "tool_count": 2,
+            "display_name": "Exa 搜索",
+            "aliases": [
+              "Exa"
+            ]
+          },
+          {
+            "namespace": "onmyway",
+            "tool_count": 4
+          }
+        ],
+        "omitted": 0
+      },
+      "evaluated_at": "2026-11-10T19:19:43.554024+00:00",
+      "max_input_tokens": 12000,
+      "original_prompt_sha256": "94c37c62910625d1457486c1d6cbe029472974f0c80e564bce7a5d8db129aab6",
+      "original_estimated_input_tokens": 11762
+    }
+  ]
+}

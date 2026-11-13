@@ -5,13 +5,30 @@ internal enum class NavigationPhase {
     val needsService get() = this in setOf(STARTING, NAVIGATING, REPLANNING)
 }
 internal enum class NavigationEvent { CALCULATE, ROUTE_READY, START, SDK_STARTED, REPLAN, PAUSE, ARRIVE, FAIL, CLOSE }
+internal enum class NavigationServiceCommand { ACCEPT, IGNORE, STOP }
+
+internal fun navigationServiceCommand(
+    currentRunId: String?, currentLease: Long, needsService: Boolean, commandRunId: String?, commandLease: Long,
+): NavigationServiceCommand = when {
+    currentRunId == null || !needsService -> NavigationServiceCommand.STOP
+    currentRunId == commandRunId && currentLease == commandLease -> NavigationServiceCommand.ACCEPT
+    else -> NavigationServiceCommand.IGNORE
+}
+
+internal fun acceptsNavigationArrival(phase: NavigationPhase, startObserved: Boolean): Boolean =
+    phase in setOf(NavigationPhase.NAVIGATING, NavigationPhase.REPLANNING) ||
+        phase == NavigationPhase.STARTING && startObserved
+
+internal fun shouldPauseRecordedNavigationStart(phase: NavigationPhase, ownsAttempt: Boolean, uncertain: Boolean): Boolean =
+    !ownsAttempt || uncertain || phase in setOf(NavigationPhase.PAUSED, NavigationPhase.FAILED, NavigationPhase.CLOSED)
 
 /** SDK callbacks cannot revive a timed-out, paused or closed run. */
 internal fun navigationTransition(state: NavigationPhase, event: NavigationEvent): NavigationPhase {
     if (state == NavigationPhase.CLOSED) return state
+    if (state == NavigationPhase.ARRIVED && event != NavigationEvent.CLOSE) return state
     return when (event) {
         NavigationEvent.CLOSE -> NavigationPhase.CLOSED
-        NavigationEvent.FAIL -> NavigationPhase.FAILED
+        NavigationEvent.FAIL -> if (state == NavigationPhase.PAUSED) state else NavigationPhase.FAILED
         NavigationEvent.CALCULATE -> if (!state.needsService) NavigationPhase.CALCULATING else state
         NavigationEvent.ROUTE_READY -> when (state) {
             NavigationPhase.CALCULATING -> NavigationPhase.READY

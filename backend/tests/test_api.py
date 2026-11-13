@@ -3,9 +3,9 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.amap import Amap, MapError
+from backend.planning.amap import Amap, MapError
 from backend.main import app
-from backend.models import Place
+from backend.planning.models import Place
 
 
 ORIGIN = Place(id="a", name="a", longitude=110, latitude=30)
@@ -84,7 +84,7 @@ def test_invalid_map_credentials_are_not_no_route():
 
 def test_end_to_end_plan_response_with_injected_map(monkeypatch):
     from datetime import datetime, timezone
-    from backend.models import Leg
+    from backend.planning.models import Leg
     class Maps:
         key = "test"
         def route(self, origin, destination, mode):

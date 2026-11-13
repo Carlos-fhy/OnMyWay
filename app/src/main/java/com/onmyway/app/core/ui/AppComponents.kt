@@ -81,7 +81,7 @@ internal fun AppCard(
     modifier: Modifier = Modifier,
     shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(16.dp),
     color: Color = MaterialTheme.colorScheme.surfaceContainerLowest,
-    border: BorderStroke? = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+    border: BorderStroke? = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f)),
     contentPadding: PaddingValues = PaddingValues(16.dp),
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -96,8 +96,8 @@ internal fun AppIconBadge(
     icon: Int,
     contentDescription: String? = null,
     modifier: Modifier = Modifier,
-    tint: Color = MaterialTheme.colorScheme.primary,
-    container: Color = MaterialTheme.colorScheme.primaryContainer,
+    tint: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    container: Color = MaterialTheme.colorScheme.surfaceContainer,
     size: Dp = 40.dp,
 ) {
     Box(
@@ -183,9 +183,9 @@ internal fun AppPrimaryButton(
 ) {
     Button(
         onClick = onClick,
-        modifier = modifier.fillMaxWidth().heightIn(min = 54.dp),
+        modifier = modifier.fillMaxWidth().heightIn(min = 52.dp),
         enabled = enabled,
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(16.dp),
         colors = ButtonDefaults.buttonColors(
             containerColor = container,
             contentColor = contentColor,

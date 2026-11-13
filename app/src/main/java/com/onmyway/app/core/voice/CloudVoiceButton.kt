@@ -95,7 +95,8 @@ private class ShortRecording(private val context: Context) {
 }
 
 @Composable
-internal fun CloudVoiceButton(server: String, enabled: Boolean, result: (String) -> Unit, failure: (String) -> Unit) {
+internal fun CloudVoiceButton(server: String, enabled: Boolean, result: (String) -> Unit, failure: (String) -> Unit,
+    activityChanged: (Boolean) -> Unit = {}) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     val owner = LocalLifecycleOwner.current
@@ -109,10 +110,11 @@ internal fun CloudVoiceButton(server: String, enabled: Boolean, result: (String)
     var explanation by remember { mutableStateOf(false) }
     val onResult by rememberUpdatedState(result)
     val onFailure by rememberUpdatedState(failure)
+    val onActivityChanged by rememberUpdatedState(activityChanged)
     val permissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         if (!it) onFailure("未获得麦克风权限，可以继续输入文字。")
     }
-    fun cancel() { recordingDevice.cancel(); recording = false; job?.cancel(); processing = false }
+    fun cancel() { recordingDevice.cancel(); recording = false; job?.cancel(); processing = false; onActivityChanged(false) }
     fun start() {
         if (!enabled || processing) return
         if (!consent) { explanation = true; return }
@@ -122,6 +124,7 @@ internal fun CloudVoiceButton(server: String, enabled: Boolean, result: (String)
         try {
             recordingDevice.start()
             recording = true
+            onActivityChanged(true)
             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
         } catch (_: Exception) { onFailure("录音启动失败，请检查麦克风。") }
     }
@@ -130,14 +133,14 @@ internal fun CloudVoiceButton(server: String, enabled: Boolean, result: (String)
         recording = false
         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
         val bytes = try { recordingDevice.finish() } catch (e: Exception) {
-            onFailure(e.message ?: "录音失败，请重新说一次。"); return
+            onActivityChanged(false); onFailure(e.message ?: "录音失败，请重新说一次。"); return
         }
         processing = true
         job = scope.launch {
             try { onResult(Api(server).transcribe(bytes)) }
             catch (e: CancellationException) { throw e }
             catch (e: Exception) { onFailure(networkMessage(e)) }
-            finally { processing = false }
+            finally { processing = false; onActivityChanged(false) }
         }
     }
     val startAction by rememberUpdatedState({ start() })

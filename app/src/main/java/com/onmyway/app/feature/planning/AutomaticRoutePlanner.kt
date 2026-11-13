@@ -11,7 +11,6 @@ import com.onmyway.app.core.state.AppViewModel
 import com.onmyway.app.core.state.networkMessage
 import com.onmyway.app.data.local.entity.Errand
 import com.onmyway.app.data.local.entity.SavedTrip
-import com.onmyway.app.data.remote.Api
 import com.onmyway.app.feature.assistant.AssistantClarification
 import com.onmyway.app.feature.assistant.ClarificationState
 import com.onmyway.app.feature.assistant.clarificationPrompt
@@ -80,6 +79,7 @@ internal class AutomaticRoutePlanner(private val scope: CoroutineScope,
     }
     fun replanForBudget(vm: AppViewModel) {
         if (busy || selectionBusy || vm.busy || vm.updatingTrip || vm.restoringTrip || start == null || end == null) return
+        if (vm.planningRecoveryVisible) { error = "请先核对或放弃上次规划请求。"; return }
         restoreTasks = candidates.map { PlanningDraftTask(it.id, it.id in selectedIds) }
         val request = generation
         job = scope.launch {
@@ -122,6 +122,7 @@ internal class AutomaticRoutePlanner(private val scope: CoroutineScope,
 
     fun select(vm: AppViewModel, ids: Set<String>) {
         if (busy || vm.busy || vm.updatingTrip || vm.restoringTrip) return
+        if (vm.planningRecoveryVisible) { error = "请先核对或放弃上次规划请求。"; return }
         selectedIds = ids.intersect(candidates.map { it.id }.toSet())
         saveChoices()
         error = ""
@@ -146,11 +147,11 @@ internal class AutomaticRoutePlanner(private val scope: CoroutineScope,
                             .put("preference", vm.preference).put("departure", OffsetDateTime.now().toString())
                             .put("allow_partial", false).put("max_extra_minutes", JSONObject.NULL)
                             .put("arrive_by", parseTime(latest) ?: JSONObject.NULL)
-                        val route = Api(vm.server).plan(body)
+                        val route = vm.executeRoutePlan(body, vm.assistantPlanningOwner(draftIdentity, planIdentity))
                         vm.requireCurrentContext(context)
                         if (session != generation) return@launch
                         if (revision != selectionRevision) continue
-                        previewVersionId = java.util.UUID.randomUUID().toString()
+                        previewVersionId = vm.pendingPlanningRequest?.runId ?: java.util.UUID.randomUUID().toString()
                         selectedRoute = route
                         selectedRequest = JSONObject(body.toString()).put("max_extra_minutes", budget.toInt())
                         calculatedAt = System.currentTimeMillis()
@@ -184,6 +185,7 @@ internal class AutomaticRoutePlanner(private val scope: CoroutineScope,
         if (committing || vm.busy || vm.updatingTrip || vm.restoringTrip) return false
         feedbackId?.let { vm.recordSuggestionDecision(it, "SUPERSEDED", 0, 0) }
         if (ownsEdit) vm.cancelPlanEdit()
+        vm.abandonAssistantPlanning(draftIdentity, planIdentity)
         ownsEdit = false; clear()
         return true
     }
@@ -191,6 +193,7 @@ internal class AutomaticRoutePlanner(private val scope: CoroutineScope,
         if (committing || vm.busy || vm.updatingTrip || vm.restoringTrip) return false
         feedbackId?.let { vm.recordSuggestionDecision(it, "REJECTED", 0, 0) }
         if (ownsEdit) vm.cancelPlanEdit()
+        vm.abandonAssistantPlanning(draftIdentity, planIdentity)
         ownsEdit = false; clear()
         return true
     }
@@ -209,6 +212,7 @@ internal class AutomaticRoutePlanner(private val scope: CoroutineScope,
 
     fun start(vm: AppViewModel, keyword: String, travelMode: String, knownDestination: Place? = null, draftId: String = java.util.UUID.randomUUID().toString(), planId: String = draftId) {
         if (committing || vm.busy || vm.updatingTrip || vm.restoringTrip) return
+        if (vm.planningRecoveryVisible) { error = "已找回上次规划请求，请先核对或放弃。"; return }
         if (ownsEdit && !vm.busy) { vm.cancelPlanEdit(); ownsEdit = false }
         val retainedDestination = end?.takeIf { destinationQuery == keyword && draftIdentity == draftId }
         val restored = restoredChoices?.takeIf { it.draft.draftId == draftId && it.draft.destination == keyword && it.draft.mode == travelMode }
@@ -305,12 +309,12 @@ internal class AutomaticRoutePlanner(private val scope: CoroutineScope,
             .put("preference", vm.preference).put("departure", OffsetDateTime.now().toString())
             .put("allow_partial", true).put("max_extra_minutes", budget.toInt())
             .put("arrive_by", parseTime(latest) ?: JSONObject.NULL)
-        val result = Api(vm.server).recommend(body)
+        val result = vm.executeRouteRecommendation(body, vm.assistantPlanningOwner(draftIdentity, planIdentity))
         vm.requireCurrentContext(context)
         decisionContext = context
         feedbackId?.let { vm.recordSuggestionDecision(it, "SUPERSEDED", 0, 0) }
         feedbackId = null
-        previewVersionId = java.util.UUID.randomUUID().toString()
+        previewVersionId = vm.pendingPlanningRequest?.runId ?: java.util.UUID.randomUUID().toString()
         preview = result
         plannedBudget = budget.toInt()
         calculatedAt = System.currentTimeMillis()
@@ -331,11 +335,11 @@ internal class AutomaticRoutePlanner(private val scope: CoroutineScope,
             val restoredRequest = JSONObject(body.toString())
                 .put("tasks", JSONArray(candidates.filter { it.id in ids }.map { it.json() }))
                 .put("allow_partial", false).put("max_extra_minutes", JSONObject.NULL)
-            val restoredRoute = Api(vm.server).plan(restoredRequest)
+            val restoredRoute = vm.executeRoutePlan(restoredRequest, vm.assistantPlanningOwner(draftIdentity, planIdentity))
             vm.requireCurrentContext(context)
             selectedRequest = restoredRequest.put("max_extra_minutes", budget.toInt())
             selectedRoute = restoredRoute
-            previewVersionId = java.util.UUID.randomUUID().toString()
+            previewVersionId = vm.pendingPlanningRequest?.runId ?: java.util.UUID.randomUUID().toString()
             calculatedAt = System.currentTimeMillis()
             restoreTasks = null
             note = listOf(note, "已恢复上次选择，并按当前位置重新计算，请核对后确认。").filter { it.isNotBlank() }.joinToString("\n")

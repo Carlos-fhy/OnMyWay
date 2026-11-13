@@ -43,6 +43,7 @@ import com.onmyway.app.data.event.EventOutboxSync
 import com.onmyway.app.data.event.PlanRevision
 import com.onmyway.app.data.event.nextPlanRevision
 import com.onmyway.app.data.local.PendingAssistantRequest
+import com.onmyway.app.data.local.PlanningRequestJournal
 import com.onmyway.app.data.local.TaskDatabase
 import com.onmyway.app.data.local.entity.AgentEvent
 import com.onmyway.app.data.local.entity.BusinessEventOutbox
@@ -94,6 +95,9 @@ internal data class NavigationEndEvent(
     val metrics: TripMetrics? = null,
 )
 
+internal data class PlanningRecoveryCompletion(val draftId: String?, val result: JSONObject,
+    val historyId: String, val message: String)
+
 internal fun retainedNavigationTasks(request: JSONArray, result: JSONObject, keepIds: Set<String>): List<JSONObject> {
     val actualStops = result.optJSONArray("stops") ?: JSONArray()
     val actualPlaces = mutableMapOf<String, JSONObject>()
@@ -142,6 +146,9 @@ class AppViewModel internal constructor(application: Application, private val da
         scheduleTaskReminder(application, it)
         scheduleReminderNotificationRefresh(application)
     },
+    private val planningRequests: PlanningRequestStore = PlanningRequestJournal(application,
+        if (database.openHelper.databaseName == "onmyway.db") "onmyway-planning-requests.db"
+        else "${database.openHelper.databaseName ?: System.identityHashCode(database)}-planning-requests.db"),
 ) : AndroidViewModel(application) {
     constructor(application: Application) : this(application, TaskDatabase.get(application))
     private val dao = database.tasks()
@@ -223,6 +230,7 @@ class AppViewModel internal constructor(application: Application, private val da
         return navigationMemory
     }
     private var terminalState by mutableStateOf(NavigationState.IDLE)
+    private var restoredExecutionState by mutableStateOf<String?>(null)
     internal var navigationEndEvent by mutableStateOf<NavigationEndEvent?>(null)
         private set
     val navigationState: NavigationState get() = when {
@@ -234,7 +242,11 @@ class AppViewModel internal constructor(application: Application, private val da
             NavigationPhase.PAUSED -> NavigationState.PAUSED
             NavigationPhase.FAILED -> NavigationState.FAILED
             NavigationPhase.ARRIVED -> NavigationState.ARRIVED
-            else -> if (tripStarted) NavigationState.NAVIGATION_OPENED else NavigationState.READY
+            else -> when (restoredExecutionState) {
+                "completed" -> NavigationState.ARRIVED
+                "unknown", "failed" -> NavigationState.FAILED
+                else -> if (tripStarted) NavigationState.NAVIGATION_OPENED else NavigationState.READY
+            }
         }
         else -> terminalState
     }
@@ -531,7 +543,7 @@ class AppViewModel internal constructor(application: Application, private val da
         }
         draftBackup = null; editingPlan = false; message = ""
     }
-    fun inputsChanged() { revision++; message = "" }
+    fun inputsChanged() { revision++; manualPlanningOwnerId = java.util.UUID.randomUUID().toString(); message = "" }
     fun chooseTripPlace(taskId: String, place: Place) {
         if (busy || updatingTrip) return
         beginPlanEdit()
@@ -546,7 +558,209 @@ class AppViewModel internal constructor(application: Application, private val da
         task.copy(placeJson = it.json().toString())
     } ?: task
 
-    internal suspend fun currentTasks(): List<Errand> = dao.all()
+    private val capabilityRuntime by lazy {
+        com.onmyway.app.data.execution.CapabilityRuntime(com.onmyway.app.data.execution.RoomCapabilityRunStore(database))
+    }
+
+    private var manualPlanningOwnerId = java.util.UUID.randomUUID().toString()
+    internal var pendingPlanningRequest by mutableStateOf<PendingPlanningRequest?>(null)
+        private set
+    internal var planningRecoveryVisible by mutableStateOf(false)
+        private set
+    internal var planningRecoveryBusy by mutableStateOf(false)
+        private set
+    internal var planningRecoveryMessage by mutableStateOf("")
+        private set
+    internal var recoveredPlanningPreview by mutableStateOf<JSONObject?>(null)
+        private set
+    internal var planningRecoveryCompletion by mutableStateOf<PlanningRecoveryCompletion?>(null)
+        private set
+    private var recoveredPlanningSnapshot: ConfirmedRouteSnapshot? = null
+    internal val canConfirmPlanningRecovery: Boolean get() = recoveredPlanningSnapshot != null &&
+        pendingPlanningRequest != null && !planningRecoveryBusy && !tripStarted
+    internal val planningRecoverySummary: String get() = pendingPlanningRequest?.let { pending ->
+        runCatching {
+            val body = JSONObject(pending.bodyJson)
+            "${body.getJSONObject("origin").optString("name")} → ${body.getJSONObject("destination").optString("name")} · " +
+                if (body.optString("mode") == "cycling") "骑行" else "步行"
+        }.getOrDefault("上次路线规划")
+    }.orEmpty()
+
+    internal suspend fun assistantPlanningOwner(draftId: String, planId: String): PlanningRequestOwner {
+        val draft = database.assistant().draft()
+        check(draft?.draftId == draftId && draft.planId == planId) { "待确认建议已变化，请重新核对。" }
+        return PlanningRequestOwner("assistant", checkNotNull(draft).conversationId, draftId, planId)
+    }
+
+    private suspend fun requirePlanningOwner(owner: PlanningRequestOwner) {
+        when (owner.kind) {
+            "manual" -> check(owner.draftId == manualPlanningOwnerId) { "规划条件已变化，请放弃旧请求后重新规划。" }
+            "assistant" -> {
+                val draft = database.assistant().draft()
+                val conversation = getApplication<Application>().getSharedPreferences("assistant_conversation", 0)
+                    .getString("active_conversation_id", "")
+                check(draft?.draftId == owner.draftId && draft.planId == owner.planId &&
+                    draft.conversationId == owner.conversationId && conversation == owner.conversationId &&
+                    draft.action == "plan_route" && assistantCardIssue(draft.proposal()) == null) {
+                    "原建议或对话已变化，请放弃旧请求后重新规划。"
+                }
+            }
+            "navigation" -> check(savedTrip?.sessionId == owner.sessionId && savedTrip?.planId == owner.planId &&
+                savedTrip?.planVersion == owner.planVersion) { "原导航会话已变化，不能应用旧结果。" }
+            else -> error("规划来源无效。")
+        }
+    }
+
+    private fun planningExecution(owner: PlanningRequestOwner,
+        planner: (suspend (JSONObject) -> JSONObject)? = null) = PlanningExecution(
+        com.onmyway.app.data.execution.RoomCapabilityRunStore(database),
+        submit = { endpoint, request, runId, action ->
+            planner?.invoke(request) ?: if (action == "plan") Api(endpoint).plan(request, runId)
+                else Api(endpoint).recommend(request, runId)
+        }, status = if (planner != null) null else { endpoint, request, runId, action ->
+            Api(endpoint).planningStatus(request, runId, action)
+        }, requests = if (planner == null) planningRequests else null, owner = owner)
+
+    internal fun recoverPlanningRequest() {
+        val pending = pendingPlanningRequest ?: return
+        if (planningRecoveryBusy || busy || updatingTrip || restoringTrip) return
+        planningRecoveryBusy = true
+        recoveredPlanningPreview = null; recoveredPlanningSnapshot = null
+        viewModelScope.launch {
+            try {
+                suspend fun requireCurrent() {
+                    check(planningRequests.pending() == pending && pendingPlanningRequest == pending) { "待核对规划已变化。" }
+                    check(Api.validateBase(server) == pending.server) { "服务地址已变化，请恢复原地址后核对，或放弃旧请求。" }
+                    requirePlanningOwner(pending.owner)
+                    ContextSnapshot.fromJson(JSONObject(pending.bodyJson).getJSONObject("context_snapshot"))
+                        .requireCurrent(dao.all(), trips.load())
+                }
+                val result = planningExecution(pending.owner).recover(pending, ::requireCurrent)
+                requireCurrent()
+                val route = if (pending.operation == "recommend")
+                    result.optJSONObject("suggestion") ?: result.getJSONObject("direct") else result
+                recoveredPlanningPreview = JSONObject(route.toString())
+                if (pending.owner.kind == "navigation") {
+                    planningRecoveryMessage = "已核对原规划结果。请回到导航调整入口重新确认；此处不会更改当前导航。"
+                    return@launch
+                }
+                val body = JSONObject(pending.bodyJson)
+                val routedIds = route.getJSONArray("stops").let { stops -> buildSet {
+                    for (i in 0 until stops.length()) {
+                        val ids = stops.getJSONObject(i).getJSONArray("task_ids")
+                        for (j in 0 until ids.length()) add(ids.getString(j))
+                    }
+                } }
+                val tasks = dao.all().filter { it.id in routedIds }
+                val originalTasks = body.getJSONArray("tasks")
+                body.put("tasks", JSONArray((0 until originalTasks.length()).map { originalTasks.getJSONObject(it) }
+                    .filter { it.getString("id") in routedIds })).put("allow_partial", false)
+                val snapshot = ContextSnapshot.fromJson(body.getJSONObject("context_snapshot"))
+                recoveredPlanningSnapshot = ConfirmedRouteSnapshot(pending.runId, body.toString(), route.toString(),
+                    trips.load(), tasks, pending.createdAt, planId = pending.owner.planId,
+                    draftId = pending.owner.draftId.takeIf { pending.owner.kind == "assistant" }, contextSnapshot = snapshot)
+                planningRecoveryMessage = "已找回上次方案，请核对后确认；确认前不会改变当前行程。"
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { planningRecoveryMessage = networkMessage(e) }
+            finally { planningRecoveryBusy = false }
+        }
+    }
+
+    internal fun confirmRecoveredPlanning() {
+        val pending = pendingPlanningRequest ?: return
+        val snapshot = recoveredPlanningSnapshot ?: return
+        if (!canConfirmPlanningRecovery || busy || updatingTrip || restoringTrip) return
+        planningRecoveryBusy = true
+        viewModelScope.launch {
+            try {
+                check(planningRequests.pending() == pending && snapshot.versionId == pending.runId) { "待确认规划已变化。" }
+                check(Api.validateBase(server) == pending.server) { "服务地址已变化，请重新核对。" }
+                requirePlanningOwner(pending.owner)
+                if (pending.owner.kind == "manual" && editingPlan) cancelPlanEdit()
+                val route = confirmAssistantRoute(snapshot)
+                planningRecoveryCompletion = PlanningRecoveryCompletion(snapshot.draftId, route, snapshot.versionId, "已确认恢复的路线方案。")
+                finishPlanningRequest(pending.runId)
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { planningRecoveryMessage = networkMessage(e) }
+            finally { planningRecoveryBusy = false }
+        }
+    }
+
+    internal fun discardPlanningRecovery() {
+        val pending = pendingPlanningRequest ?: return
+        if (planningRecoveryBusy) return
+        viewModelScope.launch { finishPlanningRequest(pending.runId) }
+    }
+
+    internal fun consumePlanningRecoveryCompletion(historyId: String) {
+        if (planningRecoveryCompletion?.historyId == historyId) planningRecoveryCompletion = null
+    }
+
+    internal fun abandonAssistantPlanning(draftId: String, planId: String) {
+        val pending = pendingPlanningRequest?.takeIf { it.owner.kind == "assistant" &&
+            it.owner.draftId == draftId && it.owner.planId == planId } ?: return
+        viewModelScope.launch { finishPlanningRequest(pending.runId) }
+    }
+
+    private suspend fun finishPlanningRequest(runId: String) {
+        try {
+            planningRequests.finish(runId)
+            if (pendingPlanningRequest?.runId == runId) {
+                pendingPlanningRequest = null; planningRecoveryVisible = false; planningRecoveryMessage = ""
+                recoveredPlanningPreview = null; recoveredPlanningSnapshot = null
+            }
+        } catch (e: CancellationException) { throw e }
+        catch (_: Exception) { planningRecoveryMessage = "方案已处理，但恢复记录清理失败；重新打开页面后可再次核对。" }
+    }
+
+    private suspend fun prepareNavigationExecution(trip: SavedTrip, correlationId: String) {
+        com.onmyway.app.feature.navigation.NavigationExecutionRecorder(
+            com.onmyway.app.feature.navigation.RoomNavigationExecutionStore(database), correlationId,
+        ).prepare(NavigationExecutionIdentity(trip.sessionId, trip.planId, trip.planVersion), System.currentTimeMillis())
+    }
+
+    internal suspend fun currentTasks(): List<Errand> = database.withTransaction {
+        val current = dao.all()
+        val snapshot = JSONObject().put("snapshot_id", java.util.UUID.randomUUID().toString())
+            .put("captured_at", System.currentTimeMillis())
+            .put("tasks", JSONArray(current.map { it.json().put("status", it.status).put("planned_date", it.plannedDate) }))
+        capabilityRuntime.execute(java.util.UUID.randomUUID().toString(), "read_tasks", 1,
+            JSONObject().put("context_snapshot", snapshot), activeEventCorrelation(), {}) { snapshot }
+        current
+    }
+
+    internal suspend fun executeRoutePlan(body: JSONObject, owner: PlanningRequestOwner? = null,
+        planner: (suspend (JSONObject) -> JSONObject)? = null): JSONObject =
+        executePlanning(body, "plan", owner, planner)
+
+    internal suspend fun executeRouteRecommendation(body: JSONObject, owner: PlanningRequestOwner? = null): JSONObject =
+        executePlanning(body, "recommend", owner)
+
+    private suspend fun executePlanning(body: JSONObject, operation: String,
+        requestOwner: PlanningRequestOwner? = null,
+        planner: (suspend (JSONObject) -> JSONObject)? = null): JSONObject {
+        val immutable = JSONObject(body.toString())
+        val snapshot = ContextSnapshot.fromJson(immutable.getJSONObject("context_snapshot"))
+        val requestServer = Api.validateBase(server)
+        val owner = requestOwner ?: PlanningRequestOwner("manual", draftId = manualPlanningOwnerId,
+            planId = savedTrip?.planId ?: manualPlanningOwnerId)
+        var completed = false
+        try {
+            val result = planningExecution(owner, planner).execute(requestServer, immutable, operation, activeEventCorrelation()) {
+                check(Api.validateBase(server) == requestServer) { "服务地址已变化，请核对原请求后重新规划。" }
+                snapshot.requireCurrent(dao.all(), trips.load())
+                requirePlanningOwner(owner)
+            }
+            completed = true
+            return result
+        } finally {
+            if (planner == null) withContext(NonCancellable) {
+                pendingPlanningRequest = planningRequests.pending()
+                planningRecoveryVisible = !completed && pendingPlanningRequest != null
+                if (planningRecoveryVisible) planningRecoveryMessage = "上次规划尚未处理，请先核对原请求或放弃。"
+            }
+        }
+    }
 
     internal suspend fun captureContextSnapshot(taskIds: Set<String>? = null,
         location: ContextLocation = ContextLocation(), proposedTasks: List<Errand> = emptyList()): ContextSnapshot =
@@ -587,7 +801,10 @@ class AppViewModel internal constructor(application: Application, private val da
     }
 
     init {
-        viewModelScope.coroutineContext[Job]?.invokeOnCompletion { navigationDelivery.close() }
+        viewModelScope.coroutineContext[Job]?.invokeOnCompletion {
+            navigationDelivery.close()
+            (planningRequests as? PlanningRequestJournal)?.close()
+        }
         viewModelScope.launch {
             try {
                 navigationSnapshot = navigationDelivery.loadContext()
@@ -602,32 +819,29 @@ class AppViewModel internal constructor(application: Application, private val da
                 tripMutex.withLock {
                     val stored = trips.load()
                     if (stored == null) clearNavigationRecovery()
-                    if (stored != null && stored.started && revision == 0 && !NavigationRuntime.owns(stored.sessionId)) {
-                        database.withTransaction {
-                            trips.record(RouteHistory(sessionId = stored.sessionId, planId = stored.planId, state = NavigationState.CANCELLED.name,
-                                planVersion = stored.planVersion,
-                                timestamp = System.currentTimeMillis(), requestJson = stored.requestJson, resultJson = stored.resultJson))
-                            try {
-                                runCatching { JSONObject(stored.requestJson) }.getOrNull()?.let { request ->
-                                    enqueueBusinessEvent(BusinessEventFactory.navigationCancelled(
-                                        sessionId = stored.sessionId, planId = stored.planId, request = request,
-                                        planVersion = stored.planVersion,
-                                        metrics = null, reason = "app_restart",
-                                        correlationId = eventCorrelation.forSession(stored.sessionId),
-                                    ))
+                    var recoveryMessage: String? = null
+                    if (stored != null && revision == 0 && !NavigationRuntime.owns(stored.sessionId)) {
+                        val identity = NavigationExecutionIdentity(stored.sessionId, stored.planId, stored.planVersion)
+                        if (stored.planVersion > 0) {
+                            val recovered = com.onmyway.app.feature.navigation.NavigationExecutionRecorder(
+                                com.onmyway.app.feature.navigation.RoomNavigationExecutionStore(database),
+                                eventCorrelation.forSession(stored.sessionId),
+                            ).recover(identity, System.currentTimeMillis())
+                            if (recovered != null) {
+                                restoredExecutionState = recovered.state
+                                explicitNavigationStartRequired = true
+                                recoveryMessage = when (recovered.state) {
+                                    "completed" -> "上次导航已记录到达，请核对并结束行程。"
+                                    "unknown", "running" -> "上次导航结果未知，请核对原执行记录；不会自动重新启动导航。"
+                                    "failed" -> "上次导航已停止，请核对失败原因后重新规划或显式重试。"
+                                    else -> "已恢复待出发方案，请显式开始导航。"
                                 }
-                            } catch (cancelled: CancellationException) {
-                                throw cancelled
-                            } catch (_: Exception) {
-                                // Archiving the stale trip must still complete.
                             }
-                            trips.clear()
+                        } else if (stored.started) {
+                            explicitNavigationStartRequired = true
+                            restoredExecutionState = "unknown"
+                            recoveryMessage = "旧导航缺少执行版本，请核对后重新规划；不会自动重新启动。"
                         }
-                        eventCorrelation.finishTrip(stored.sessionId)
-                        terminalState = NavigationState.CANCELLED
-                        clearNavigationRecovery()
-                        message = "上次导航已结束，方案保存在行程记录；再次出发请重新规划。"
-                        return@withLock
                     }
                     if (stored != null && revision == 0) {
                         val request = JSONObject(stored.requestJson)
@@ -655,11 +869,23 @@ class AppViewModel internal constructor(application: Application, private val da
                         tripPlaces = (0 until chosen.length()).map { chosen.getJSONObject(it) }
                             .filter { !it.isNull("place") }.associate { it.getString("id") to Place.from(it.getJSONObject("place")) }
                         savedTrip = stored; result = response; tripStarted = stored.started
-                        message = "已恢复上次行程"
+                        message = recoveryMessage ?: "已恢复上次行程"
                     }
                 }
             } catch (_: Exception) { message = "上次行程读取失败，请重新规划。" }
-            finally { restoringTrip = false }
+            finally {
+                try {
+                    val pending = planningRequests.pending()
+                    if (pending != null && trips.historyById(pending.runId) != null) planningRequests.finish(pending.runId)
+                    else if (pending != null) {
+                        pendingPlanningRequest = pending
+                        if (pending.owner.kind == "manual" && revision == 0) manualPlanningOwnerId = pending.owner.draftId
+                        planningRecoveryVisible = true
+                        planningRecoveryMessage = "发现上次未处理的路线规划。请核对原请求；不会自动重新规划。"
+                    }
+                } catch (_: Exception) { planningRecoveryMessage = "上次规划请求读取失败，请稍后重新打开页面。" }
+                restoringTrip = false
+            }
         }
     }
 
@@ -671,6 +897,7 @@ class AppViewModel internal constructor(application: Application, private val da
                     if (active != null && identity.matches(active) &&
                         savedTrip?.let(identity::matches) == true && active.started) {
                         explicitNavigationStartRequired = false
+                        restoredExecutionState = null
                         savedTrip = active
                         tripStarted = true
                     }
@@ -680,94 +907,44 @@ class AppViewModel internal constructor(application: Application, private val da
         }
     }
 
-    /** Recorded immediately on the SDK arrival callback, not when the user later confirms. */
-    internal fun embeddedNavigationArrived(identity: NavigationExecutionIdentity) {
-        val observedAt = System.currentTimeMillis()
-        viewModelScope.launch {
-            try {
-                tripMutex.withLock {
-                    val active = savedTrip ?: return@withLock
-                    if (!identity.matches(active)) return@withLock
-                    val request = runCatching { JSONObject(active.requestJson) }.getOrNull() ?: return@withLock
-                    val route = runCatching { JSONObject(active.resultJson) }.getOrNull()
-                    val metrics = runCatching {
-                        NavigationRuntime.metricsSnapshot(active.sessionId,
-                            route?.optInt("total_seconds", -1)?.takeIf { it >= 0 },
-                            route?.optInt("total_meters", -1)?.takeIf { it >= 0 })
-                    }.getOrNull()
-                    enqueueBusinessEvent(BusinessEventFactory.navigationArrived(
-                        sessionId = active.sessionId, planId = active.planId, planVersion = active.planVersion, request = request,
-                        metrics = metrics, correlationId = eventCorrelation.forSession(active.sessionId),
-                        occurredAt = observedAt,
-                    ))
-                }
-            } catch (cancelled: CancellationException) { throw cancelled }
-            // A receipt failure must never change the navigation result shown to the user.
-            catch (_: Exception) { }
-        }
-    }
-
-    internal fun embeddedNavigationFailed(identity: NavigationExecutionIdentity, reason: String) {
-        val observedAt = System.currentTimeMillis()
-        viewModelScope.launch {
-            try {
-                tripMutex.withLock {
-                    val active = savedTrip ?: return@withLock
-                    if (!identity.matches(active)) return@withLock
-                    val request = runCatching { JSONObject(active.requestJson) }.getOrNull() ?: return@withLock
-                    enqueueBusinessEvent(BusinessEventFactory.navigationFailed(
-                        sessionId = active.sessionId, planId = active.planId, planVersion = active.planVersion, request = request,
-                        reason = reason.take(300),
-                        occurredAt = observedAt,
-                        correlationId = eventCorrelation.forSession(active.sessionId),
-                    ))
-                }
-            } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { }
-        }
-    }
-
     fun launchTrip(launch: () -> Boolean) {
         if (updatingTrip || restoringTrip) return
         val stored = savedTrip ?: return
-        if (stored.needsReplan && !stored.started) {
-            message = "待办已变化，请重新规划后再开始导航。"
-            return
-        }
         updatingTrip = true
         viewModelScope.launch {
             try {
                 tripMutex.withLock {
                     if (savedTrip != stored) return@withLock
-                    val started = stored.copy(started = true, startedAt = stored.startedAt.takeIf { it > 0 } ?: System.currentTimeMillis())
-                    if (savedTrip != stored) return@withLock
-                    if (launch()) {
+                    val identity = NavigationExecutionIdentity(stored.sessionId, stored.planId, stored.planVersion)
+                    val attempt = java.util.UUID.randomUUID().toString()
+                    val recorder = com.onmyway.app.feature.navigation.NavigationExecutionRecorder(
+                        com.onmyway.app.feature.navigation.RoomNavigationExecutionStore(database),
+                        eventCorrelation.forSession(stored.sessionId))
+                    val claimed = recorder.claim(identity, attempt, System.currentTimeMillis())
+                    if (claimed != com.onmyway.app.feature.navigation.NavigationClaimResult.CLAIMED) {
+                        message = "已有导航执行记录，请先核对结果；不会重复打开导航。"
+                        return@withLock
+                    }
+                    val launched = try { launch() } catch (error: Exception) {
+                        recorder.markUnknown(identity, attempt, System.currentTimeMillis(), "外部导航启动结果未知")
+                        throw error
+                    }
+                    if (launched) {
+                        // An external activity hand-off cannot establish SDK execution.
                         database.withTransaction {
+                            val current = checkNotNull(trips.load()).also { check(identity.matches(it)) }
+                            val started = current.copy(started = true,
+                                startedAt = current.startedAt.takeIf { it > 0 } ?: System.currentTimeMillis())
                             trips.save(started)
-                            if (!stored.started) trips.record(RouteHistory(sessionId = stored.sessionId, planId = stored.planId,
-                                planVersion = stored.planVersion,
-                                state = NavigationState.NAVIGATION_OPENED.name, timestamp = started.startedAt,
-                                requestJson = stored.requestJson, resultJson = stored.resultJson))
+                            recorder.markUnknown(identity, attempt, System.currentTimeMillis(), "外部导航已打开，执行结果需要人工核对")
+                            savedTrip = started; tripStarted = true; restoredExecutionState = "unknown"
                         }
-                        savedTrip = started; tripStarted = true
                     } else {
-                        // External AMap launch cannot confirm SDK navigation start,
-                        // but a failed hand-off is a device observation.
-                        try {
-                            runCatching { JSONObject(stored.requestJson) }.getOrNull()?.let { request ->
-                                enqueueBusinessEvent(BusinessEventFactory.navigationFailed(
-                                    sessionId = stored.sessionId, planId = stored.planId, request = request,
-                                    planVersion = stored.planVersion,
-                                    reason = "external_launch_failed",
-                                    correlationId = eventCorrelation.forSession(stored.sessionId),
-                                ))
-                            }
-                        } catch (cancelled: CancellationException) {
-                            throw cancelled
-                        } catch (_: Exception) { }
+                        recorder.recordFailed(identity, attempt, System.currentTimeMillis(), "external_launch_failed")
+                        EventOutboxSync.schedule(getApplication())
                     }
                 }
-            } catch (e: Exception) { message = "行程保存或打开失败，请重试。" }
+            } catch (error: Exception) { message = error.message ?: "行程保存或打开失败，请核对执行状态。" }
             finally { updatingTrip = false }
         }
     }
@@ -780,6 +957,9 @@ class AppViewModel internal constructor(application: Application, private val da
             try {
                 tripMutex.withLock {
                     if (savedTrip != stored) return@withLock
+                    kotlinx.coroutines.withTimeout(10_000) { NavigationRuntime.receipts.drain() }
+                    val currentTrip = checkNotNull(trips.load())
+                    check(NavigationExecutionIdentity(stored.sessionId, stored.planId, stored.planVersion).matches(currentTrip))
                     val state = if (arrived) NavigationState.ARRIVED else NavigationState.CANCELLED
                     val routeResult = runCatching { JSONObject(stored.resultJson) }.getOrNull()
                     val predictedSeconds = routeResult?.optInt("total_seconds", -1)?.takeIf { it >= 0 }
@@ -807,40 +987,36 @@ class AppViewModel internal constructor(application: Application, private val da
                         NavigationEndEvent("${stored.sessionId}:${state.name}", arrived, "", emptyList(), metrics)
                     }
                     val correlationId = eventCorrelation.forSession(stored.sessionId)
-                    val sdkArrived = NavigationRuntime.current?.let {
-                        it.executionIdentity.matches(stored) && it.arrived
-                    } == true
                     database.withTransaction {
                         trips.record(RouteHistory(sessionId = stored.sessionId, planId = stored.planId, state = state.name,
                             planVersion = stored.planVersion,
                             timestamp = System.currentTimeMillis(), requestJson = stored.requestJson, resultJson = archivedResultJson))
-                        try {
-                            runCatching { JSONObject(stored.requestJson) }.getOrNull()?.let { request ->
-                                // Manual arrival changes local task/trip state, but is not SDK evidence.
-                                val receipt = if (arrived && sdkArrived) BusinessEventFactory.navigationArrived(
-                                    sessionId = stored.sessionId, planId = stored.planId, request = request,
-                                    planVersion = stored.planVersion,
-                                    metrics = metrics, correlationId = correlationId,
-                                ) else if (!arrived) BusinessEventFactory.navigationCancelled(
-                                    sessionId = stored.sessionId, planId = stored.planId, request = request,
-                                    planVersion = stored.planVersion,
-                                    metrics = metrics,
-                                    reason = if (stored.started) "user_finished" else "ended_before_start",
-                                    correlationId = correlationId,
-                                ) else null
-                                receipt?.let { enqueueBusinessEvent(it) }
-                            }
-                        } catch (cancelled: CancellationException) {
-                            throw cancelled
-                        } catch (_: Exception) {
-                            // Archiving the trip is user-visible; a receipt failure must not block it.
+                        val identity = NavigationExecutionIdentity(stored.sessionId, stored.planId, stored.planVersion)
+                        check(trips.load()?.let(identity::matches) == true) { "行程已变化，请重新核对。" }
+                        val execution = database.capabilityRuns().load(
+                            com.onmyway.app.feature.navigation.NavigationExecutionRecorder.runId(identity))
+                        // SDK arrival is already committed by the controller queue. Manual arrival is not SDK evidence.
+                        if (!arrived && execution?.state != "completed") {
+                            enqueueBusinessEvent(BusinessEventFactory.navigationCancelled(
+                                sessionId = stored.sessionId, planId = stored.planId, planVersion = stored.planVersion,
+                                request = JSONObject(stored.requestJson), metrics = metrics,
+                                reason = if (currentTrip.started) "user_finished" else "ended_before_start",
+                                correlationId = execution?.correlationId ?: correlationId,
+                                executionId = execution?.runId.orEmpty(), attemptId = execution?.attemptId.orEmpty(),
+                            ))
+                        }
+                        if (stored.planVersion > 0) {
+                            com.onmyway.app.feature.navigation.NavigationExecutionRecorder(
+                                com.onmyway.app.feature.navigation.RoomNavigationExecutionStore(database), correlationId,
+                            ).recordClosed(NavigationExecutionIdentity(stored.sessionId, stored.planId, stored.planVersion),
+                                System.currentTimeMillis(), arrivedManually = arrived)
                         }
                         trips.clear()
                     }
                     navigationEndEvent = endEvent
                     NavigationRuntime.finish(stored.sessionId)
                     eventCorrelation.finishTrip(stored.sessionId)
-                    revision++; savedTrip = null; result = null; tripStarted = false
+                    revision++; savedTrip = null; result = null; tripStarted = false; restoredExecutionState = null
                     explicitNavigationStartRequired = false
                     origin = null; destination = null; selected = emptySet(); extra = ""; arriveBy = ""; partial = false
                     editingPlan = false; draftBackup = null; tripPlaces = emptyMap(); terminalState = state
@@ -1141,7 +1317,13 @@ class AppViewModel internal constructor(application: Application, private val da
         return try { block() } finally { adjustingNavigation = false }
     }
     private suspend fun navigationOrigin() = navigationTools?.origin() ?: assistantOrigin()
-    private suspend fun navigationPlan(body: JSONObject) = navigationTools?.plan(server, body) ?: Api(server).plan(body)
+    private suspend fun navigationPlan(body: JSONObject): JSONObject {
+        val trip = checkNotNull(savedTrip) { "原导航会话已结束。" }
+        val owner = PlanningRequestOwner("navigation", planId = trip.planId,
+            sessionId = trip.sessionId, planVersion = trip.planVersion)
+        return navigationTools?.let { tools -> executeRoutePlan(body, owner) { tools.plan(server, it) } }
+            ?: executeRoutePlan(body, owner)
+    }
     private suspend fun navigationSearch(keyword: String, searchCity: String) =
         navigationTools?.search(server, keyword, searchCity) ?: search(keyword, searchCity)
     private suspend fun navigationRequestContext(previous: SavedTrip): String {
@@ -1495,6 +1677,7 @@ class AppViewModel internal constructor(application: Application, private val da
                         resultJson = change.previous.resultJson))
                     change.addedTask?.let { dao.save(it) }
                     trips.save(stored)
+                    prepareNavigationExecution(stored, correlationId)
                     trips.record(RouteHistory(id = change.versionId, sessionId = stored.sessionId, planId = stored.planId,
                         planVersion = planVersion,
                         state = NavigationState.NAVIGATION_OPENED.name, timestamp = stored.plannedAt,
@@ -1512,7 +1695,11 @@ class AppViewModel internal constructor(application: Application, private val da
                     ))
                     validatePreview()
                 }
-                savedTrip = stored; result = route
+                savedTrip = stored; result = route; restoredExecutionState = null
+                pendingPlanningRequest?.takeIf { pending ->
+                    pending.owner.kind == "navigation" && JSONObject(pending.bodyJson).getJSONObject("context_snapshot")
+                        .optString("snapshot_id") == change.contextSnapshot.json().optString("snapshot_id")
+                }?.let { finishPlanningRequest(it.runId) }
                 explicitNavigationStartRequired = true
                 navigationMemoryTrip = stored
                 memory.clear()
@@ -1549,6 +1736,12 @@ class AppViewModel internal constructor(application: Application, private val da
                     else eventCorrelation.bind(stored.sessionId)
                 database.withTransaction {
                     snapshot.contextSnapshot.requireCurrent(dao.all(), trips.load())
+                    pendingPlanningRequest?.takeIf { it.runId == snapshot.versionId }?.let { pending ->
+                        check(planningRequests.pending() == pending && Api.validateBase(server) == pending.server) {
+                            "待确认规划或服务地址已变化。"
+                        }
+                        requirePlanningOwner(pending.owner)
+                    }
                     snapshot.draftId?.let { draftId ->
                         val draft = database.assistant().draft()
                         check(draft?.draftId == draftId && draft.planId == snapshot.planId) { "待确认方案已变化，请重新核对。" }
@@ -1565,6 +1758,7 @@ class AppViewModel internal constructor(application: Application, private val da
                     stored = stored.copy(planId = accepted.planId, planVersion = planVersion)
                     trips.save(stored)
                     trips.record(event.copy(planId = stored.planId, planVersion = planVersion))
+                    prepareNavigationExecution(stored, correlationId)
                     if (snapshot.draftId != null) {
                         database.assistant().clearDraft()
                         database.assistant().clearPlanningDraft(); database.assistant().clearPlanningTasks()
@@ -1585,7 +1779,7 @@ class AppViewModel internal constructor(application: Application, private val da
                         request = body, route = response, replanned = snapshot.previous != null,
                     ))
                 }
-                savedTrip = stored; result = response; tripStarted = false
+                savedTrip = stored; result = response; tripStarted = false; restoredExecutionState = null
                 explicitNavigationStartRequired = false
                 lastPlannedHistoryId = event.id
                 origin = Place.from(body.getJSONObject("origin"))
@@ -1598,6 +1792,7 @@ class AppViewModel internal constructor(application: Application, private val da
                 partial = false; tripPlaces = emptyMap()
                 draftBackup = null; editingPlan = false
                 revision++
+                finishPlanningRequest(snapshot.versionId)
                 response
             }
         } finally { updatingTrip = false }
@@ -1651,7 +1846,9 @@ class AppViewModel internal constructor(application: Application, private val da
                 }
                 inputsChanged()
                 requestRevision = revision
-                val response = Api(server).plan(body)
+                val owner = if (draftId != null && planId != null) assistantPlanningOwner(draftId, planId) else null
+                val response = executeRoutePlan(body, owner)
+                val executionId = pendingPlanningRequest?.runId ?: java.util.UUID.randomUUID().toString()
                 requireCurrentContext(context)
                 tripMutex.withLock {
                     if (revision == requestRevision) {
@@ -1659,13 +1856,19 @@ class AppViewModel internal constructor(application: Application, private val da
                         var stored = SavedTrip(requestJson = body.toString(), resultJson = response.toString(),
                             sessionId = previous?.sessionId ?: java.util.UUID.randomUUID().toString(),
                             planId = planId ?: previous?.planId ?: java.util.UUID.randomUUID().toString())
-                        val plannedEvent = RouteHistory(sessionId = stored.sessionId, planId = stored.planId,
+                        val plannedEvent = RouteHistory(id = executionId, sessionId = stored.sessionId, planId = stored.planId,
                             state = NavigationState.READY.name, timestamp = stored.plannedAt,
                             requestJson = stored.requestJson, resultJson = stored.resultJson)
                         val correlationId = if (previous != null) eventCorrelation.forSession(stored.sessionId)
                             else eventCorrelation.bind(stored.sessionId)
                         database.withTransaction {
                             context.requireCurrent(dao.all(), trips.load())
+                            pendingPlanningRequest?.takeIf { it.runId == executionId }?.let { pending ->
+                                check(planningRequests.pending() == pending && Api.validateBase(server) == pending.server) {
+                                    "待确认规划或服务地址已变化。"
+                                }
+                                requirePlanningOwner(pending.owner)
+                            }
                             draftId?.let {
                                 val draft = database.assistant().draft()
                                 check(draft?.draftId == it && draft.planId == planId) { "待确认建议已变化，请重新规划。" }
@@ -1682,6 +1885,7 @@ class AppViewModel internal constructor(application: Application, private val da
                             stored = stored.copy(planId = accepted.planId, planVersion = planVersion)
                             trips.save(stored)
                             trips.record(plannedEvent.copy(planId = stored.planId, planVersion = planVersion))
+                            prepareNavigationExecution(stored, correlationId)
                             if (draftId != null) {
                                 database.assistant().clearDraft()
                                 database.assistant().clearPlanningDraft(); database.assistant().clearPlanningTasks()
@@ -1704,11 +1908,12 @@ class AppViewModel internal constructor(application: Application, private val da
                             ))
                         }
                         if (revision == requestRevision) {
-                            savedTrip = stored; result = response; tripStarted = false
+                            savedTrip = stored; result = response; tripStarted = false; restoredExecutionState = null
                             lastPlannedHistoryId = plannedEvent.id
                             draftBackup = null; editingPlan = false
                             onPlanned?.invoke(response)
                         }
+                        finishPlanningRequest(executionId)
                     }
                 }
             } catch (e: Exception) { if (revision == requestRevision) message = networkMessage(e) }
@@ -1720,6 +1925,8 @@ class AppViewModel internal constructor(application: Application, private val da
 fun networkMessage(e: Exception): String {
     if (e is CancellationException) throw e
     return when (e) {
+        // 服务端已明确拒绝时不能伪装成断网：ApiHttpException 是 IOException 的子类，必须先判断。
+        is com.onmyway.app.data.remote.ApiHttpException -> e.message ?: "请求失败，请重试。"
         is java.net.SocketTimeoutException -> "请求超时，首次规划需要查询多段路线，请稍后重试。"
         is java.io.IOException -> "无法连接服务，请检查电脑服务、地址和 USB 转发或局域网连接。"
         else -> e.message ?: "请求失败，请重试。"

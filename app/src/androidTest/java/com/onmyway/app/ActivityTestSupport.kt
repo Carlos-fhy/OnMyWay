@@ -68,6 +68,7 @@ abstract class ActivityTestSupport {
         }
         app.deleteDatabase("onmyway-navigation-requests.db")
         app.deleteDatabase("onmyway-assistant-requests.db")
+        app.deleteDatabase("onmyway-planning-requests.db")
     }
 
     /** Must be called before launching the Activity; AppViewModel reads the default at init. */

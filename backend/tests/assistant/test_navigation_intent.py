@@ -1,0 +1,104 @@
+import json
+import pytest
+from fastapi import HTTPException
+from backend.assistant import api as assistant
+
+
+def request():
+    return assistant.NavigationRequest(text='取完快递直接回宿舍', destination='图书馆', tasks=[
+        assistant.NavigationTask(id='parcel', title='取快递', place_type='PARCEL'),
+        assistant.NavigationTask(id='print', title='打印论文', place_type='PRINT_SHOP')])
+
+
+def test_compound_intent_gets_trip_context(monkeypatch):
+    def complete(messages, *args):
+        context = json.loads(messages[1]['content'])
+        assert context['destination'] == '图书馆'
+        assert {t['id'] for t in context['tasks']} == {'parcel', 'print'}
+        return json.dumps(dict(action='adjust', destination='宿舍', keep_task_ids=['parcel']))
+    monkeypatch.setattr(assistant, 'completion', complete)
+    intent = assistant.navigation(request())
+    assert intent.destination == '宿舍'
+    assert intent.keep_task_ids == ['parcel']
+
+
+@pytest.mark.parametrize('action,fields', [
+    ('adjust', {}),
+    ('add_stop', {'new_task_title': '买瓶水', 'new_place_type': 'SUPERMARKET'}),
+])
+def test_unconfirmed_navigation_reply_cannot_claim_execution(monkeypatch, action, fields):
+    monkeypatch.setattr(assistant, 'completion', lambda *args: json.dumps(dict(
+        action=action, keep_task_ids=['parcel'], destination='',
+        reply='已取消打印，已开始新路线，已保存买水任务。', **fields)))
+    body = request().model_copy(update={'proposed_destination': '宿舍'})
+    result = assistant.navigation(body)
+    assert '取快递' in result.reply
+    assert '宿舍' in result.reply
+    assert '确认' in result.reply
+    assert all(word not in result.reply for word in ('已取消', '已开始', '已保存'))
+    assert result.keep_task_ids == ['parcel']
+    assert result.destination == ''
+
+
+def test_bounded_preview_reply_retains_confirmation_for_long_labels():
+    body = assistant.NavigationRequest(text='调整', destination='终点' * 100,
+        tasks=[assistant.NavigationTask(id=str(i), title='打印' * 50, place_type='PRINT_SHOP')
+               for i in range(6)])
+    result = assistant._validate_navigation(dict(action='add_stop', keep_task_ids=[str(i) for i in range(6)],
+        new_task_title='买水' * 50, new_place_type='SUPERMARKET', reply='已执行'), body)
+    assert len(result.reply) <= 500
+    assert '确认' in result.reply
+
+
+@pytest.mark.parametrize('ids', [['invented'], ['parcel', 'parcel']])
+def test_rejects_invalid_selection(monkeypatch, ids):
+    monkeypatch.setattr(assistant, 'completion', lambda *args: json.dumps(dict(action='adjust', keep_task_ids=ids)))
+    with pytest.raises(HTTPException):
+        assistant.navigation(request())
+
+
+def test_followup_includes_unconfirmed_state_and_history(monkeypatch):
+    body = request().model_copy(update={
+        'text': '那快递也不取了', 'proposed_destination': '宿舍',
+        'proposed_task_ids': ['parcel'],
+        'history': [assistant.NavigationTurn(role='user', content='取完快递直接回宿舍')],
+    })
+    def complete(messages, *args):
+        context = json.loads(messages[1]['content'])
+        assert context['proposed_destination'] == '宿舍'
+        assert context['proposed_task_ids'] == ['parcel']
+        assert context['history'][0]['content'] == '取完快递直接回宿舍'
+        return json.dumps(dict(action='adjust', destination='', keep_task_ids=[]))
+    monkeypatch.setattr(assistant, 'completion', complete)
+    assert assistant.navigation(body).keep_task_ids == []
+
+
+def test_add_stop_is_bounded_proposal(monkeypatch):
+    monkeypatch.setattr(assistant, 'completion', lambda *args: json.dumps(dict(
+        action='add_stop', keep_task_ids=['parcel', 'print'],
+        new_task_title='买瓶水', new_place_type='SUPERMARKET', reply='可以搜索顺路超市。')))
+    result = assistant.navigation(request())
+    assert result.new_place_type == 'SUPERMARKET'
+    assert result.new_task_title == '买瓶水'
+
+
+@pytest.mark.parametrize('payload', [
+    dict(action='add_stop', keep_task_ids=[], new_task_title='买水'),
+    dict(action='adjust', keep_task_ids=[], new_task_title='买水', new_place_type='SUPERMARKET'),
+])
+def test_rejects_incomplete_or_unexpected_new_stop(monkeypatch, payload):
+    monkeypatch.setattr(assistant, 'completion', lambda *args: json.dumps(payload))
+    with pytest.raises(HTTPException):
+        assistant.navigation(request())
+
+
+def test_combined_destination_existing_and_new_stop(monkeypatch):
+    def complete(messages, *args):
+        assert '可同时更换终点' in messages[0]['content']
+        return json.dumps(dict(action='add_stop', destination='上方山森林公园', keep_task_ids=['parcel'],
+            new_task_title='买瓶水', new_place_type='SUPERMARKET'))
+    monkeypatch.setattr(assistant, 'completion', complete)
+    result = assistant.navigation(request())
+    assert result.destination == '上方山森林公园'
+    assert result.keep_task_ids == ['parcel']
+    assert result.new_task_title == '买瓶水'

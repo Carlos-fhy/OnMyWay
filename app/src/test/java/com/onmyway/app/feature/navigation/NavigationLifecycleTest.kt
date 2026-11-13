@@ -38,6 +38,37 @@ class NavigationLifecycleTest {
         val closed = navigationTransition(NavigationPhase.NAVIGATING, NavigationEvent.CLOSE)
         NavigationEvent.entries.forEach { assertEquals(closed, navigationTransition(closed, it)) }
     }
+    @Test fun arrivalCannotBeOverwrittenByLateFailureOrCalculation() {
+        val arrived = navigationTransition(NavigationPhase.NAVIGATING, NavigationEvent.ARRIVE)
+        for (event in NavigationEvent.entries.filter { it != NavigationEvent.CLOSE }) {
+            assertEquals("late $event must preserve arrival", arrived, navigationTransition(arrived, event))
+        }
+        assertEquals(NavigationPhase.CLOSED, navigationTransition(arrived, NavigationEvent.CLOSE))
+    }
+    @Test fun pausedNavigationIgnoresLateFailure() {
+        assertEquals(NavigationPhase.PAUSED, navigationTransition(NavigationPhase.PAUSED, NavigationEvent.FAIL))
+    }
+    @Test fun sdkArrivalWaitsForObservedStartButNotForItsDatabaseCommit() {
+        assertFalse(acceptsNavigationArrival(NavigationPhase.STARTING, false))
+        assertTrue(acceptsNavigationArrival(NavigationPhase.STARTING, true))
+        assertFalse(acceptsNavigationArrival(NavigationPhase.FAILED, true))
+        assertFalse(acceptsNavigationArrival(NavigationPhase.CLOSED, true))
+        assertFalse(shouldPauseRecordedNavigationStart(NavigationPhase.ARRIVED, true, false))
+        assertTrue(shouldPauseRecordedNavigationStart(NavigationPhase.PAUSED, true, false))
+        assertTrue(shouldPauseRecordedNavigationStart(NavigationPhase.STARTING, false, false))
+    }
+    @Test fun staleServiceCommandCannotStopCurrentNavigation() {
+        assertEquals(NavigationServiceCommand.IGNORE,
+            navigationServiceCommand("current", 4, true, "previous", 2))
+        assertEquals(NavigationServiceCommand.IGNORE,
+            navigationServiceCommand("current", 4, true, "current", 3))
+        assertEquals(NavigationServiceCommand.ACCEPT,
+            navigationServiceCommand("current", 4, true, "current", 4))
+        assertEquals(NavigationServiceCommand.STOP,
+            navigationServiceCommand("current", 4, false, "current", 4))
+        assertEquals(NavigationServiceCommand.STOP,
+            navigationServiceCommand(null, -1, false, "previous", 2))
+    }
     @Test fun duplicateCalculationCallbackDoesNotRestartNavigation() {
         val starting = navigationTransition(NavigationPhase.READY, NavigationEvent.START)
         assertEquals(starting, navigationTransition(starting, NavigationEvent.ROUTE_READY))

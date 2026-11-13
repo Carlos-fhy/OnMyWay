@@ -88,8 +88,8 @@ class PlanVersionPersistenceTest {
             helper.writableDatabase
             helper.close()
             val migrated = Room.databaseBuilder(context, TaskDatabase::class.java, name)
-                .addMigrations(MIGRATION_16_17).build().also { database = it }
-            assertEquals(17, migrated.openHelper.readableDatabase.version)
+                .addMigrations(MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20).build().also { database = it }
+            assertEquals(20, migrated.openHelper.readableDatabase.version)
             assertEquals("legacy-plan", migrated.trips().load()!!.planId)
             assertEquals(0, migrated.trips().load()!!.planVersion)
             assertEquals(listOf(0, 0), migrated.trips().history().map { it.planVersion })

@@ -27,6 +27,7 @@ import com.onmyway.app.feature.assistant.clarificationPrompt
 import kotlin.math.ceil
 import org.json.JSONObject
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun AutomaticRouteCard(auto: AutomaticRoutePlanner, vm: AppViewModel, retry: () -> Unit,
     manual: () -> Unit, cancel: () -> Unit, accepted: (JSONObject) -> Unit,
@@ -36,12 +37,17 @@ internal fun AutomaticRouteCard(auto: AutomaticRoutePlanner, vm: AppViewModel, r
     var editingBudget by remember { mutableStateOf(false) }
     var customBudget by remember { mutableStateOf("") }
     var directBecauseDetour by remember(auto.preview) { mutableStateOf(false) }
-    AppCard(contentPadding = PaddingValues(16.dp)) {
+    AppCard(contentPadding = PaddingValues(20.dp)) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            AppIconBadge(R.drawable.ic_route, size = 36.dp)
+            AppIconBadge(
+                R.drawable.ic_route,
+                size = 32.dp,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                container = MaterialTheme.colorScheme.surfaceContainerLow,
+            )
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
                 Text("顺路建议", style = MaterialTheme.typography.titleMedium)
                 Text(
@@ -54,7 +60,7 @@ internal fun AutomaticRouteCard(auto: AutomaticRoutePlanner, vm: AppViewModel, r
         if (auto.busy || vm.busy) {
             Spacer(Modifier.height(10.dp))
             LinearProgressIndicator(
-                Modifier.fillMaxWidth(),
+                Modifier.fillMaxWidth().height(2.dp),
                 color = MaterialTheme.colorScheme.primary,
                 trackColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
             )
@@ -71,10 +77,16 @@ internal fun AutomaticRouteCard(auto: AutomaticRoutePlanner, vm: AppViewModel, r
                 { if (canAct()) auto.choose(vm, place) },
                 enabled = !auto.busy && !vm.busy,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(12.dp),
+                border = null,
+                colors = ButtonDefaults.outlinedButtonColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                ),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
             ) {
-                Column(Modifier.fillMaxWidth()) {
-                    Text("${index + 1}. ${place.name}")
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("${index + 1}. ${place.name}", style = MaterialTheme.typography.titleSmall)
                     if (place.address.isNotBlank()) Text(
                         place.address,
                         style = MaterialTheme.typography.bodySmall,
@@ -86,7 +98,7 @@ internal fun AutomaticRouteCard(auto: AutomaticRoutePlanner, vm: AppViewModel, r
         auto.preview?.let { preview ->
             val direct = preview.getJSONObject("direct")
             val suggested = preview.optJSONObject("suggestion")
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(20.dp))
             Text(
                 Place.from(direct.getJSONObject("destination")).name,
                 style = MaterialTheme.typography.titleLarge,
@@ -113,7 +125,7 @@ internal fun AutomaticRouteCard(auto: AutomaticRoutePlanner, vm: AppViewModel, r
                 Text(
                     "最多多花 ${auto.budget} 分钟",
                     Modifier.weight(1f),
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.bodyMedium,
                 )
                 Text(
                     if (budgetOpen) "收起" else "调整",
@@ -123,25 +135,27 @@ internal fun AutomaticRouteCard(auto: AutomaticRoutePlanner, vm: AppViewModel, r
             }
             if (budgetOpen) {
                 Spacer(Modifier.height(4.dp))
-                listOf(listOf(5, 10, 15), listOf(20, 30)).forEach { row ->
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        row.forEach { mins ->
-                            AppPill(
-                                text = "${mins}分钟",
-                                selected = auto.budget == mins.toString(),
-                                onClick = { if (canAct()) { auto.updateBudget(mins); editingBudget = false } },
-                                enabled = !auto.busy && !vm.busy,
-                            )
-                        }
-                        if (row.size == 2) AppPill(
-                            text = "自定义",
-                            selected = auto.budget.toIntOrNull() !in listOf(5, 10, 15, 20, 30),
-                            onClick = { customBudget = auto.budget; editingBudget = !editingBudget },
+                FlowRow(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    listOf(5, 10, 15, 20, 30).forEach { mins ->
+                        AppPill(
+                            text = "${mins}分钟",
+                            selected = auto.budget == mins.toString(),
+                            onClick = { if (canAct()) { auto.updateBudget(mins); editingBudget = false } },
                             enabled = !auto.busy && !vm.busy,
                         )
                     }
-                    Spacer(Modifier.height(8.dp))
+                    AppPill(
+                        text = "自定义",
+                        selected = auto.budget.toIntOrNull() !in listOf(5, 10, 15, 20, 30),
+                        onClick = { customBudget = auto.budget; editingBudget = !editingBudget },
+                        enabled = !auto.busy && !vm.busy,
+                    )
                 }
+                Spacer(Modifier.height(8.dp))
                 if (editingBudget) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(
@@ -199,7 +213,10 @@ internal fun AutomaticRouteCard(auto: AutomaticRoutePlanner, vm: AppViewModel, r
                     for (i in 0 until assessments.length()) {
                         val entry = assessments.getJSONObject(i)
                         val id = entry.getString("task_id")
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
                             Checkbox(
                                 checked = id in auto.selectedIds,
                                 onCheckedChange = { if (canAct()) auto.toggle(vm, id) },
@@ -219,7 +236,7 @@ internal fun AutomaticRouteCard(auto: AutomaticRoutePlanner, vm: AppViewModel, r
                             }
                         }
                         if (i != assessments.length() - 1) HorizontalDivider(
-                            Modifier.padding(start = 4.dp),
+                            Modifier.padding(start = 48.dp),
                             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
                         )
                     }
@@ -234,7 +251,7 @@ internal fun AutomaticRouteCard(auto: AutomaticRoutePlanner, vm: AppViewModel, r
             if (auto.selectionBusy) {
                 Spacer(Modifier.height(8.dp))
                 LinearProgressIndicator(
-                    Modifier.fillMaxWidth(),
+                    Modifier.fillMaxWidth().height(2.dp),
                     color = MaterialTheme.colorScheme.primary,
                     trackColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
                 )
@@ -287,7 +304,7 @@ internal fun AutomaticRouteCard(auto: AutomaticRoutePlanner, vm: AppViewModel, r
                     Text("这次直达是因为绕路太久（可选，仅用于学习预算）", style = MaterialTheme.typography.bodySmall)
                 }
             }
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(20.dp))
             AppPrimaryButton(
                 if (auto.selectedIds.isEmpty()) "确认直达" else "确认所选 ${auto.selectedIds.size} 件事并规划",
                 onClick = { if (canAct()) auto.accept(vm, auto.selectedIds, directBecauseDetour, accepted) },
@@ -339,7 +356,10 @@ internal fun AutomaticRouteCard(auto: AutomaticRoutePlanner, vm: AppViewModel, r
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         if (!auto.busy && !vm.busy) {
-            Row {
+            FlowRow(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
                 TextButton({ if (canAct()) retry() }) { Text("重新计算") }
                 TextButton({ if (canAct()) manual() }) { Text("手动调整") }
                 TextButton({ if (canAct()) cancel() }) { Text("取消") }
